@@ -1,0 +1,38 @@
+\hypertarget{_input_field_8f90}{
+\section{/home/matteo/HSticking/JK6\_\-v2/Source/InputField.f90 File Reference}
+\label{_input_field_8f90}\index{/home/matteo/HSticking/JK6\_\-v2/Source/InputField.f90@{/home/matteo/HSticking/JK6\_\-v2/Source/InputField.f90}}
+}
+\subsection*{Data Types}
+\begin{DoxyCompactItemize}
+\item 
+type \hyperlink{type_input_field_1_1_input_file}{InputField::InputFile}
+\begin{DoxyCompactList}\small\item\em Data type to store information on the input file. \item\end{DoxyCompactList}\item 
+interface \hyperlink{interface_input_field_1_1_set_field_from_input}{InputField::SetFieldFromInput}
+\begin{DoxyCompactList}\small\item\em A wrapper for different reading different kind of input data. \item\end{DoxyCompactList}\end{DoxyCompactItemize}
+\subsection*{Modules}
+\begin{DoxyCompactItemize}
+\item 
+module \hyperlink{namespace_input_field}{InputField}
+
+
+\begin{DoxyCompactList}\small\item\em Read data from input file. \item\end{DoxyCompactList}\end{DoxyCompactItemize}
+\subsection*{Functions/Subroutines}
+\begin{DoxyCompactItemize}
+\item 
+subroutine \hyperlink{namespace_input_field_ab4dd5bd42a4fe952b9d298c46d09ac20}{InputField::OpenFile} (Input, FileName)
+\begin{DoxyCompactList}\small\item\em Wrapper to open an input file with a given name. \item\end{DoxyCompactList}\item 
+subroutine \hyperlink{namespace_input_field_a2ff58fb6ffd3fe11782567af59bc26fa}{InputField::CloseFile} (Input)
+\begin{DoxyCompactList}\small\item\em Wrapper to close the input file. \item\end{DoxyCompactList}\item 
+subroutine \hyperlink{namespace_input_field_adc129418985de962f55e62964277411d}{InputField::SetRealFieldFromInput} (Input, FieldName, Variable, DefaultV)
+\begin{DoxyCompactList}\small\item\em Look for the field name in input file and store the corresponding real variable. If the optional argument DefaultV is absent, the subroutine stops with error in case the Field is not found in the input file. Otherwise, the default value DefaultV is assigned to the variable. \item\end{DoxyCompactList}\item 
+subroutine \hyperlink{namespace_input_field_ac3f69e3960e1f451a3e6fe072075f90f}{InputField::SetIntegerFieldFromInput} (Input, FieldName, Variable, DefaultV)
+\begin{DoxyCompactList}\small\item\em Look for the field name in input file and store the corresponding integer variable. If the optional argument DefaultV is absent, the subroutine stops with error in case the Field is not found in the input file. Otherwise, the default value DefaultV is assigned to the variable. \item\end{DoxyCompactList}\item 
+subroutine \hyperlink{namespace_input_field_a6238d310b4f7c163dd317b81bb279393}{InputField::SetStringFieldFromInput} (Input, FieldName, Variable, DefaultV)
+\begin{DoxyCompactList}\small\item\em Look for the field name in input file and store the corresponding character variable. If the optional argument DefaultV is absent, the subroutine stops with error in case the Field is not found in the input file. Otherwise, the default value DefaultV is assigned to the variable. \item\end{DoxyCompactList}\end{DoxyCompactItemize}
+\subsection*{Variables}
+\begin{DoxyCompactItemize}
+\item 
+INTEGER, parameter \hyperlink{namespace_input_field_ac271f9951500fb53f89b59f48c60e4d9}{InputField::FILE\_\-IS\_\-OPEN} = 1
+\item 
+INTEGER, parameter \hyperlink{namespace_input_field_a1408d7aae417ece86cc598019d1e5ff9}{InputField::FILE\_\-IS\_\-CLOSED} = 0
+\end{DoxyCompactItemize}

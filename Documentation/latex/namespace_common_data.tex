@@ -1,0 +1,207 @@
+\hypertarget{namespace_common_data}{
+\section{CommonData Module Reference}
+\label{namespace_common_data}\index{CommonData@{CommonData}}
+}
+
+
+Common data.  
+\subsection*{Variables}
+\begin{DoxyCompactItemize}
+\item 
+REAL, parameter \hyperlink{namespace_common_data_a425e3890d3344a540420425e443dc800}{ev\_\-tu} = 1.0364314
+\item 
+REAL, parameter \hyperlink{namespace_common_data_a565ffab49e04f2d30ebed2b70485cbb2}{pi} = 3.1415926535897932384626433832795028841971
+\item 
+INTEGER \hyperlink{namespace_common_data_a976b903826d3d0278c77a43ee3d29754}{nevo}
+\begin{DoxyCompactList}\small\item\em ???? \item\end{DoxyCompactList}\end{DoxyCompactItemize}
+\begin{Indent}{\bf MASSES}\par
+{\em \label{_amgrpc6c04a786e5ad5cf1e19a4894db38501}
+Masses of the atoms }\begin{DoxyCompactItemize}
+\item 
+REAL, save \hyperlink{namespace_common_data_ab83fa563208d5b60c511fb8561b4cf02}{rmh}
+\begin{DoxyCompactList}\small\item\em mass of the H atom \item\end{DoxyCompactList}\item 
+REAL, save \hyperlink{namespace_common_data_a5d2cb89262577c7e0271959b185d97f8}{rmc}
+\begin{DoxyCompactList}\small\item\em mass of the C atoms \item\end{DoxyCompactList}\end{DoxyCompactItemize}
+\end{Indent}
+\begin{Indent}{\bf POSITIONS}\par
+{\em \label{_amgrpf3624ebc73536284b7104d42ac395766}
+Positions of the atoms }\begin{DoxyCompactItemize}
+\item 
+REAL, save \hyperlink{namespace_common_data_a54cf378ece8175fe01e142e009cefd6a}{xh}
+\item 
+REAL, save \hyperlink{namespace_common_data_aefaa9a9c076fac8257c87df0ac2c3f08}{yh}
+\item 
+REAL, save \hyperlink{namespace_common_data_af47bf8216990a30ef0b9c34a3259fa83}{zh}
+\begin{DoxyCompactList}\small\item\em X,Y,Z positions of the H atom. \item\end{DoxyCompactList}\item 
+REAL, dimension(121), save \hyperlink{namespace_common_data_a449fb6ff43ccc84909d922ac55097b87}{z}
+\begin{DoxyCompactList}\small\item\em Z positions of the C atoms. \item\end{DoxyCompactList}\end{DoxyCompactItemize}
+\end{Indent}
+\begin{Indent}{\bf VELOCITIES}\par
+{\em \label{_amgrp37fcd1f52db2b7fae70aa3f5dfc8df0b}
+Positions of the atoms }\begin{DoxyCompactItemize}
+\item 
+REAL, save \hyperlink{namespace_common_data_a82357dbd5bbd2700a2a5ee66874b8e43}{vxh}
+\item 
+REAL, save \hyperlink{namespace_common_data_aabc4c29fca54ecb40e7edb7253d05f30}{vyh}
+\item 
+REAL, save \hyperlink{namespace_common_data_a0d934df8fa7969c9e8b25f8338b68bb7}{vzh}
+\begin{DoxyCompactList}\small\item\em X,Y,Z velocity of the H atom. \item\end{DoxyCompactList}\item 
+REAL, dimension(121), save \hyperlink{namespace_common_data_ac22677afeff86b9a93bcbb4447a213aa}{vzc}
+\begin{DoxyCompactList}\small\item\em Z velocity of the C atoms. \item\end{DoxyCompactList}\end{DoxyCompactItemize}
+\end{Indent}
+\begin{Indent}{\bf ACCELERATIONS}\par
+{\em \label{_amgrpa5fdc1668c426cc06df5727a473ad21c}
+Positions of the atoms }\begin{DoxyCompactItemize}
+\item 
+REAL, save \hyperlink{namespace_common_data_a92452d88a25f1d941bd33406eb4219ee}{axh}
+\item 
+REAL, save \hyperlink{namespace_common_data_a4256419c9e9f412bf3d0f5984841a834}{ayh}
+\item 
+REAL, save \hyperlink{namespace_common_data_ad7ceb7c20d99e27c42aa1b1d3b579262}{azh}
+\begin{DoxyCompactList}\small\item\em X,Y,Z acceleration of the H atom. \item\end{DoxyCompactList}\item 
+REAL, dimension(121), save \hyperlink{namespace_common_data_a500e1c90c8246eced8ce0a8338de0c84}{azc}
+\begin{DoxyCompactList}\small\item\em Z acceleration of the C atoms. \item\end{DoxyCompactList}\end{DoxyCompactItemize}
+\end{Indent}
+\begin{Indent}{\bf latt}\par
+{\em \label{_amgrp5d1e6bead47fd4265bb6143ccbade00a}
+??? }\begin{DoxyCompactItemize}
+\item 
+REAL, dimension(121), save \hyperlink{namespace_common_data_a3c7cb8fe8980c16677d67a91d4253347}{vzsum}
+\item 
+REAL, dimension(121), save \hyperlink{namespace_common_data_a0ce423b52c02935927c0328fb2a8a869}{zsum}
+\item 
+REAL, dimension(10, 501), save \hyperlink{namespace_common_data_a98fb8e9102a9fe8002bca31265299a9a}{vz2av}
+\item 
+REAL, dimension(10, 501), save \hyperlink{namespace_common_data_a9ab21d0d353de9bb788831e27d9a5130}{zcav}
+\end{DoxyCompactItemize}
+\end{Indent}
+
+
+\subsection{Detailed Description}
+Common data. This module include the data that is shared by the all the other modules of the code 
+
+\subsection{Variable Documentation}
+\hypertarget{namespace_common_data_a425e3890d3344a540420425e443dc800}{
+\index{CommonData@{CommonData}!ev\_\-tu@{ev\_\-tu}}
+\index{ev\_\-tu@{ev\_\-tu}!CommonData@{CommonData}}
+\subsubsection[{ev\_\-tu}]{\setlength{\rightskip}{0pt plus 5cm}REAL,parameter {\bf CommonData::ev\_\-tu} = 1.0364314}}
+\label{namespace_common_data_a425e3890d3344a540420425e443dc800}
+\hypertarget{namespace_common_data_a565ffab49e04f2d30ebed2b70485cbb2}{
+\index{CommonData@{CommonData}!pi@{pi}}
+\index{pi@{pi}!CommonData@{CommonData}}
+\subsubsection[{pi}]{\setlength{\rightskip}{0pt plus 5cm}REAL,parameter {\bf CommonData::pi} = 3.1415926535897932384626433832795028841971}}
+\label{namespace_common_data_a565ffab49e04f2d30ebed2b70485cbb2}
+\hypertarget{namespace_common_data_ab83fa563208d5b60c511fb8561b4cf02}{
+\index{CommonData@{CommonData}!rmh@{rmh}}
+\index{rmh@{rmh}!CommonData@{CommonData}}
+\subsubsection[{rmh}]{\setlength{\rightskip}{0pt plus 5cm}REAL,save {\bf CommonData::rmh}}}
+\label{namespace_common_data_ab83fa563208d5b60c511fb8561b4cf02}
+
+
+mass of the H atom \hypertarget{namespace_common_data_a5d2cb89262577c7e0271959b185d97f8}{
+\index{CommonData@{CommonData}!rmc@{rmc}}
+\index{rmc@{rmc}!CommonData@{CommonData}}
+\subsubsection[{rmc}]{\setlength{\rightskip}{0pt plus 5cm}REAL,save {\bf CommonData::rmc}}}
+\label{namespace_common_data_a5d2cb89262577c7e0271959b185d97f8}
+
+
+mass of the C atoms \hypertarget{namespace_common_data_a54cf378ece8175fe01e142e009cefd6a}{
+\index{CommonData@{CommonData}!xh@{xh}}
+\index{xh@{xh}!CommonData@{CommonData}}
+\subsubsection[{xh}]{\setlength{\rightskip}{0pt plus 5cm}REAL,save {\bf CommonData::xh}}}
+\label{namespace_common_data_a54cf378ece8175fe01e142e009cefd6a}
+\hypertarget{namespace_common_data_aefaa9a9c076fac8257c87df0ac2c3f08}{
+\index{CommonData@{CommonData}!yh@{yh}}
+\index{yh@{yh}!CommonData@{CommonData}}
+\subsubsection[{yh}]{\setlength{\rightskip}{0pt plus 5cm}REAL,save {\bf CommonData::yh}}}
+\label{namespace_common_data_aefaa9a9c076fac8257c87df0ac2c3f08}
+\hypertarget{namespace_common_data_af47bf8216990a30ef0b9c34a3259fa83}{
+\index{CommonData@{CommonData}!zh@{zh}}
+\index{zh@{zh}!CommonData@{CommonData}}
+\subsubsection[{zh}]{\setlength{\rightskip}{0pt plus 5cm}REAL,save {\bf CommonData::zh}}}
+\label{namespace_common_data_af47bf8216990a30ef0b9c34a3259fa83}
+
+
+X,Y,Z positions of the H atom. \hypertarget{namespace_common_data_a449fb6ff43ccc84909d922ac55097b87}{
+\index{CommonData@{CommonData}!z@{z}}
+\index{z@{z}!CommonData@{CommonData}}
+\subsubsection[{z}]{\setlength{\rightskip}{0pt plus 5cm}REAL,dimension(121),save {\bf CommonData::z}}}
+\label{namespace_common_data_a449fb6ff43ccc84909d922ac55097b87}
+
+
+Z positions of the C atoms. \hypertarget{namespace_common_data_a82357dbd5bbd2700a2a5ee66874b8e43}{
+\index{CommonData@{CommonData}!vxh@{vxh}}
+\index{vxh@{vxh}!CommonData@{CommonData}}
+\subsubsection[{vxh}]{\setlength{\rightskip}{0pt plus 5cm}REAL,save {\bf CommonData::vxh}}}
+\label{namespace_common_data_a82357dbd5bbd2700a2a5ee66874b8e43}
+\hypertarget{namespace_common_data_aabc4c29fca54ecb40e7edb7253d05f30}{
+\index{CommonData@{CommonData}!vyh@{vyh}}
+\index{vyh@{vyh}!CommonData@{CommonData}}
+\subsubsection[{vyh}]{\setlength{\rightskip}{0pt plus 5cm}REAL,save {\bf CommonData::vyh}}}
+\label{namespace_common_data_aabc4c29fca54ecb40e7edb7253d05f30}
+\hypertarget{namespace_common_data_a0d934df8fa7969c9e8b25f8338b68bb7}{
+\index{CommonData@{CommonData}!vzh@{vzh}}
+\index{vzh@{vzh}!CommonData@{CommonData}}
+\subsubsection[{vzh}]{\setlength{\rightskip}{0pt plus 5cm}REAL,save {\bf CommonData::vzh}}}
+\label{namespace_common_data_a0d934df8fa7969c9e8b25f8338b68bb7}
+
+
+X,Y,Z velocity of the H atom. \hypertarget{namespace_common_data_ac22677afeff86b9a93bcbb4447a213aa}{
+\index{CommonData@{CommonData}!vzc@{vzc}}
+\index{vzc@{vzc}!CommonData@{CommonData}}
+\subsubsection[{vzc}]{\setlength{\rightskip}{0pt plus 5cm}REAL,dimension(121),save {\bf CommonData::vzc}}}
+\label{namespace_common_data_ac22677afeff86b9a93bcbb4447a213aa}
+
+
+Z velocity of the C atoms. \hypertarget{namespace_common_data_a92452d88a25f1d941bd33406eb4219ee}{
+\index{CommonData@{CommonData}!axh@{axh}}
+\index{axh@{axh}!CommonData@{CommonData}}
+\subsubsection[{axh}]{\setlength{\rightskip}{0pt plus 5cm}REAL,save {\bf CommonData::axh}}}
+\label{namespace_common_data_a92452d88a25f1d941bd33406eb4219ee}
+\hypertarget{namespace_common_data_a4256419c9e9f412bf3d0f5984841a834}{
+\index{CommonData@{CommonData}!ayh@{ayh}}
+\index{ayh@{ayh}!CommonData@{CommonData}}
+\subsubsection[{ayh}]{\setlength{\rightskip}{0pt plus 5cm}REAL,save {\bf CommonData::ayh}}}
+\label{namespace_common_data_a4256419c9e9f412bf3d0f5984841a834}
+\hypertarget{namespace_common_data_ad7ceb7c20d99e27c42aa1b1d3b579262}{
+\index{CommonData@{CommonData}!azh@{azh}}
+\index{azh@{azh}!CommonData@{CommonData}}
+\subsubsection[{azh}]{\setlength{\rightskip}{0pt plus 5cm}REAL,save {\bf CommonData::azh}}}
+\label{namespace_common_data_ad7ceb7c20d99e27c42aa1b1d3b579262}
+
+
+X,Y,Z acceleration of the H atom. \hypertarget{namespace_common_data_a500e1c90c8246eced8ce0a8338de0c84}{
+\index{CommonData@{CommonData}!azc@{azc}}
+\index{azc@{azc}!CommonData@{CommonData}}
+\subsubsection[{azc}]{\setlength{\rightskip}{0pt plus 5cm}REAL,dimension(121),save {\bf CommonData::azc}}}
+\label{namespace_common_data_a500e1c90c8246eced8ce0a8338de0c84}
+
+
+Z acceleration of the C atoms. \hypertarget{namespace_common_data_a3c7cb8fe8980c16677d67a91d4253347}{
+\index{CommonData@{CommonData}!vzsum@{vzsum}}
+\index{vzsum@{vzsum}!CommonData@{CommonData}}
+\subsubsection[{vzsum}]{\setlength{\rightskip}{0pt plus 5cm}REAL,dimension(121),save {\bf CommonData::vzsum}}}
+\label{namespace_common_data_a3c7cb8fe8980c16677d67a91d4253347}
+\hypertarget{namespace_common_data_a0ce423b52c02935927c0328fb2a8a869}{
+\index{CommonData@{CommonData}!zsum@{zsum}}
+\index{zsum@{zsum}!CommonData@{CommonData}}
+\subsubsection[{zsum}]{\setlength{\rightskip}{0pt plus 5cm}REAL,dimension(121),save {\bf CommonData::zsum}}}
+\label{namespace_common_data_a0ce423b52c02935927c0328fb2a8a869}
+\hypertarget{namespace_common_data_a98fb8e9102a9fe8002bca31265299a9a}{
+\index{CommonData@{CommonData}!vz2av@{vz2av}}
+\index{vz2av@{vz2av}!CommonData@{CommonData}}
+\subsubsection[{vz2av}]{\setlength{\rightskip}{0pt plus 5cm}REAL,dimension(10,501),save {\bf CommonData::vz2av}}}
+\label{namespace_common_data_a98fb8e9102a9fe8002bca31265299a9a}
+\hypertarget{namespace_common_data_a9ab21d0d353de9bb788831e27d9a5130}{
+\index{CommonData@{CommonData}!zcav@{zcav}}
+\index{zcav@{zcav}!CommonData@{CommonData}}
+\subsubsection[{zcav}]{\setlength{\rightskip}{0pt plus 5cm}REAL,dimension(10,501),save {\bf CommonData::zcav}}}
+\label{namespace_common_data_a9ab21d0d353de9bb788831e27d9a5130}
+\hypertarget{namespace_common_data_a976b903826d3d0278c77a43ee3d29754}{
+\index{CommonData@{CommonData}!nevo@{nevo}}
+\index{nevo@{nevo}!CommonData@{CommonData}}
+\subsubsection[{nevo}]{\setlength{\rightskip}{0pt plus 5cm}INTEGER {\bf CommonData::nevo}}}
+\label{namespace_common_data_a976b903826d3d0278c77a43ee3d29754}
+
+
+???? 

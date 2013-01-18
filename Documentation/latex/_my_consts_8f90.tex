@@ -1,0 +1,109 @@
+\hypertarget{_my_consts_8f90}{
+\section{/home/matteo/HSticking/JK6\_\-v2/Source/MyConsts.f90 File Reference}
+\label{_my_consts_8f90}\index{/home/matteo/HSticking/JK6\_\-v2/Source/MyConsts.f90@{/home/matteo/HSticking/JK6\_\-v2/Source/MyConsts.f90}}
+}
+\subsection*{Modules}
+\begin{DoxyCompactItemize}
+\item 
+module \hyperlink{namespace_my_consts}{MyConsts}
+
+
+\begin{DoxyCompactList}\small\item\em Often used mathematical and physical constants. \item\end{DoxyCompactList}\end{DoxyCompactItemize}
+\subsection*{Functions/Subroutines}
+\begin{DoxyCompactItemize}
+\item 
+subroutine \hyperlink{namespace_my_consts_a30010b124d6326386412e65f9673b934}{MyConsts::Calculate\_\-Constant\_\-EPS} ()
+\begin{DoxyCompactList}\small\item\em Calculates the machines precision at runtime and stores it into the Constant\_\-EPS variable so it can be used on any system or byte sizes of real types... \item\end{DoxyCompactList}\item 
+INTEGER \hyperlink{namespace_my_consts_a093b1ea96b1aa71b483171f830362952}{MyConsts::LookForFreeUnit} ()
+\begin{DoxyCompactList}\small\item\em Set the smallest integer equal or greater than 20 that is available as unit i/o. \item\end{DoxyCompactList}\item 
+CHARACTER(3) \hyperlink{namespace_my_consts_a48c07e594adf4fa6121bcd79c799145b}{MyConsts::NumberToString} (N)
+\begin{DoxyCompactList}\small\item\em Given an integer number within 0 and 999, five back a 3 character string of the number with zeros instead of null characters. \item\end{DoxyCompactList}\end{DoxyCompactItemize}
+\subsection*{Variables}
+\begin{Indent}{\bf NUMERICAL PRECISION}\par
+{\em \label{_amgrp06d6057c95b18103ce7db924b914f0ce}
+Numerical precision of the machine \par
+ It can be set dynamically through the subroutine \hyperlink{namespace_my_consts_a30010b124d6326386412e65f9673b934}{Calculate\_\-Constant\_\-EPS()} }\begin{DoxyCompactItemize}
+\item 
+REAL \hyperlink{namespace_my_consts_a16f360c5da46572d6fb585806a1df519}{MyConsts::MyConsts\_\-EPS} = 1E-\/12
+\end{DoxyCompactItemize}
+\end{Indent}
+\begin{Indent}{\bf MATHEMATICAL CONSTANTS}\par
+{\em \label{_amgrp84277d81319af617f28dca6319eed8fe}
+Values of frequently used mathematical constants }\begin{DoxyCompactItemize}
+\item 
+REAL, parameter \hyperlink{namespace_my_consts_a6e68542f43fce6ab1f7e252239b4a25b}{MyConsts::MyConsts\_\-SQRT\_\-2} = SQRT( 2.0 )
+\begin{DoxyCompactList}\small\item\em Square Root of 2. \item\end{DoxyCompactList}\item 
+REAL, parameter \hyperlink{namespace_my_consts_a929edc066c350d2da103fc05a425cf82}{MyConsts::MyConsts\_\-SQRT\_\-3} = SQRT( 3.0 )
+\begin{DoxyCompactList}\small\item\em Square Root of 3. \item\end{DoxyCompactList}\item 
+REAL, parameter \hyperlink{namespace_my_consts_af9c57a57cecb201806c7ab5d3095ee96}{MyConsts::MyConsts\_\-INVSQRT\_\-3} = 1./MyConsts\_\-SQRT\_\-3
+\begin{DoxyCompactList}\small\item\em Inverse of the square root of 3. \item\end{DoxyCompactList}\item 
+REAL, parameter \hyperlink{namespace_my_consts_a269bb97656a3220bb770f00b1a25bf4c}{MyConsts::MyConsts\_\-PI} = 3.1415926535897932384626433832795028841971
+\begin{DoxyCompactList}\small\item\em Greek Pi. \item\end{DoxyCompactList}\item 
+COMPLEX, parameter \hyperlink{namespace_my_consts_ac8a82909a7db530fcc275af18b798094}{MyConsts::MyConsts\_\-I} = CMPLX( 0.0
+\begin{DoxyCompactList}\small\item\em Imaginary Unit. \item\end{DoxyCompactList}\end{DoxyCompactItemize}
+\end{Indent}
+\begin{Indent}{\bf PHYSICAL CONSTANTS}\par
+{\em \label{_amgrpb70515a7c0eef9512cf1cb068a7ba792}
+Values of frequently used physical constants }\begin{DoxyCompactItemize}
+\item 
+REAL, parameter \hyperlink{namespace_my_consts_a8ec037cf234b67a520136aaea3133b7c}{MyConsts::MyConsts\_\-kb} = 8.617332478e-\/5
+\begin{DoxyCompactList}\small\item\em Boltzmann's constant in eV/K. \item\end{DoxyCompactList}\item 
+REAL, parameter \hyperlink{namespace_my_consts_a3b04681501dc44eeb3701aa7ee2f220e}{MyConsts::MyConsts\_\-uma} = 1.660538921e-\/27
+\begin{DoxyCompactList}\small\item\em Atomic Mass Unit (AMU) in kg (from NIST reference). \item\end{DoxyCompactList}\item 
+REAL, parameter \hyperlink{namespace_my_consts_aa1367128efaba1f65ead2ceb9f64db46}{MyConsts::MyConsts\_\-mel} = 9.10938291e-\/31
+\begin{DoxyCompactList}\small\item\em Electron mass in kg (from NIST reference). \item\end{DoxyCompactList}\item 
+REAL, parameter \hyperlink{namespace_my_consts_a9d0cf18aaa762022e93aa97d649e6cbd}{MyConsts::MyConsts\_\-NAvo} = 6.02214129E23
+\begin{DoxyCompactList}\small\item\em Avogadro's number (from NIST reference). \item\end{DoxyCompactList}\item 
+REAL, parameter \hyperlink{namespace_my_consts_ac5ba183f9282fe2c8554f8b9f5c7d5d1}{MyConsts::MyConsts\_\-ThermoCal} = 4.184
+\begin{DoxyCompactList}\small\item\em Thermochemical Calorie ( from NIST reference ). \item\end{DoxyCompactList}\end{DoxyCompactItemize}
+\end{Indent}
+\begin{Indent}{\bf CONVERSION FACTORS}\par
+{\em \label{_amgrp967a702e6e71caee351fcca5d9a7e303}
+Conversions factor between common units }\begin{DoxyCompactItemize}
+\item 
+REAL, parameter \hyperlink{namespace_my_consts_aa924b16cd5b1a897d1d3983c45adca62}{MyConsts::MyConsts\_\-Hartree2eV} = 27.21138505
+\begin{DoxyCompactList}\small\item\em Conversion factor from Hartree to eV (from NIST reference). \item\end{DoxyCompactList}\item 
+REAL, parameter \hyperlink{namespace_my_consts_aaa4538847321d2d0c658c076868a98e6}{MyConsts::MyConsts\_\-Hatree2joule} = 4.35974434e-\/18
+\begin{DoxyCompactList}\small\item\em Conversion factor from Hartree to Joule (from NIST reference). \item\end{DoxyCompactList}\item 
+REAL, parameter \hyperlink{namespace_my_consts_a52c584174f4239e0fc306f998e2ea995}{MyConsts::MyConsts\_\-Hatree2kjmol} = MyConsts\_\-Hatree2joule$\ast$MyConsts\_\-NAvo/1000.
+\begin{DoxyCompactList}\small\item\em Conversion factor from Hartree to kJ/mol. \item\end{DoxyCompactList}\item 
+REAL, parameter \hyperlink{namespace_my_consts_a10bc4f3baa41b52bdf26dc261a49bcf7}{MyConsts::MyConsts\_\-Hatree2kcalmol} = MyConsts\_\-Hatree2kjmol/ MyConsts\_\-ThermoCal
+\begin{DoxyCompactList}\small\item\em Conversion factor from Hartree to kcal/mol. \item\end{DoxyCompactList}\item 
+REAL, parameter \hyperlink{namespace_my_consts_ac63452d39765e7e679949322436dfb08}{MyConsts::MyConsts\_\-Deg2Rad} = MyConsts\_\-PI / 180.0
+\begin{DoxyCompactList}\small\item\em Conversion factor from Decimal degrees to radiants. \item\end{DoxyCompactList}\item 
+REAL, parameter \hyperlink{namespace_my_consts_a5fc835991a4a417c2bdf1226c1ba2b3a}{MyConsts::MyConsts\_\-Bohr2Ang} = 0.52917721092
+\begin{DoxyCompactList}\small\item\em Conversion factor from Bohr to Ang (from NIST reference). \item\end{DoxyCompactList}\item 
+REAL, parameter \hyperlink{namespace_my_consts_a36b4ba1dfa259ff5c9eaec55eb5f977f}{MyConsts::MyConsts\_\-Uma2Au} = MyConsts\_\-uma / MyConsts\_\-mel
+\begin{DoxyCompactList}\small\item\em Conversion factor from UMA to Atomic Units. \item\end{DoxyCompactList}\end{DoxyCompactItemize}
+\end{Indent}
+\begin{Indent}{\bf ELEMENTS MASSES}\par
+{\em \label{_amgrp9ee2c80ba04aa74b67659c257da42bf0}
+Masses of the elements (both pure and weighted for the isotopic composition) \par
+ Values have been taken from NIST:\par
+ \href{http://physics.nist.gov/cgi-bin/Compositions/stand_alone.pl?ele=&ascii=html&isotype=some}{\tt http://physics.nist.gov/cgi-\/bin/Compositions/stand\_\-alone.pl?ele=\&ascii=html\&isotype=some} }\begin{DoxyCompactItemize}
+\item 
+REAL, parameter \hyperlink{namespace_my_consts_a6f63ce440e87b3a56e3497bfa4f8fe89}{MyConsts::MyConsts\_\-mH} = 1.00782503207 $\ast$ MyConsts\_\-Uma2Au
+\begin{DoxyCompactList}\small\item\em Hydrogen atomic mass (from NIST). \item\end{DoxyCompactList}\item 
+REAL, parameter \hyperlink{namespace_my_consts_a1f26a10350f900a32cfaac2147965359}{MyConsts::MyConsts\_\-mD} = 2.0141017778 $\ast$ MyConsts\_\-Uma2Au
+\begin{DoxyCompactList}\small\item\em Deuterium atomic mass (from NIST). \item\end{DoxyCompactList}\item 
+REAL, parameter \hyperlink{namespace_my_consts_a0e6de90a68dfbeb30ff2510d3a0f4f33}{MyConsts::MyConsts\_\-mCMix} = 12.01078 $\ast$ MyConsts\_\-Uma2Au
+\begin{DoxyCompactList}\small\item\em Isotopic mix Carbon atomic mass (from NIST). \item\end{DoxyCompactList}\item 
+REAL, parameter \hyperlink{namespace_my_consts_a3e9915df2fca44d18350e2829d68c34a}{MyConsts::MyConsts\_\-mCuMix} = 63.5463 $\ast$ MyConsts\_\-Uma2Au
+\begin{DoxyCompactList}\small\item\em Isotopic mix Cupper atomic mass (from NIST). \item\end{DoxyCompactList}\end{DoxyCompactItemize}
+\end{Indent}
+\begin{Indent}{\bf OTHER}\par
+{\em \label{_amgrp03570470bad94692ce93e32700d2e1cb}
+Other useful parameters, like special characters or numeric standard types \par
+ }\begin{DoxyCompactItemize}
+\item 
+CHARACTER(len=1), parameter \hyperlink{namespace_my_consts_a9a8e9aee6b2dd00efffbdb0957a48628}{MyConsts::NewLine} = achar(10)
+\item 
+INTEGER, parameter \hyperlink{namespace_my_consts_a293023fa7183e7f030a565aab4319d39}{MyConsts::SINGLE\_\-PRECISION\_\-KIND} = SELECTED\_\-REAL\_\-KIND(5
+\item 
+INTEGER, parameter \hyperlink{namespace_my_consts_a692521408a6d0a60e684c2dc67c804ab}{MyConsts::DOUBLE\_\-PRECISION\_\-KIND} = SELECTED\_\-REAL\_\-KIND(10
+\item 
+INTEGER, parameter \hyperlink{namespace_my_consts_a2d3348d585376d97fd760ceea81f0b65}{MyConsts::LONG\_\-INTEGER\_\-KIND} = SELECTED\_\-INT\_\-KIND( 8 )
+\item 
+INTEGER, parameter \hyperlink{namespace_my_consts_a12ff6515269f67ce554ac8d092a2119e}{MyConsts::SHORT\_\-INTEGER\_\-KIND} = SELECTED\_\-INT\_\-KIND( 16 )
+\end{DoxyCompactItemize}
+\end{Indent}

@@ -1,0 +1,81 @@
+\hypertarget{_common_data_8f90}{
+\section{/home/matteo/HSticking/JK6\_\-v2/Source/CommonData.f90 File Reference}
+\label{_common_data_8f90}\index{/home/matteo/HSticking/JK6\_\-v2/Source/CommonData.f90@{/home/matteo/HSticking/JK6\_\-v2/Source/CommonData.f90}}
+}
+\subsection*{Modules}
+\begin{DoxyCompactItemize}
+\item 
+module \hyperlink{namespace_common_data}{CommonData}
+
+
+\begin{DoxyCompactList}\small\item\em Common data. \item\end{DoxyCompactList}\end{DoxyCompactItemize}
+\subsection*{Variables}
+\begin{DoxyCompactItemize}
+\item 
+REAL, parameter \hyperlink{namespace_common_data_a425e3890d3344a540420425e443dc800}{CommonData::ev\_\-tu} = 1.0364314
+\item 
+REAL, parameter \hyperlink{namespace_common_data_a565ffab49e04f2d30ebed2b70485cbb2}{CommonData::pi} = 3.1415926535897932384626433832795028841971
+\item 
+INTEGER \hyperlink{namespace_common_data_a976b903826d3d0278c77a43ee3d29754}{CommonData::nevo}
+\begin{DoxyCompactList}\small\item\em ???? \item\end{DoxyCompactList}\end{DoxyCompactItemize}
+\begin{Indent}{\bf MASSES}\par
+{\em \label{_amgrpc6c04a786e5ad5cf1e19a4894db38501}
+Masses of the atoms }\begin{DoxyCompactItemize}
+\item 
+REAL, save \hyperlink{namespace_common_data_ab83fa563208d5b60c511fb8561b4cf02}{CommonData::rmh}
+\begin{DoxyCompactList}\small\item\em mass of the H atom \item\end{DoxyCompactList}\item 
+REAL, save \hyperlink{namespace_common_data_a5d2cb89262577c7e0271959b185d97f8}{CommonData::rmc}
+\begin{DoxyCompactList}\small\item\em mass of the C atoms \item\end{DoxyCompactList}\end{DoxyCompactItemize}
+\end{Indent}
+\begin{Indent}{\bf POSITIONS}\par
+{\em \label{_amgrpf3624ebc73536284b7104d42ac395766}
+Positions of the atoms }\begin{DoxyCompactItemize}
+\item 
+REAL, save \hyperlink{namespace_common_data_a54cf378ece8175fe01e142e009cefd6a}{CommonData::xh}
+\item 
+REAL, save \hyperlink{namespace_common_data_aefaa9a9c076fac8257c87df0ac2c3f08}{CommonData::yh}
+\item 
+REAL, save \hyperlink{namespace_common_data_af47bf8216990a30ef0b9c34a3259fa83}{CommonData::zh}
+\begin{DoxyCompactList}\small\item\em X,Y,Z positions of the H atom. \item\end{DoxyCompactList}\item 
+REAL, dimension(121), save \hyperlink{namespace_common_data_a449fb6ff43ccc84909d922ac55097b87}{CommonData::z}
+\begin{DoxyCompactList}\small\item\em Z positions of the C atoms. \item\end{DoxyCompactList}\end{DoxyCompactItemize}
+\end{Indent}
+\begin{Indent}{\bf VELOCITIES}\par
+{\em \label{_amgrp37fcd1f52db2b7fae70aa3f5dfc8df0b}
+Positions of the atoms }\begin{DoxyCompactItemize}
+\item 
+REAL, save \hyperlink{namespace_common_data_a82357dbd5bbd2700a2a5ee66874b8e43}{CommonData::vxh}
+\item 
+REAL, save \hyperlink{namespace_common_data_aabc4c29fca54ecb40e7edb7253d05f30}{CommonData::vyh}
+\item 
+REAL, save \hyperlink{namespace_common_data_a0d934df8fa7969c9e8b25f8338b68bb7}{CommonData::vzh}
+\begin{DoxyCompactList}\small\item\em X,Y,Z velocity of the H atom. \item\end{DoxyCompactList}\item 
+REAL, dimension(121), save \hyperlink{namespace_common_data_ac22677afeff86b9a93bcbb4447a213aa}{CommonData::vzc}
+\begin{DoxyCompactList}\small\item\em Z velocity of the C atoms. \item\end{DoxyCompactList}\end{DoxyCompactItemize}
+\end{Indent}
+\begin{Indent}{\bf ACCELERATIONS}\par
+{\em \label{_amgrpa5fdc1668c426cc06df5727a473ad21c}
+Positions of the atoms }\begin{DoxyCompactItemize}
+\item 
+REAL, save \hyperlink{namespace_common_data_a92452d88a25f1d941bd33406eb4219ee}{CommonData::axh}
+\item 
+REAL, save \hyperlink{namespace_common_data_a4256419c9e9f412bf3d0f5984841a834}{CommonData::ayh}
+\item 
+REAL, save \hyperlink{namespace_common_data_ad7ceb7c20d99e27c42aa1b1d3b579262}{CommonData::azh}
+\begin{DoxyCompactList}\small\item\em X,Y,Z acceleration of the H atom. \item\end{DoxyCompactList}\item 
+REAL, dimension(121), save \hyperlink{namespace_common_data_a500e1c90c8246eced8ce0a8338de0c84}{CommonData::azc}
+\begin{DoxyCompactList}\small\item\em Z acceleration of the C atoms. \item\end{DoxyCompactList}\end{DoxyCompactItemize}
+\end{Indent}
+\begin{Indent}{\bf latt}\par
+{\em \label{_amgrp5d1e6bead47fd4265bb6143ccbade00a}
+??? }\begin{DoxyCompactItemize}
+\item 
+REAL, dimension(121), save \hyperlink{namespace_common_data_a3c7cb8fe8980c16677d67a91d4253347}{CommonData::vzsum}
+\item 
+REAL, dimension(121), save \hyperlink{namespace_common_data_a0ce423b52c02935927c0328fb2a8a869}{CommonData::zsum}
+\item 
+REAL, dimension(10, 501), save \hyperlink{namespace_common_data_a98fb8e9102a9fe8002bca31265299a9a}{CommonData::vz2av}
+\item 
+REAL, dimension(10, 501), save \hyperlink{namespace_common_data_a9ab21d0d353de9bb788831e27d9a5130}{CommonData::zcav}
+\end{DoxyCompactItemize}
+\end{Indent}
