@@ -19,7 +19,7 @@ PrintType : 3
 # Step of the time evolution
 TimeStep : 0.01     
 # Total number of time step per trajectory          
-nstep    : 10000              
+nstep    : 100000              
 # Nr of steps between each analysis
 nprint   : 100                 
 
@@ -40,11 +40,11 @@ zhi  : 10.00
 
 # Temperature of the simulation
 # Temperature of the system / substrate
-temp : 100.00                   
+temp : 300.00                   
 
 # Sampling parameters
 # number of trajectories per impact parameter
-inum   : 1            
+inum   : 100           
 # number of impact parameters values
 irho   : 100             
 # grid spacing of impact parameter sampling

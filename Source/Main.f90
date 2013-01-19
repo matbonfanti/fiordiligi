@@ -67,8 +67,17 @@ PROGRAM JK6
    REAL  :: KinEnergy, PotEnergy, TotEnergy, IstTemperature
 
    ! Equilibration analysis data
-   REAL  :: EquilibrationAverage, EquilibrationVariance
+   REAL  :: EquilibrationAverage, EquilibrationVariance, ZHEquilibrium
    INTEGER :: NrOfEquilibrStepsAver
+   
+   ! Propagation analysis data
+   REAL  :: TempAverage, TempVariance
+   REAL, DIMENSION(3)  :: HAverage, HVariance
+   REAL  :: C1Average, C1Variance
+   
+   ! Autocorrelation computation
+   REAL, DIMENSION(:,:), ALLOCATABLE  :: ZHinTime
+   REAL :: Correlation
 
    ! Initial kinetic energy and position for scattering hydrogen
    REAL  :: ezh = 0.0, zhi = 0.0
@@ -190,15 +199,16 @@ PROGRAM JK6
    WRITE(*,899) dt / MyConsts_fs2AU, nstep, ntime
    IF (RunType == SCATTERING) WRITE(*,900) ezh * MyConsts_Hartree2eV, zhi * MyConsts_Bohr2Ang
    WRITE(*,901) nevo, inum
-   WRITE(*,902) irho, delrho * MyConsts_Bohr2Ang
-   WRITE(*,903) (1/gamma)/MyConsts_fs2AU, real(NrEquilibSteps)*dt/MyConsts_fs2AU, real(EquilibrInitAverage)*dt/MyConsts_fs2AU
+   IF (RunType == SCATTERING) WRITE(*,902) irho, delrho * MyConsts_Bohr2Ang
+   IF (RunType == EQUILIBRIUM) WRITE(*,903) (1/gamma)/MyConsts_fs2AU,      &
+                 dt*real(NrEquilibSteps)/MyConsts_fs2AU, real(EquilibrInitAverage)*dt/MyConsts_fs2AU
    WRITE(*,"(/)")
 
    898 FORMAT(" * Mass of the H atom (UMA):                    ",F10.4,/, &
               " * Mass of the C atoms (UMA):                   ",F10.4,/, &
               " * Temperature of the system (Kelvin):          ",F10.4      )
    899 FORMAT(" * Time step of the evolution (fs):             ",F10.4,/, &
-              " * Total nr of time step per trajectory:        ",I5   ,/, &
+              " * Total nr of time step per trajectory:        ",I8   ,/, &
               " * Nr of analysis steps:                        ",I5         )
    900 FORMAT(" * Initial kinetic energy of the H atom (eV):   ",F10.4,/, &
               " * Initial Z position of the H atom (Ang):      ",F10.4      )
@@ -249,6 +259,7 @@ PROGRAM JK6
 
       ! ALLOCATE AND INITIALIZE THOSE DATA THAT WILL CONTAIN THE AVERAGES OVER 
       ! THE SET OF TRAJECTORIES
+      ALLOCATE( ZHinTime(nstep, inum) )
 
    END IF  
 
@@ -272,9 +283,11 @@ PROGRAM JK6
       END IF  
 
       PRINT "(A,I5,A)"," Running ", inum, " trajectories ... "
-
+      
       !run inum number of trajectories at the current rxn parameter
       DO i=1,inum
+      
+         PRINT "(/,A,I6,A)"," **** Trajectory Nr. ", i," ****" 
 
          !*************************************************************
          ! INITIALIZATION OF THE COORDINATES AND MOMENTA OF THE SYSTEM
@@ -291,7 +304,7 @@ PROGRAM JK6
             ! Set initial conditions
             CALL ThermalEquilibriumConditions( temp )
 
-            PRINT "(/,A,F6.1)"," Equilibrating the initial conditions at T = ", temp
+            PRINT "(/,A,F6.1)"," Equilibrating the initial conditions at T = ", temp / MyConsts_K2AU
 
             IF ( PrintType >= DEBUG ) THEN
                ! Open file to store equilibration
@@ -301,11 +314,14 @@ PROGRAM JK6
                WRITE( NWriteUnit, * ) "# EQUILIBRATION: time, temperature, potential, kinetic energy, total energy"
             ENDIF
 
+            ! Equilibrium position of Z
+            ZHEquilibrium = 0.0
+            ! Nr of steps to average
+            NrOfEquilibrStepsAver = 0
             IF ( PrintType >= FULL ) THEN
                ! Initialize temperature average and variance
                EquilibrationAverage = 0.0
                EquilibrationVariance = 0.0
-               NrOfEquilibrStepsAver = 0
             ENDIF
 
             ! Do an equilibration run
@@ -330,9 +346,12 @@ PROGRAM JK6
                   850 FORMAT( F12.5, 5F15.8 )
 
                   ! If the step is after 2.0/gamma time, store temperature averages
-                  IF (( n >= EquilibrInitAverage ) .AND. ( PrintType >= FULL )) THEN
-                        EquilibrationAverage = EquilibrationAverage + IstTemperature
-                        EquilibrationVariance = EquilibrationVariance + IstTemperature**2
+                  IF ( n >= EquilibrInitAverage ) THEN
+                        ZHEquilibrium = ZHEquilibrium + ( zh - (z(2)+z(3)+z(4))/3.0 )
+                        IF ( PrintType >= FULL ) THEN
+                           EquilibrationAverage = EquilibrationAverage + IstTemperature
+                           EquilibrationVariance = EquilibrationVariance + IstTemperature**2
+                        END IF
                         NrOfEquilibrStepsAver = NrOfEquilibrStepsAver + 1
                   END IF
 
@@ -343,6 +362,7 @@ PROGRAM JK6
                CLOSE( Unit=NWriteUnit )
             ENDIF
 
+            ZHEquilibrium = ZHEquilibrium / NrOfEquilibrStepsAver
             IF ( PrintType >= FULL ) THEN
                ! Compute average and standard deviation
                EquilibrationAverage = EquilibrationAverage / NrOfEquilibrStepsAver 
@@ -351,7 +371,8 @@ PROGRAM JK6
                ! output message with average values
                PRINT "(/,A)",                    " Equilibration completed! "
                PRINT "(A,1F10.4,/,A,1F10.4,/)",  " Average temperature (K): ", EquilibrationAverage, &
-                                                " Standard deviation (K): ", sqrt(EquilibrationVariance)
+                                                 " Standard deviation (K):  ", sqrt(EquilibrationVariance), &
+                                                 " H Equilibrium Z (Ang):   ", ZHEquilibrium*MyConsts_Bohr2Ang
             ENDIF
 
          END IF
@@ -381,19 +402,34 @@ PROGRAM JK6
 
          ELSE IF (RunType == EQUILIBRIUM) THEN    ! in case of thermal equilibrium simulation
 
-            ! compute potential, and total energy
+            ! Compute potential
             CALL ComputePotential( xh, yh, zh, z, vv, axh, ayh, azh, azc )
-            entot = vv + KineticEnergy()
+            ! Compute kinetic energy and total energy
+            PotEnergy = vv
+            KinEnergy = KineticEnergy()
+            TotEnergy = PotEnergy + KinEnergy
+            IstTemperature = 2.0*KinEnergy/(MyConsts_K2AU*(nevo+3))
+            
+            ! PRINT INITIAL CONDITIONS of THE TRAJECTORY
+            IF ( PrintType >= FULL ) THEN
+               WRITE(*,600)  PotEnergy*MyConsts_Hartree2eV, KinEnergy*MyConsts_Hartree2eV, &
+                             TotEnergy*MyConsts_Hartree2eV, IstTemperature
+               600 FORMAT (/, " Initial condition of the MD trajectory ",/   &
+                              " * Potential Energy (eV)        ",1F10.4,/    &
+                              " * Kinetic Energy (eV)          ",1F10.4,/    &
+                              " * Total Energy (eV)            ",1F10.4,/    &
+                              " * Istantaneous temperature (K) ",1F10.4,/ ) 
+            END IF
 
             ! INITIALIZE THE RELEVANT VARIABLES FOR THE SINGLE TRAJECTORY AVERAGE
-
-            ! PRINT INITIAL CONDITIONS
             IF ( PrintType >= FULL ) THEN
-               ! RENDERE PIU' ESPLICATIVO QUESTO OUTPUT!!!!!!!!!!!!!1
-               !   WRITE(*,"(/,A10,A25,A25)") "Trajectory", "Initial V", "Initial Total E"
-                  WRITE(*,600) i, vv*MyConsts_Hartree2eV, entot*MyConsts_Hartree2eV
-                  600 FORMAT( I10, F25.4, F25.4 )
-            END IF
+               TempAverage = 0.0      ! Temperature
+               TempVariance = 0.0
+               HAverage(:) = 0.0      ! H position
+               HVariance(:) = 0.0
+               C1Average = 0.0        ! C1 position
+               C1Variance = 0.0
+            ENDIF
 
             IF ( PrintType >= DEBUG ) THEN
                ! Open file to store trajectory information
@@ -402,7 +438,6 @@ PROGRAM JK6
                OPEN( Unit=NWriteUnit, File=OutFileName, Position="APPEND" )
                WRITE( NWriteUnit, "(/,A)" ) "# TRAJECTORY "
             ENDIF
-
 
          END IF
 
@@ -434,6 +469,29 @@ PROGRAM JK6
                   ! Propagate for one timestep
                   CALL VelocityVerlet( .FALSE. )
 
+                  ! Compute kin energy and temperature
+                  PotEnergy = vv
+                  KinEnergy = KineticEnergy()
+                  TotEnergy = PotEnergy + KinEnergy
+                  IstTemperature = 2.0*KinEnergy/(MyConsts_K2AU*(nevo+3))
+                  
+                  ! Store ZH-ZHeq for the autocorrelation function
+                  ZHinTime(n, i) = ( zh - (z(2)+z(3)+z(4))/3.0 ) - ZHEquilibrium
+                  
+                  ! Increment variables for averages
+                  IF ( PrintType >= FULL ) THEN
+                     TempAverage = TempAverage + IstTemperature
+                     TempVariance = TempVariance + IstTemperature**2
+                     HAverage(1) = HAverage(1) + xh
+                     HVariance(1) = HVariance(1) + xh**2
+                     HAverage(2) = HAverage(2) + yh
+                     HVariance(2) = HVariance(2) + yh**2
+                     HAverage(3) = HAverage(3) + zh-z(1)
+                     HVariance(3) = HVariance(3) + (zh-z(1))**2
+                     C1Average = C1Average + (z(1) - (z(2)+z(3)+z(4))/3.0)
+                     C1Variance = C1Variance + (z(1) - (z(2)+z(3)+z(4))/3.0)**2
+                  ENDIF
+                  
             END IF
 
             ! every nprint steps, compute trapping and write output
@@ -447,20 +505,19 @@ PROGRAM JK6
                   ! check if H is in the trapping region
                   IF ( zh <= AdsorpLimit ) ptrap(j,kstep) = ptrap(j,kstep)+1.0
 
-                  ! ???????????????????????????????
+                  ! average lattice velocity
                   CALL lattice( kstep )
 
                ELSE IF (RunType == EQUILIBRIUM) THEN
 
                   ! If massive level of output, print traj information to std out
                   IF ( PrintType >= DEBUG ) THEN
-                     entot = vv + KineticEnergy() 
-                     WRITE(NWriteUnit,800) dt*real(n)/MyConsts_fs2AU, vv*MyConsts_Hartree2eV, (entot-vv)*MyConsts_Hartree2eV, &
-                                  entot*MyConsts_Hartree2eV
-                     WRITE(NWriteUnit,801)  dt*real(n)/MyConsts_fs2AU, xh*MyConsts_Bohr2Ang, yh*MyConsts_Bohr2Ang,  &
+                     WRITE(NWriteUnit,800) dt*real(n)/MyConsts_fs2AU, PotEnergy*MyConsts_Hartree2eV,                 &
+                                           KinEnergy*MyConsts_Hartree2eV, TotEnergy*MyConsts_Hartree2eV, IstTemperature                    
+                     WRITE(NWriteUnit,801)  dt*real(n)/MyConsts_fs2AU, xh*MyConsts_Bohr2Ang, yh*MyConsts_Bohr2Ang,   &
                                    zh*MyConsts_Bohr2Ang, z(1)*MyConsts_Bohr2Ang, z(2)*MyConsts_Bohr2Ang, z(5)*MyConsts_Bohr2Ang,   &
                                    z(11)*MyConsts_Bohr2Ang, z(14)*MyConsts_Bohr2Ang
-                     800 FORMAT( "T= ",F12.5," ENERGY= ", 3F15.8 )
+                     800 FORMAT( "T= ",F12.5," V= ", 1F15.8," K= ", 1F15.8," E= ", 1F15.8," Temp= ", 1F15.8 )
                      801 FORMAT( "T= ",F12.5," COORDS= ", 8F8.4  )
                   END IF
 
@@ -482,11 +539,29 @@ PROGRAM JK6
             ! print the full trajectory as output file
             WRITE(OutFileName,"(A,I4.4,A,I4.4,A)") "Traj_",j,"_",i,".xyz"
             CALL WriteTrajectoryXYZ( Trajectory(:,1:NrOfTrajSteps)*MyConsts_Bohr2Ang, OutFileName, &
-                                                                     GraphiteLatticeConstant()*MyConsts_Bohr2Ang )
+                                            GraphiteLatticeConstant()*MyConsts_Bohr2Ang )
 
-            ! And print the average values of that trajectory (?)
-            !        -----
-
+            ! Divide averages for number of time steps and compute variances
+            TempAverage = TempAverage / nstep
+            TempVariance = TempVariance / nstep - TempAverage**2
+            HAverage(:) = HAverage(:) / nstep
+            HVariance(1) = HVariance(1) / nstep - HAverage(1)**2
+            HVariance(2) = HVariance(2) / nstep - HAverage(2)**2
+            HVariance(3) = HVariance(3) / nstep - HAverage(3)**2
+            C1Average = C1Average / nstep
+            C1Variance = C1Variance / nstep - C1Average**2        
+                                            
+            ! And print the average values of that trajectory 
+            WRITE(*,700)  TempAverage, sqrt(TempVariance), HAverage(:)* MyConsts_Bohr2Ang, sqrt(HVariance(:))* MyConsts_Bohr2Ang, &
+                          C1Average* MyConsts_Bohr2Ang, sqrt(C1Variance)* MyConsts_Bohr2Ang
+            700 FORMAT (/, " Time propagation completed! ",/   &
+                           " * Average temperature (K)        ",1F10.4,/    &
+                           "   Standard deviation (K)         ",1F10.4,/    &
+                           " * Average H coordinates (Ang)    ",3F10.4,/    &
+                           "   Standard deviation (Ang)       ",3F10.4,/    &
+                           " * Average Z height (Ang)         ",1F10.4,/    &
+                           "   Standard deviation (Ang)       ",1F10.4,/ ) 
+                                                
          END IF
 
          IF ( (RunType == EQUILIBRIUM) .AND. ( PrintType >= DEBUG ) ) THEN
@@ -581,6 +656,15 @@ PROGRAM JK6
 
    ELSE IF (RunType == EQUILIBRIUM) THEN
 
+      DO n = 1, nstep
+          Correlation = 0.0
+          DO i = 1, inum
+             Correlation = Correlation + ZHinTime(1, i)*ZHinTime(n, i)
+          END DO
+          Correlation = Correlation / inum
+          WRITE(111,*) dt*real(n-1)/MyConsts_fs2AU, Correlation
+      END DO
+   
    END IF
 
 
