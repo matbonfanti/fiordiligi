@@ -13,10 +13,10 @@ LOGFILE = yes
 LOGNAME = jk6_v2.log
 
 # Compiler ( gfortran, ifort )
-FC = gfortran
+FC = ifort
 
 # Debugging options ( yes or no )
-DEBUG = yes
+DEBUG = no 
 
 # Optimization level
 OPTLEVEL = 3
@@ -265,9 +265,11 @@ ${OBJDIR}/InputField.o       : ${SRCDIR}/InputField.f90 ${COMMONDEP}
 # Module containing the common data
 ${OBJDIR}/CommonData.o       : ${SRCDIR}/CommonData.f90 ${COMMONDEP}
 
-# Module containing the common data
+# Module containing the potential energy surface
 ${OBJDIR}/PotentialModule.o  : ${SRCDIR}/PotentialModule.f90 ${OBJDIR}/CommonData.o ${COMMONDEP}
 
-# Module containing the common data
+# Module containing the random number generator
 ${OBJDIR}/RandomNumberGenerator.o  : ${SRCDIR}/RandomNumberGenerator.f90 ${COMMONDEP}
 
+# Module containing the integrator for the classical eq of motion
+${OBJDIR}/ClassicalEqMotion.o  : ${SRCDIR}/ClassicalEqMotion.f90 ${OBJDIR}/RandomNumberGenerator.o ${COMMONDEP}

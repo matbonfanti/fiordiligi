@@ -19,37 +19,21 @@ PROGRAM JK6
    USE MyConsts
    USE ErrorTrap
    USE RandomNumberGenerator
+   USE ClassicalEqMotion
 
    IMPLICIT NONE
 
-   ! Variable to define adsorption condition
-   REAL, PARAMETER :: AdsorpLimit = 2.8
-
-   ! Various variable to handle the input
-   TYPE(InputFile) :: InputData
+   ! Variable to handle the command line
    INTEGER :: NArgs
    LOGICAL :: Help = .FALSE.
+   
+   ! Input file name, set from command line arguments
    CHARACTER(120) :: InputFileName
+   ! Derived type to handle input data
+   TYPE(InputFile) :: InputData
 
-   ! Variable to define which kind of calculation is required 
-   INTEGER :: RunType
-   INTEGER, PARAMETER :: SCATTERING = 1, &
-                         EQUILIBRIUM = 2
-
-   ! Variable to set print of the trajectory in XYZ format
-   INTEGER :: PrintType
-   INTEGER, PARAMETER :: DEBUG = 3,   &   ! fully detailed information about the trajs
-                         FULL = 2,    &   ! files to plot the make animations 
-                         MINIMAL = 1      ! minimal level of output
-
-   ! GENERAL GUIDE LINES of STANDARD OUTPUT
-   ! MINIMAL: print only the final average values per impact parameter and integrated along rho
-   ! FULL: print also the relevant averages per single trajectory, print the trajectory to other dat files
-   ! DEBUG: print average values along all the steps of the trajectory
-
-   ! Real array to store the single trajectory
-   REAL, DIMENSION(:,:), ALLOCATABLE :: Trajectory 
-   INTEGER :: NrOfTrajSteps
+   ! Data type with evolution information
+   TYPE(Evolution) :: Equilibration, MolecularDynamics
 
    ! Variable to store trapping probability, resolved in time and in rho
    REAL, DIMENSION(:,:), ALLOCATABLE :: ptrap
@@ -58,10 +42,6 @@ PROGRAM JK6
    REAL, DIMENSION(6) :: HCoordAndVel    ! temporary array to store initial conditions of H atom
    CHARACTER(100) :: OutFileName         ! output file name
    INTEGER  :: NWriteUnit                ! output unit number
-
-   ! Langevin equilibration parameters
-   REAL  ::  Gamma,  LangIntegr,  GammaNoiseH, GammaNoiseC  
-   INTEGER  ::   NrEquilibSteps, EquilibrInitAverage
 
    ! Energy
    REAL  :: KinEnergy, PotEnergy, TotEnergy, IstTemperature
@@ -77,17 +57,13 @@ PROGRAM JK6
    
    ! Autocorrelation computation
    REAL, DIMENSION(:,:), ALLOCATABLE  :: ZHinTime
-   REAL :: Correlation
-
-   ! Initial kinetic energy and position for scattering hydrogen
-   REAL  :: ezh = 0.0, zhi = 0.0
 
    REAL, DIMENSION(501)      :: crscn
 
-   INTEGER :: i, inum, ipt, irho, j, jrho, kk, kstep, lpt, n, nn, nprint, nrho
-   INTEGER :: nstep, ntime
+   INTEGER :: iCoord
+   INTEGER :: i, ipt, j, jrho, kk, kstep, lpt, n, nn, nrho
 
-   REAL :: delrho, dt, entot, rho, temp, vv
+   REAL :: entot, rho, vv
    REAL :: vav, vsqav, zav, zsqav
 
    PRINT "(/,     '                    ==============================')"
@@ -131,8 +107,10 @@ PROGRAM JK6
 
    ! Check if a scattering simulation is required
    CALL SetFieldFromInput( InputData, "RunType", RunType, 1 )
+   ! Set the level of output
+   CALL SetFieldFromInput( InputData, "PrintType", PrintType )
 
-   ! read parameters common to all calculations and transform them in atomic units
+   ! Read parameters common to all calculations and transform them in atomic units
    CALL SetFieldFromInput( InputData, "TimeStep", dt )
    dt = dt * MyConsts_fs2AU
    CALL SetFieldFromInput( InputData, "temp", temp )
@@ -145,9 +123,6 @@ PROGRAM JK6
    rmh = rmh * MyConsts_Uma2Au
    CALL SetFieldFromInput( InputData, "rmc", rmc )
    rmc = rmc * MyConsts_Uma2Au
-
-   ! output parameters
-   CALL SetFieldFromInput( InputData, "PrintType", PrintType )
 
    ! If scattering simulation, read all the relevant parameters
    IF (RunType == SCATTERING) THEN
@@ -179,16 +154,30 @@ PROGRAM JK6
    ! number of analysis step
    ntime=int(nstep/nprint)
 
+   ! Allocation of position, velocity, acceleration arrays
+   ALLOCATE( X(nevo+3), V(nevo+3), A(nevo+3) )
+   
    ! if XYZ files of the trajectories are required, allocate memory to store the traj
    IF ( PrintType >= FULL ) THEN
          ALLOCATE( Trajectory( 7, ntime ) )
    END IF
 
-   ! Set variables for Langevin dynamics integration
-   LangIntegr  =  1.0 - 0.5 * Gamma * dt  
-   GammaNoiseH = sqrt( 2.0 * temp * rmh * Gamma / dt )
-   GammaNoiseC = sqrt( 2.0 * temp * rmc * Gamma / dt )
+   ! Set variables for EOM integration in the microcanonical ensamble
+   CALL EvolutionSetup( MolecularDynamics, nevo+3, (/ (rmh, n=1,3), (rmc, n=1,nevo) /), dt )
+   
+   ! Set variables for EOM integration with Langevin thermostat
+   CALL EvolutionSetup( Equilibration, nevo+3, (/ (rmh, n=1,3), (rmc, n=1,nevo) /), dt )
+   CALL SetupThermostat( Equilibration, Gamma, temp )
 
+   
+   !*************************************************************
+   !       POTENTIAL SETUP 
+   !*************************************************************
+
+   ! Setup potential energy surface
+   CALL SetupPotential( rmh, rmc )
+   
+   
    !*************************************************************
    !       PRINT OF THE INPUT DATA TO STD OUT
    !*************************************************************
@@ -219,13 +208,6 @@ PROGRAM JK6
    903 FORMAT(" * Langevin relaxation time (fs)                ",F10.4,/, &
               " * Equilibration time (fs)                      ",F10.4,/, &
               " * Equilibr averages are computed from (fs)     " F10.4      )
-
-   !*************************************************************
-   !       POTENTIAL SETUP 
-   !*************************************************************
-
-   ! Setup potential energy surface
-   CALL SetupPotential( rmh, rmc )
 
 
    !*************************************************************
@@ -302,7 +284,7 @@ PROGRAM JK6
          ELSE IF (RunType == EQUILIBRIUM) THEN    ! in case of thermal equilibrium simulation
 
             ! Set initial conditions
-            CALL ThermalEquilibriumConditions( temp )
+            CALL ThermalEquilibriumConditions( X, V, temp, rmh, rmc )
 
             PRINT "(/,A,F6.1)"," Equilibrating the initial conditions at T = ", temp / MyConsts_K2AU
 
@@ -324,15 +306,19 @@ PROGRAM JK6
                EquilibrationVariance = 0.0
             ENDIF
 
+            ! Compute starting potential and forces
+            PotEnergy = VHSticking( X, A )
+            A(1:3) = A(1:3) / rmh
+            A(4:nevo+3) = A(4:nevo+3) / rmc
+            
             ! Do an equilibration run
             DO n = 1, NrEquilibSteps
 
                   ! Propagate for one timestep with langevin thermostat
-                  vv = 0.0
-                  CALL VelocityVerlet( .TRUE. )
+                  CALL EOM_VelocityVerlet( Equilibration, X, V, A, VHSticking, PotEnergy )
+
                   ! compute kinetic energy and total energy
-                  PotEnergy = vv
-                  KinEnergy = KineticEnergy()
+                  KinEnergy = EOM_KineticEnergy(Equilibration, V )
                   TotEnergy = PotEnergy + KinEnergy
                   IstTemperature = 2.0*KinEnergy/(MyConsts_K2AU*(nevo+3))
 
@@ -347,7 +333,7 @@ PROGRAM JK6
 
                   ! If the step is after 2.0/gamma time, store temperature averages
                   IF ( n >= EquilibrInitAverage ) THEN
-                        ZHEquilibrium = ZHEquilibrium + ( zh - (z(2)+z(3)+z(4))/3.0 )
+                        ZHEquilibrium = ZHEquilibrium + ( X(3) - (X(5)+X(6)+X(7))/3.0 )
                         IF ( PrintType >= FULL ) THEN
                            EquilibrationAverage = EquilibrationAverage + IstTemperature
                            EquilibrationVariance = EquilibrationVariance + IstTemperature**2
@@ -402,11 +388,13 @@ PROGRAM JK6
 
          ELSE IF (RunType == EQUILIBRIUM) THEN    ! in case of thermal equilibrium simulation
 
-            ! Compute potential
-            CALL ComputePotential( xh, yh, zh, z, vv, axh, ayh, azh, azc )
+            ! Compute starting potential and forces
+            PotEnergy = VHSticking( X, A )
+            A(1:3) = A(1:3) / rmh
+            A(4:nevo+3) = A(4:nevo+3) / rmc
+!             CALL ComputePotential( xh, yh, zh, z, vv, axh, ayh, azh, azc )
             ! Compute kinetic energy and total energy
-            PotEnergy = vv
-            KinEnergy = KineticEnergy()
+            KinEnergy = EOM_KineticEnergy( MolecularDynamics, V )
             TotEnergy = PotEnergy + KinEnergy
             IstTemperature = 2.0*KinEnergy/(MyConsts_K2AU*(nevo+3))
             
@@ -456,7 +444,7 @@ PROGRAM JK6
             IF (RunType == SCATTERING) THEN
 
                   ! if scattering simulation, propagate only if in the interaction region
-                  IF ( zh <= zhi )   CALL VelocityVerlet( .FALSE. )
+                  IF ( zh <= zhi )   CALL VelocityVerlet(  )
 
                   ! compute average values of the carbon positions
                   DO nn = 1,121
@@ -467,29 +455,30 @@ PROGRAM JK6
             ELSE IF (RunType == EQUILIBRIUM) THEN
 
                   ! Propagate for one timestep
-                  CALL VelocityVerlet( .FALSE. )
+                  CALL EOM_VelocityVerlet( MolecularDynamics, X, V, A, VHSticking, vv )
+!                   CALL VelocityVerlet(  )
 
                   ! Compute kin energy and temperature
                   PotEnergy = vv
-                  KinEnergy = KineticEnergy()
+                  KinEnergy = EOM_KineticEnergy( MolecularDynamics, V )
                   TotEnergy = PotEnergy + KinEnergy
                   IstTemperature = 2.0*KinEnergy/(MyConsts_K2AU*(nevo+3))
                   
                   ! Store ZH-ZHeq for the autocorrelation function
-                  ZHinTime(n, i) = ( zh - (z(2)+z(3)+z(4))/3.0 ) - ZHEquilibrium
+                  ZHinTime(n, i) = ( X(3) - (X(5)+X(6)+X(7))/3.0 ) - ZHEquilibrium
                   
                   ! Increment variables for averages
                   IF ( PrintType >= FULL ) THEN
                      TempAverage = TempAverage + IstTemperature
                      TempVariance = TempVariance + IstTemperature**2
-                     HAverage(1) = HAverage(1) + xh
-                     HVariance(1) = HVariance(1) + xh**2
-                     HAverage(2) = HAverage(2) + yh
-                     HVariance(2) = HVariance(2) + yh**2
-                     HAverage(3) = HAverage(3) + zh-z(1)
-                     HVariance(3) = HVariance(3) + (zh-z(1))**2
-                     C1Average = C1Average + (z(1) - (z(2)+z(3)+z(4))/3.0)
-                     C1Variance = C1Variance + (z(1) - (z(2)+z(3)+z(4))/3.0)**2
+                     DO iCoord = 1, 2 
+                        HAverage(iCoord) = HAverage(iCoord) + X(iCoord)
+                        HVariance(iCoord) = HVariance(iCoord) + X(iCoord)**2
+                     END DO
+                     HAverage(3) = HAverage(3) + X(3)-X(4)
+                     HVariance(3) = HVariance(3) + ( X(3)-X(4) )**2
+                     C1Average = C1Average + (X(4) - (X(5)+X(6)+X(7))/3.0)
+                     C1Variance = C1Variance + (X(4) - (X(5)+X(6)+X(7))/3.0)**2
                   ENDIF
                   
             END IF
@@ -512,20 +501,19 @@ PROGRAM JK6
 
                   ! If massive level of output, print traj information to std out
                   IF ( PrintType >= DEBUG ) THEN
-                     WRITE(NWriteUnit,800) dt*real(n)/MyConsts_fs2AU, PotEnergy*MyConsts_Hartree2eV,                 &
-                                           KinEnergy*MyConsts_Hartree2eV, TotEnergy*MyConsts_Hartree2eV, IstTemperature                    
-                     WRITE(NWriteUnit,801)  dt*real(n)/MyConsts_fs2AU, xh*MyConsts_Bohr2Ang, yh*MyConsts_Bohr2Ang,   &
-                                   zh*MyConsts_Bohr2Ang, z(1)*MyConsts_Bohr2Ang, z(2)*MyConsts_Bohr2Ang, z(5)*MyConsts_Bohr2Ang,   &
-                                   z(11)*MyConsts_Bohr2Ang, z(14)*MyConsts_Bohr2Ang
-                     800 FORMAT( "T= ",F12.5," V= ", 1F15.8," K= ", 1F15.8," E= ", 1F15.8," Temp= ", 1F15.8 )
-                     801 FORMAT( "T= ",F12.5," COORDS= ", 8F8.4  )
+                     WRITE(NWriteUnit,800) dt*real(n)/MyConsts_fs2AU, PotEnergy*MyConsts_Hartree2eV,  &
+                         KinEnergy*MyConsts_Hartree2eV, TotEnergy*MyConsts_Hartree2eV, IstTemperature                    
+                     WRITE(NWriteUnit,801)  dt*real(n)/MyConsts_fs2AU, X(1:5)*MyConsts_Bohr2Ang,  &
+                             X(8)*MyConsts_Bohr2Ang, X(14)*MyConsts_Bohr2Ang, X(17)*MyConsts_Bohr2Ang
+                     800 FORMAT("T= ",F12.5," V= ",1F15.8," K= ",1F15.8," E= ",1F15.8," Temp= ", 1F15.8)
+                     801 FORMAT("T= ",F12.5," COORDS= ", 8F8.4)
                   END IF
 
                END IF
 
                ! Store the trajectory for XYZ printing
                IF ( PrintType >= FULL ) THEN
-                     Trajectory( :, kstep ) = (/ xh,yh,zh,z(1),z(2),z(3),z(4) /)
+                     Trajectory( :, kstep ) = X(1:7)
                      NrOfTrajSteps = kstep
                END IF
 
@@ -619,10 +607,10 @@ PROGRAM JK6
             write(15,'(A1)') '{'
             DO lpt=1,ntime
                IF(lpt.eq.ntime)THEN
-                  write(15,'(F8.6)') ptrap(nrho,lpt)/inum
+                  write(15,'(F9.6)') ptrap(nrho,lpt)/inum
                END IF
                IF(lpt.ne.ntime)THEN 
-                  write(15,'(F8.6,A1)') ptrap(nrho,lpt)/inum,','
+                  write(15,'(F9.6,A1)') ptrap(nrho,lpt)/inum,','
                END IF
             END DO
             IF(nrho.ne.irho+1)THEN
@@ -656,15 +644,11 @@ PROGRAM JK6
 
    ELSE IF (RunType == EQUILIBRIUM) THEN
 
-      DO n = 1, nstep
-          Correlation = 0.0
-          DO i = 1, inum
-             Correlation = Correlation + ZHinTime(1, i)*ZHinTime(n, i)
-          END DO
-          Correlation = Correlation / inum
-          WRITE(111,*) dt*real(n-1)/MyConsts_fs2AU, Correlation
+      DO i = 1, inum, 50
+         CALL PrintCorrelation( ZHinTime, i )
       END DO
-   
+      CALL PrintCorrelation( ZHinTime, inum )
+      
    END IF
 
 
@@ -735,48 +719,6 @@ PROGRAM JK6
 
 !****************************************************************************************************************
 
-   SUBROUTINE ThermalEquilibriumConditions( Temperature )
-      IMPLICIT NONE
-
-      REAL, INTENT(IN) :: Temperature
-      INTEGER          :: nCarbon
-      REAL             :: SigmaCarbonVelocity, SigmaHydroVelocity
-
-      ! All the atoms are initially at the equilibrium position for stable chemisorption 
-      ! Value for the puckering are taken from J. Phys. Chem. B, 2006, 110, 18811-18817
-      ! Equilibrium position of zH obtained instead from plot of the PES
-      ! Velocities are sampled according to a Maxwell-Boltzmann distribution at temperature T
-
-      ! Equilibrium position of H atom
-      xh = 0.00001
-      yh = 0.00001
-      zh = 1.483 / MyConsts_Bohr2Ang
-
-      ! Equilibrium position of C1 atom
-      z(1) = 0.37 / MyConsts_Bohr2Ang
-
-      ! Equilibrium position of the other carbon atoms 
-      DO nCarbon = 2,121
-         z(nCarbon)   = 0.0
-      END DO
-
-      ! Compute st deviation of Maxwell-Boltzmann distribution ( for the VELOCITY, not momenta!)
-      SigmaCarbonVelocity = sqrt( Temperature / rmc )
-      SigmaHydroVelocity  = sqrt( Temperature / rmh )
-
-      ! Random velocities according to Maxwell-Boltzmann
-      vxh = GaussianRandomNr( SigmaHydroVelocity ) 
-      vyh = GaussianRandomNr( SigmaHydroVelocity ) 
-      vzh = GaussianRandomNr( SigmaHydroVelocity ) 
-      DO nCarbon = 1,121
-         vzc(nCarbon) = GaussianRandomNr( SigmaCarbonVelocity ) 
-      END DO
-
-   END SUBROUTINE ThermalEquilibriumConditions
-
-!****************************************************************************************************************
-
-
    SUBROUTINE lattice( kstep )
       IMPLICIT NONE
 
@@ -813,73 +755,58 @@ PROGRAM JK6
 
 ! *****************************************************************************************
    ! IF the optional argument is given, a Langevin thermostat is added to the system
-   SUBROUTINE VelocityVerlet( LangevinFriction )
+   SUBROUTINE VelocityVerlet( )
       IMPLICIT NONE
-
-         LOGICAL, INTENT(IN) :: LangevinFriction
+         REAL, DIMENSION(124) :: Position, Acceleration
+         INTEGER :: jDoF
 
          ! (1) FULL TIME STEP FOR THE POSITIONS
-
          xh=xh+vxh*dt+0.5*axh*(dt**2)
          yh=yh+vyh*dt+0.5*ayh*(dt**2)
          zh=zh+vzh*dt+0.5*azh*(dt**2)
-
          DO nn=1,nevo
             z(nn)=z(nn)+vzc(nn)*dt+0.5*azc(nn)*(dt**2)
          END DO
 
          ! (2) HALF TIME STEP FOR THE VELOCITIES
-
-         IF ( .NOT. ( LangevinFriction ) ) THEN
-            vxh=vxh+0.5*axh*dt
-            vyh=vyh+0.5*ayh*dt
-            vzh=vzh+0.5*azh*dt
-            DO nn = 1,nevo
-               vzc(nn)=vzc(nn)+0.5*azc(nn)*dt
-            END DO
-         ELSE IF ( LangevinFriction ) THEN
-            vxh= 0.5 * axh * dt + LangIntegr * vxh
-            vyh= 0.5 * ayh * dt + LangIntegr * vyh
-            vzh= 0.5 * azh * dt + LangIntegr * vzh
-            DO nn = 1,nevo
-               vzc(nn)= 0.5 * azc(nn) * dt + LangIntegr * vzc(nn)
-            END DO
-         END IF
+         vxh=vxh+0.5*axh*dt
+         vyh=vyh+0.5*ayh*dt
+         vzh=vzh+0.5*azh*dt
+         DO nn = 1,nevo
+            vzc(nn)=vzc(nn)+0.5*azc(nn)*dt
+         END DO
 
          ! (3) NEW FORCES AND ACCELERATIONS 
-
-         CALL ComputePotential( xh, yh, zh, z, vv, axh, ayh, azh, azc )
-
-         IF ( LangevinFriction ) THEN
-!             axh = axh + GaussianRandomNr( GammaNoiseH ) / rmh
-!             ayh = ayh + GaussianRandomNr( GammaNoiseH ) / rmh
-!             azh = azh + GaussianRandomNr( GammaNoiseH ) / rmh
-            axh = axh + UniformRandomNr( -sqrt(3.)*GammaNoiseH, sqrt(3.)*GammaNoiseH ) / rmh
-            ayh = ayh + UniformRandomNr( -sqrt(3.)*GammaNoiseH, sqrt(3.)*GammaNoiseH ) / rmh
-            azh = azh + UniformRandomNr( -sqrt(3.)*GammaNoiseH, sqrt(3.)*GammaNoiseH ) / rmh
-            DO nn = 1,nevo
-!                azc(nn) = azc(nn) + GaussianRandomNr( GammaNoiseC ) / rmc 
-               azc(nn) = azc(nn) + UniformRandomNr( -sqrt(3.)*GammaNoiseC, sqrt(3.)*GammaNoiseC ) / rmc 
-            END DO
-         END IF
+         Position(1) = xh
+         Position(2) = yh
+         Position(3) = zh
+         Acceleration(1) = axh
+         Acceleration(2) = ayh
+         Acceleration(3) = azh
+         DO jDoF = 1, 121
+            Position(3+jDoF) = z(jDoF)
+            Acceleration(3+jDoF) = azc(jDoF)
+         END DO            
+         vv = VHSticking( Position, Acceleration )  
+         xh = Position(1)
+         yh = Position(2)
+         zh = Position(3)
+         axh = Acceleration(1) / rmh
+         ayh = Acceleration(2) / rmh
+         azh = Acceleration(3) / rmh
+         DO jDoF = 1, 121
+            z(jDoF) = Position(3+jDoF)
+            azc(jDoF) = Acceleration(3+jDoF) /  rmc
+         END DO                 
+!        CALL ComputePotential( xh, yh, zh, z, vv, axh, ayh, azh, azc )
 
          ! (4) HALF TIME STEP AGAIN FOR THE VELOCITIES
-
-         IF ( .NOT. LangevinFriction ) THEN
-            vxh=vxh+0.5*axh*dt
-            vyh=vyh+0.5*ayh*dt
-            vzh=vzh+0.5*azh*dt
-            DO nn = 1,nevo
-               vzc(nn)=vzc(nn)+0.5*azc(nn)*dt
-            END DO
-         ELSE IF ( LangevinFriction ) THEN
-            vxh= 0.5 * axh * dt + LangIntegr * vxh
-            vyh= 0.5 * ayh * dt + LangIntegr * vyh
-            vzh= 0.5 * azh * dt + LangIntegr * vzh
-            DO nn = 1,nevo
-               vzc(nn)= 0.5 * azc(nn) * dt + LangIntegr * vzc(nn)
-            END DO
-         END IF
+         vxh=vxh+0.5*axh*dt
+         vyh=vyh+0.5*ayh*dt
+         vzh=vzh+0.5*azh*dt
+         DO nn = 1,nevo
+            vzc(nn)=vzc(nn)+0.5*azc(nn)*dt
+         END DO
 
    END SUBROUTINE VelocityVerlet
 
@@ -941,6 +868,38 @@ PROGRAM JK6
    END SUBROUTINE WriteTrajectoryXYZ
 
 !****************************************************************************************************************
+
+   SUBROUTINE PrintCorrelation( ZArray, NrOfTraj )
+      IMPLICIT NONE
+      REAL, INTENT(IN), DIMENSION(:,:) :: ZArray
+      INTEGER, INTENT(IN) :: NrOfTraj
+      
+      INTEGER :: NrOfTStep, iStep, iTraj, OutUnit
+      REAL :: Correlation
+      CHARACTER(100) :: FileName
+      
+      NrOfTStep = size( ZArray, 1 )
+      CALL ERROR( NrOfTraj > size( ZArray, 2 ), "PrintCorrelation: wrong trajectories number " )
+      
+      OutUnit = LookForFreeUnit()
+      WRITE(FileName,"(A,I4.4,A)") "Correlation_",NrOfTraj,".dat"
+      OPEN( Unit=OutUnit, File=FileName )
+      
+      DO iStep = 1, NrOfTStep
+          Correlation = 0.0
+          DO iTraj = 1, NrOfTraj
+             Correlation = Correlation + ZArray(1, iTraj)*ZArray(iStep, iTraj)
+          END DO
+          Correlation = Correlation / NrOfTraj
+          WRITE(OutUnit,*) dt*real(iStep-1)/MyConsts_fs2AU, Correlation
+      END DO
+      
+      CLOSE(OutUnit)
+      
+   END SUBROUTINE PrintCorrelation
+
+!****************************************************************************************************************
+
 
 END PROGRAM JK6
 
