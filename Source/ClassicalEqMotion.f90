@@ -25,7 +25,7 @@ MODULE ClassicalEqMotion
       PRIVATE
       PUBLIC :: Evolution
       PUBLIC :: EvolutionSetup, SetupThermostat, DisposeThermostat
-      PUBLIC :: EOM_VelocityVerlet, EOM_KineticEnergy
+      PUBLIC :: EOM_VelocityVerlet, EOM_KineticEnergy, EOM_Beeman
 
       LOGICAL :: GaussianNoise = .TRUE.
       
@@ -35,7 +35,8 @@ MODULE ClassicalEqMotion
          INTEGER   :: NDoF                            !< Nr of degrees of freedom
          REAL, DIMENSION(:), POINTER :: Mass          !< Vector with the masses of the system
          REAL  :: dt                                  !< Time step of integration
-         REAL  :: FrictionCoeff                       !< Coefficient including Langevin friction
+         REAL  :: FrictionCoeff_FullDt                !< Coefficient including Langevin friction for one timestep
+         REAL  :: FrictionCoeff_HalfDt                !< Coefficient including Langevin friction for half timestep
          REAL, DIMENSION(:), POINTER :: ThermalNoise  !< Vector of the thermal noise sigma
          LOGICAL :: HasThermostat = .FALSE.           !< Thermostat data has been setup
          LOGICAL :: IsSetup = .FALSE.                 !< Evolution data has been setup
@@ -104,7 +105,8 @@ MODULE ClassicalEqMotion
       CALL WARN( EvolData%HasThermostat, "ClassicalEqMotion.SetupThermostat: overwriting thermostat data" ) 
 
       ! Set coefficient for velocity integration with Langevin friction
-      EvolData%FrictionCoeff = 1.0 - 0.5 * Gamma * EvolData%dt
+      EvolData%FrictionCoeff_HalfDt = 1.0 - 0.5 * Gamma * EvolData%dt
+      EvolData%FrictionCoeff_FullDt = 1.0 - Gamma * EvolData%dt
       
       ! Set standard deviations of the thermal noise
       IF ( .NOT. EvolData%HasThermostat )  ALLOCATE( EvolData%ThermalNoise( EvolData%NDoF ) )
@@ -138,7 +140,8 @@ MODULE ClassicalEqMotion
       IF ((.NOT. EvolData%IsSetup) .OR. (.NOT. EvolData%HasThermostat))  RETURN
 
       ! Set coefficient with zero friction
-      EvolData%FrictionCoeff = 1.0
+      EvolData%FrictionCoeff_HalfDt = 1.0
+      EvolData%FrictionCoeff_FullDt = 1.0
       
       ! Deallocate standard deviations of the thermal noise
       DEALLOCATE( EvolData%ThermalNoise )
@@ -212,7 +215,7 @@ MODULE ClassicalEqMotion
             
       ELSE IF ( EvolData%HasThermostat ) THEN             ! Integration with Langevin thermostat
          DO iDoF = 1, EvolData%NDoF
-            Vel(iDoF) = EvolData%FrictionCoeff*Vel(iDoF) + 0.5*Acc(iDoF)*EvolData%dt
+            Vel(iDoF) = EvolData%FrictionCoeff_HalfDt*Vel(iDoF) + 0.5*Acc(iDoF)*EvolData%dt
          END DO
       END IF
 
@@ -245,56 +248,89 @@ MODULE ClassicalEqMotion
             
       ELSE IF ( EvolData%HasThermostat ) THEN             ! Integration with Langevin thermostat
          DO iDoF = 1, EvolData%NDoF
-            Vel(iDoF) = EvolData%FrictionCoeff*Vel(iDoF) + 0.5*Acc(iDoF)*EvolData%dt
+            Vel(iDoF) = EvolData%FrictionCoeff_HalfDt*Vel(iDoF) + 0.5*Acc(iDoF)*EvolData%dt
          END DO
       END IF
 
    END SUBROUTINE EOM_VelocityVerlet   
    
-! SUBROUTINE beeman(pos,vel,force,force1,cell,link,ncel,rcel,len,potential,ksi,trace)
-! !integrate the EOM using Beeman's predictor-corrector algorithm with Nose-
-! Hoover thermostat
-! USE constants
-! IMPLICIT NONE
-! REAL*8 pos(dim,num)
-! REAL*8 vel(dim,num),velp(dim,num) !velp:the predicted velocity
-! !forces at the previous, current and the next time point
-! REAL*8 force(dim,num),force1(dim,num),force2(dim,num)
-! INTEGER cell(0:ncel-1,0:ncel-1,0:ncel-1) !cell list
-! INTEGER link(num)!link list
-! INTEGER ncel !number of cells per dimension
-! REAL*8 rcel,len,potential(num)
-! REAL*8 ksi !friction factor
-! INTEGER i,j !loop control
-! REAL*8 trace(dim,num) !trace of the atoms
-! REAL*8 delta_pos !relative motion
-! DO i = 1,num
-! DO j = 1,dim
-! !calculate relative motion
-! delta_pos = vel(j,i)*time_step +
-! time_step*time_step/6*(4*force1(j,i)-force(j,i))/mass
-! pos(j,i) = pos(j,i) + delta_pos
-! trace(j,i) = trace(j,i) + delta_pos
-! !periodic boundary conditions
-! IF (pos(j,i) .LT. 0) pos(j,i) = pos(j,i) - INT(pos(j,i)/len)*len + len
-! IF (pos(j,i) .GT. len) pos(j,i) = pos(j,i) - INT(pos(j,i)/len)*len
-! !predicted velocities
-! velp(j,i) = vel(j,i) + time_step/2*(3*force1(j,i)-force(j,i))/mass
-! END DO
-! END DO
-! !update cell list and calculate forces
-! CALL cell_list(pos,cell,ncel,rcel,link)
-! CALL force_calculation (pos,cell,link,ncel,rcel,force2,len,potential)
-! DO i = 1,num
-! DO j = 1,dim
-! !calculate forces incorporating thermostat
-! force2(j,i)=force2(j,i)-ksi*mass*velp(j,i)
-! !corrected velocity
-! vel(j,i) = vel(j,i) + time_step/6*(2*force2(j,i)+5*force1(j,i)-
-! force(j,i))/mass
-! END DO
-! END DO
-! RETURN
-! END SUBROUTINE beeman
+
+
+
+
+
+!*******************************************************************************
+!> Propagate trajectory with Beeman's algorith.
+!> If the Langevin parameters are setup, propagation is done in the
+!> canonical ensamble with a Langevin thermostat
+!> @ref 
+!>
+!> @param EvolData     Evolution data type
+!*******************************************************************************
+   SUBROUTINE EOM_Beeman( EvolData, Pos, Vel, Acc, PreAcc, GetPotential, V )
+      IMPLICIT NONE
+
+      TYPE( Evolution ), INTENT(INOUT)                 :: EvolData
+      REAL, DIMENSION( EvolData%NDoF ), INTENT(INOUT)  :: Pos, Vel, Acc, PreAcc
+      REAL, INTENT(OUT)                                :: V
+
+      INTERFACE
+         REAL FUNCTION GetPotential( X, Force )
+            REAL, DIMENSION(:), INTENT(IN)  :: X
+            REAL, DIMENSION(:), INTENT(OUT) :: Force
+         END FUNCTION GetPotential
+      END INTERFACE
+      
+      INTEGER :: iDoF
+ 
+      ! (1) FULL TIME STEP FOR THE POSITIONS
+       
+      DO iDoF = 1, EvolData%NDoF
+          Pos(iDoF) = Pos(iDoF) + Vel(iDoF)*EvolData%dt + (4.*Acc(iDoF)-PreAcc(iDof))*(EvolData%dt**2)/6.0
+      END DO
+      
+      ! (2) VELOCITIES: TIME STEP INCLUDING ACCELERATION AT PRESENT AND PREVIOUS T
+
+      IF ( .NOT. ( EvolData%HasThermostat ) ) THEN        ! Integration without Langevin thermostat
+         DO iDoF = 1, EvolData%NDoF
+            Vel(iDoF) = Vel(iDoF) +  ( 5.0*Acc(iDoF) - PreAcc(iDof) ) * EvolData%dt / 6.0
+         END DO
+            
+      ELSE IF ( EvolData%HasThermostat ) THEN             ! Integration with Langevin thermostat
+         DO iDoF = 1, EvolData%NDoF
+            Vel(iDoF) = EvolData%FrictionCoeff_FullDt * Vel(iDoF) +  ( 5.0*Acc(iDoF) - PreAcc(iDof) ) * EvolData%dt / 6.0
+         END DO
+      END IF
+
+      ! (3) NEW FORCES AND ACCELERATIONS
+ 
+      PreAcc(:) = Acc(:)                 ! Store present accelerations for later use
+      V = GetPotential( Pos, Acc )       ! Compute new forces and store the potential value
+       
+      ! Divide by mass and if it's  Langevin dynamics, add random noise
+      IF ( .NOT. ( EvolData%HasThermostat ) ) THEN        ! only potential forces
+         DO iDoF = 1, EvolData%NDoF
+            Acc(iDoF) = Acc(iDoF)/EvolData%Mass(iDoF)
+         END DO
+      ELSE IF (( EvolData%HasThermostat ) .AND. ( GaussianNoise )) THEN    ! add gaussian noise
+         DO iDoF = 1, EvolData%NDoF
+            Acc(iDoF) = ( Acc(iDoF)+GaussianRandomNr( EvolData%ThermalNoise(iDoF) ) ) / EvolData%Mass(iDoF)
+         END DO
+      ELSE IF (( EvolData%HasThermostat ) .AND. ( .NOT. GaussianNoise )) THEN    ! add uniform noise
+         DO iDoF = 1, EvolData%NDoF
+            Acc(iDoF) = ( Acc(iDoF) + UniformRandomNr( -sqrt(3.)*EvolData%ThermalNoise(iDoF),     &
+                                                       sqrt(3.)*EvolData%ThermalNoise(iDoF) ) )  / EvolData%Mass(iDoF)
+         END DO
+      END IF
+      
+      ! (4) VELOCITIES: TIME STEP INCLUDING ACCELERATION AT NEW T 
+
+      DO iDoF = 1, EvolData%NDoF
+         Vel(iDoF) = Vel(iDoF) + Acc(iDoF)*EvolData%dt / 3.0
+      END DO  
+    
+   END SUBROUTINE EOM_Beeman   
+
+
 
 END MODULE ClassicalEqMotion

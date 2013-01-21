@@ -26,7 +26,8 @@ MODULE CommonData
 
    !> Variable to set the print level of the calculation
    INTEGER :: PrintType
-   INTEGER, PARAMETER :: DEBUG = 3,   &   ! fully detailed information about the trajs
+   INTEGER, PARAMETER :: EQUILIBRDBG = 4,   &   ! fully detailed information about the trajs
+                         DEBUG = 3,   &   ! fully detailed information about the trajs
                          FULL = 2,    &   ! files to plot the make animations, averages for each traj
                          MINIMAL = 1      ! minimal level of output, only final averages
 
@@ -60,6 +61,7 @@ MODULE CommonData
    REAL, DIMENSION(:), SAVE, ALLOCATABLE :: X    ! Position at given timestep
    REAL, DIMENSION(:), SAVE, ALLOCATABLE :: V    ! Velocity at given timestep
    REAL, DIMENSION(:), SAVE, ALLOCATABLE :: A    ! Acceleration at ginve timestep
+   REAL, DIMENSION(:), SAVE, ALLOCATABLE :: APre ! Acceleration from the previous time step
 
    ! OTHER DATA
      

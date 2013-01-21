@@ -155,7 +155,7 @@ PROGRAM JK6
    ntime=int(nstep/nprint)
 
    ! Allocation of position, velocity, acceleration arrays
-   ALLOCATE( X(nevo+3), V(nevo+3), A(nevo+3) )
+   ALLOCATE( X(nevo+3), V(nevo+3), A(nevo+3), APre(nevo+3) )
    
    ! if XYZ files of the trajectories are required, allocate memory to store the traj
    IF ( PrintType >= FULL ) THEN
@@ -288,7 +288,7 @@ PROGRAM JK6
 
             PRINT "(/,A,F6.1)"," Equilibrating the initial conditions at T = ", temp / MyConsts_K2AU
 
-            IF ( PrintType >= DEBUG ) THEN
+            IF ( PrintType == DEBUG ) THEN
                ! Open file to store equilibration
                WRITE(OutFileName,"(A,I4.4,A)") "Traj_",i,".dat"
                NWriteUnit = LookForFreeUnit()
@@ -314,8 +314,15 @@ PROGRAM JK6
             ! Do an equilibration run
             DO n = 1, NrEquilibSteps
 
-                  ! Propagate for one timestep with langevin thermostat
-                  CALL EOM_VelocityVerlet( Equilibration, X, V, A, VHSticking, PotEnergy )
+                  IF ( n == 1 ) THEN           ! If first step, previous acceleration are not available
+                     ! Store initial accelerations
+                     APre(:) = A(:)
+                     ! Propagate for one timestep with Velocity-Verlet and langevin thermostat
+                     CALL EOM_VelocityVerlet( Equilibration, X, V, A, VHSticking, PotEnergy )
+                  ELSE
+                     ! Propagate for one timestep with Beeman's method and langevin thermostat
+                     CALL EOM_Beeman( Equilibration, X, V, A, APre, VHSticking, PotEnergy )
+                  END IF
 
                   ! compute kinetic energy and total energy
                   KinEnergy = EOM_KineticEnergy(Equilibration, V )
@@ -324,7 +331,7 @@ PROGRAM JK6
 
                   ! every nprint steps, compute trapping and write debug output
                   IF ( mod(n,nprint) == 0 ) THEN
-                     IF ( PrintType >= DEBUG ) THEN
+                     IF ( PrintType == DEBUG ) THEN
                          WRITE(NWriteUnit,850) real(n)*dt/MyConsts_fs2AU, IstTemperature, &
                          PotEnergy*MyConsts_Hartree2eV, KinEnergy*MyConsts_Hartree2eV,  TotEnergy*MyConsts_Hartree2eV
                      END IF
@@ -333,17 +340,21 @@ PROGRAM JK6
 
                   ! If the step is after 2.0/gamma time, store temperature averages
                   IF ( n >= EquilibrInitAverage ) THEN
+                        NrOfEquilibrStepsAver = NrOfEquilibrStepsAver + 1
                         ZHEquilibrium = ZHEquilibrium + ( X(3) - (X(5)+X(6)+X(7))/3.0 )
                         IF ( PrintType >= FULL ) THEN
                            EquilibrationAverage = EquilibrationAverage + IstTemperature
                            EquilibrationVariance = EquilibrationVariance + IstTemperature**2
-                        END IF
-                        NrOfEquilibrStepsAver = NrOfEquilibrStepsAver + 1
+                        ENDIF
+                        IF ( PrintType == EQUILIBRDBG ) THEN                     
+                           IF ( mod(n,10000) == 0 ) WRITE(567,* )  real(n)*dt/MyConsts_fs2AU, EquilibrationAverage/NrOfEquilibrStepsAver, &
+                                         sqrt((EquilibrationVariance/NrOfEquilibrStepsAver)-(EquilibrationAverage/NrOfEquilibrStepsAver)**2)
+                        ENDIF
                   END IF
 
             END DO
 
-            IF ( PrintType >= DEBUG ) THEN
+            IF ( PrintType == DEBUG ) THEN
                ! Close file to store equilibration
                CLOSE( Unit=NWriteUnit )
             ENDIF
@@ -419,7 +430,7 @@ PROGRAM JK6
                C1Variance = 0.0
             ENDIF
 
-            IF ( PrintType >= DEBUG ) THEN
+            IF ( PrintType == DEBUG ) THEN
                ! Open file to store trajectory information
                WRITE(OutFileName,"(A,I4.4,A)") "Traj_",i,".dat"
                NWriteUnit = LookForFreeUnit()
@@ -500,7 +511,7 @@ PROGRAM JK6
                ELSE IF (RunType == EQUILIBRIUM) THEN
 
                   ! If massive level of output, print traj information to std out
-                  IF ( PrintType >= DEBUG ) THEN
+                  IF ( PrintType == DEBUG ) THEN
                      WRITE(NWriteUnit,800) dt*real(n)/MyConsts_fs2AU, PotEnergy*MyConsts_Hartree2eV,  &
                          KinEnergy*MyConsts_Hartree2eV, TotEnergy*MyConsts_Hartree2eV, IstTemperature                    
                      WRITE(NWriteUnit,801)  dt*real(n)/MyConsts_fs2AU, X(1:5)*MyConsts_Bohr2Ang,  &
@@ -552,7 +563,7 @@ PROGRAM JK6
                                                 
          END IF
 
-         IF ( (RunType == EQUILIBRIUM) .AND. ( PrintType >= DEBUG ) ) THEN
+         IF ( (RunType == EQUILIBRIUM) .AND. ( PrintType == DEBUG ) ) THEN
                ! Close file to store equilibration
                CLOSE( Unit=NWriteUnit )
          ENDIF
