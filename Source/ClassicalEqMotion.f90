@@ -25,7 +25,7 @@ MODULE ClassicalEqMotion
       PRIVATE
       PUBLIC :: Evolution
       PUBLIC :: EvolutionSetup, SetupThermostat, DisposeThermostat
-      PUBLIC :: EOM_VelocityVerlet, EOM_KineticEnergy, EOM_Beeman
+      PUBLIC :: EOM_VelocityVerlet, EOM_KineticEnergy, EOM_Beeman, EOM_ImpulseIntegrator
 
       LOGICAL :: GaussianNoise = .TRUE.
       
@@ -35,7 +35,7 @@ MODULE ClassicalEqMotion
          INTEGER   :: NDoF                            !< Nr of degrees of freedom
          REAL, DIMENSION(:), POINTER :: Mass          !< Vector with the masses of the system
          REAL  :: dt                                  !< Time step of integration
-         REAL  :: FrictionCoeff_FullDt                !< Coefficient including Langevin friction for one timestep
+         REAL  :: Gamma                            !< Integrated Langevin friction for one timestep
          REAL  :: FrictionCoeff_HalfDt                !< Coefficient including Langevin friction for half timestep
          REAL, DIMENSION(:), POINTER :: ThermalNoise  !< Vector of the thermal noise sigma
          LOGICAL :: HasThermostat = .FALSE.           !< Thermostat data has been setup
@@ -77,6 +77,8 @@ MODULE ClassicalEqMotion
       
       ! evolutiondata is now setup
       EvolutionData%IsSetup = .TRUE.
+
+      EvolutionData%HasThermostat = .FALSE.
       
 #if defined(VERBOSE_OUTPUT)
       WRITE(*,"(/,A,I3,A,1F8.3)") "Evolution data type is setup: Nr DoF is ",NDoF," and TimeStep ", TimeStep
@@ -106,7 +108,7 @@ MODULE ClassicalEqMotion
 
       ! Set coefficient for velocity integration with Langevin friction
       EvolData%FrictionCoeff_HalfDt = 1.0 - 0.5 * Gamma * EvolData%dt
-      EvolData%FrictionCoeff_FullDt = 1.0 - Gamma * EvolData%dt
+      EvolData%Gamma = Gamma
       
       ! Set standard deviations of the thermal noise
       IF ( .NOT. EvolData%HasThermostat )  ALLOCATE( EvolData%ThermalNoise( EvolData%NDoF ) )
@@ -141,7 +143,7 @@ MODULE ClassicalEqMotion
 
       ! Set coefficient with zero friction
       EvolData%FrictionCoeff_HalfDt = 1.0
-      EvolData%FrictionCoeff_FullDt = 1.0
+      EvolData%Gamma = 0.0
       
       ! Deallocate standard deviations of the thermal noise
       DEALLOCATE( EvolData%ThermalNoise )
@@ -180,6 +182,8 @@ MODULE ClassicalEqMotion
 !> Propagate trajectory with Velocity-Verlet algorith.
 !> If the Langevin parameters are setup, propagation is done in the
 !> canonical ensamble with a Langevin thermostat
+!> NOTE: THIS INTEGRATOR IS BETTER SUITED FOR MICROCANONICAL DYNAMICS 
+!>       in case of Langevin MD, use Beeman's algorithm!
 !> @ref http://en.wikipedia.org/wiki/Verlet_integration#Velocity_Verlet
 !>
 !> @param EvolData     Evolution data type
@@ -201,69 +205,56 @@ MODULE ClassicalEqMotion
       INTEGER :: iDoF
  
       ! (1) FULL TIME STEP FOR THE POSITIONS
-       
-      DO iDoF = 1, EvolData%NDoF
-          Pos(iDoF) = Pos(iDoF) + Vel(iDoF)*EvolData%dt + 0.5*Acc(iDoF)*(EvolData%dt**2)
-      END DO
-      
-      ! (2) HALF TIME STEP FOR THE VELOCITIES
+      Pos(:) = Pos(:) + Vel(:)*EvolData%dt + 0.5*Acc(:)*(EvolData%dt**2)
+ 
+      IF ( .NOT. EvolData%HasThermostat ) THEN        ! Integration without Langevin thermostat
+   
+         ! (2) HALF TIME STEP FOR THE VELOCITIES
+         Vel(:) = Vel(:) + 0.5*Acc(:)*EvolData%dt
 
-      IF ( .NOT. ( EvolData%HasThermostat ) ) THEN        ! Integration without Langevin thermostat
-         DO iDoF = 1, EvolData%NDoF
-            Vel(iDoF) = Vel(iDoF) + 0.5*Acc(iDoF)*EvolData%dt
-         END DO
+         ! (3) NEW FORCES AND ACCELERATIONS 
+         V = GetPotential( Pos, Acc )       ! Compute new forces and store the potential value
+         Acc(:) = Acc(:)/EvolData%Mass(:)   ! only potential forces
+
+         ! (4) HALF TIME STEP AGAIN FOR THE VELOCITIES
+         Vel(:) = Vel(:) + 0.5*Acc(:)*EvolData%dt
+
+
+      ELSE IF ( ( EvolData%HasThermostat ) ) THEN     ! Integration with Langevin thermostat
             
-      ELSE IF ( EvolData%HasThermostat ) THEN             ! Integration with Langevin thermostat
-         DO iDoF = 1, EvolData%NDoF
-            Vel(iDoF) = EvolData%FrictionCoeff_HalfDt*Vel(iDoF) + 0.5*Acc(iDoF)*EvolData%dt
-         END DO
-      END IF
+         ! (2) HALF TIME STEP FOR THE VELOCITIES
+         Vel(:) = EvolData%FrictionCoeff_HalfDt*Vel(:) + 0.5*Acc(:)*EvolData%dt
 
-      ! (3) NEW FORCES AND ACCELERATIONS 
-      
-      V = GetPotential( Pos, Acc )       ! Compute new forces and store the potential value
-       
-      ! Divide by mass and if it's  Langevin dynamics, add random noise
-      IF ( .NOT. ( EvolData%HasThermostat ) ) THEN        ! only potential forces
-         DO iDoF = 1, EvolData%NDoF
-            Acc(iDoF) = Acc(iDoF)/EvolData%Mass(iDoF)
-         END DO
-      ELSE IF (( EvolData%HasThermostat ) .AND. ( GaussianNoise )) THEN    ! add gaussian noise
-         DO iDoF = 1, EvolData%NDoF
-            Acc(iDoF) = ( Acc(iDoF)+GaussianRandomNr( EvolData%ThermalNoise(iDoF) ) ) / EvolData%Mass(iDoF)
-         END DO
-      ELSE IF (( EvolData%HasThermostat ) .AND. ( .NOT. GaussianNoise )) THEN    ! add uniform noise
-         DO iDoF = 1, EvolData%NDoF
-            Acc(iDoF) = ( Acc(iDoF) + UniformRandomNr( -sqrt(3.)*EvolData%ThermalNoise(iDoF),     &
-                                                       sqrt(3.)*EvolData%ThermalNoise(iDoF) ) )  / EvolData%Mass(iDoF)
-         END DO
-      END IF
-      
-      ! (4) HALF TIME STEP AGAIN FOR THE VELOCITIES
+         ! (3) NEW FORCES AND ACCELERATIONS 
+         V = GetPotential( Pos, Acc )       ! Compute new forces and store the potential value
 
-      IF ( .NOT. ( EvolData%HasThermostat ) ) THEN        ! Integration without Langevin thermostat
-         DO iDoF = 1, EvolData%NDoF
-            Vel(iDoF) = Vel(iDoF) + 0.5*Acc(iDoF)*EvolData%dt
-         END DO
-            
-      ELSE IF ( EvolData%HasThermostat ) THEN             ! Integration with Langevin thermostat
-         DO iDoF = 1, EvolData%NDoF
-            Vel(iDoF) = EvolData%FrictionCoeff_HalfDt*Vel(iDoF) + 0.5*Acc(iDoF)*EvolData%dt
-         END DO
+         IF ( GaussianNoise ) THEN    ! add gaussian noise
+            DO iDoF = 1, EvolData%NDoF
+               Acc(iDoF) = ( Acc(iDoF)+GaussianRandomNr( EvolData%ThermalNoise(iDoF) ) ) / EvolData%Mass(iDoF)
+            END DO
+         ELSE IF ( .NOT. GaussianNoise ) THEN    ! add uniform noise
+            DO iDoF = 1, EvolData%NDoF
+               Acc(iDoF) = ( Acc(iDoF) + UniformRandomNr( -sqrt(3.)*EvolData%ThermalNoise(iDoF),     &
+                                                         sqrt(3.)*EvolData%ThermalNoise(iDoF) ) )  / EvolData%Mass(iDoF)
+            END DO
+         END IF
+
+         ! (4) HALF TIME STEP AGAIN FOR THE VELOCITIES
+         Vel(:) = EvolData%FrictionCoeff_HalfDt*Vel(:) + 0.5*Acc(:)*EvolData%dt
+
       END IF
 
    END SUBROUTINE EOM_VelocityVerlet   
    
 
 
-
-
-
 !*******************************************************************************
 !> Propagate trajectory with Beeman's algorith.
 !> If the Langevin parameters are setup, propagation is done in the
 !> canonical ensamble with a Langevin thermostat
-!> @ref 
+!> NOTE: THIS INTEGRATOR IS BETTER SUITED FOR LANGEVIN DYNAMICS 
+!>       in case of microcanonical MD, use Velocity-Verlet!
+!> @ref http://en.wikipedia.org/wiki/Beeman%27s_algorithm
 !>
 !> @param EvolData     Evolution data type
 !*******************************************************************************
@@ -282,55 +273,113 @@ MODULE ClassicalEqMotion
       END INTERFACE
       
       INTEGER :: iDoF
- 
-      ! (1) FULL TIME STEP FOR THE POSITIONS
-       
-      DO iDoF = 1, EvolData%NDoF
-          Pos(iDoF) = Pos(iDoF) + Vel(iDoF)*EvolData%dt + (4.*Acc(iDoF)-PreAcc(iDof))*(EvolData%dt**2)/6.0
-      END DO
-      
-      ! (2) VELOCITIES: TIME STEP INCLUDING ACCELERATION AT PRESENT AND PREVIOUS T
+      ! Temporary array for predicted velocity and new accelerations
+      REAL, DIMENSION( EvolData%NDoF ) :: NewPos, NewVel, NewAcc
 
-      IF ( .NOT. ( EvolData%HasThermostat ) ) THEN        ! Integration without Langevin thermostat
-         DO iDoF = 1, EvolData%NDoF
-            Vel(iDoF) = Vel(iDoF) +  ( 5.0*Acc(iDoF) - PreAcc(iDof) ) * EvolData%dt / 6.0
-         END DO
+      ! (1) PREDICTED POSITIONS
+      NewPos(:) = Pos(:) + Vel(:)*EvolData%dt + (4.*Acc(:)-PreAcc(:))*(EvolData%dt**2)/6.0
+
+      ! (2) PREDICTED VELOCITY
+      NewVel(:) = Vel(:) + (3.*Acc(:)-PreAcc(:))*EvolData%dt/2.0
+ 
+      IF ( .NOT. EvolData%HasThermostat ) THEN        ! Integration without Langevin thermostat
+
+            ! (2) NEW ACCELERATION
+            V = GetPotential( NewPos, NewAcc )         ! Compute new forces and store the potential value
+            NewAcc(:) =  NewAcc(:) / EvolData%Mass(:)   ! Devide by the mass
+! 
+!             ! (3) NEW VELOCITIES
+!             Vel(:) = Vel(:) + (2.*PreAcc(:) +5.*Acc(:) -1.*NewAcc(:))*EvolData%dt/6.0
+
+      ELSE IF ( ( EvolData%HasThermostat ) ) THEN
             
-      ELSE IF ( EvolData%HasThermostat ) THEN             ! Integration with Langevin thermostat
-         DO iDoF = 1, EvolData%NDoF
-            Vel(iDoF) = EvolData%FrictionCoeff_FullDt * Vel(iDoF) +  ( 5.0*Acc(iDoF) - PreAcc(iDof) ) * EvolData%dt / 6.0
-         END DO
+
+            ! (3) NEW ACCELERATION
+            V = GetPotential( NewPos, NewAcc )         ! Compute new forces and store the potential value
+
+            IF ( GaussianNoise ) THEN               ! Add gaussian noise and friction
+               DO iDoF = 1, EvolData%NDoF
+                  NewAcc(iDoF) = ( NewAcc(iDoF) + GaussianRandomNr(EvolData%ThermalNoise(iDoF)) ) / EvolData%Mass(iDoF) &
+                                                                                   - EvolData%Gamma*NewVel(iDoF)
+               END DO
+            ELSE IF ( .NOT. GaussianNoise ) THEN    ! add uniform noise and friction
+               DO iDoF = 1, EvolData%NDoF
+                  NewAcc(iDoF) = ( NewAcc(iDoF) + UniformRandomNr(-sqrt(3.)*EvolData%ThermalNoise(iDoF),sqrt(3.)*EvolData%ThermalNoise(iDoF)) ) &
+                                    / EvolData%Mass(iDoF) - EvolData%Gamma*NewVel(iDoF)
+               END DO
+            END IF   
+
+
       END IF
 
-      ! (3) NEW FORCES AND ACCELERATIONS
- 
-      PreAcc(:) = Acc(:)                 ! Store present accelerations for later use
-      V = GetPotential( Pos, Acc )       ! Compute new forces and store the potential value
-       
-      ! Divide by mass and if it's  Langevin dynamics, add random noise
-      IF ( .NOT. ( EvolData%HasThermostat ) ) THEN        ! only potential forces
-         DO iDoF = 1, EvolData%NDoF
-            Acc(iDoF) = Acc(iDoF)/EvolData%Mass(iDoF)
-         END DO
-      ELSE IF (( EvolData%HasThermostat ) .AND. ( GaussianNoise )) THEN    ! add gaussian noise
-         DO iDoF = 1, EvolData%NDoF
-            Acc(iDoF) = ( Acc(iDoF)+GaussianRandomNr( EvolData%ThermalNoise(iDoF) ) ) / EvolData%Mass(iDoF)
-         END DO
-      ELSE IF (( EvolData%HasThermostat ) .AND. ( .NOT. GaussianNoise )) THEN    ! add uniform noise
-         DO iDoF = 1, EvolData%NDoF
-            Acc(iDoF) = ( Acc(iDoF) + UniformRandomNr( -sqrt(3.)*EvolData%ThermalNoise(iDoF),     &
-                                                       sqrt(3.)*EvolData%ThermalNoise(iDoF) ) )  / EvolData%Mass(iDoF)
-         END DO
-      END IF
-      
-      ! (4) VELOCITIES: TIME STEP INCLUDING ACCELERATION AT NEW T 
+      ! CORRECTED POSITIONS
+      Pos(:) = Pos(:) + Vel(:)*EvolData%dt + (NewAcc(:)+2*Acc(:))*(EvolData%dt**2)/6.0
 
-      DO iDoF = 1, EvolData%NDoF
-         Vel(iDoF) = Vel(iDoF) + Acc(iDoF)*EvolData%dt / 3.0
-      END DO  
-    
+!       ! (4) CORRECTED VELOCITIES
+!       Vel(:) = Vel(:) + (5.*PreAcc(:) +8.*Acc(:) -1.*NewAcc(:))*EvolData%dt/12.0    
+! 
+      ! (4) CORRECTED VELOCITIES
+      Vel(:) = Vel(:) + (Acc(:) + NewAcc(:))*EvolData%dt/2.0    
+
+      ! Store new acceleration
+      PreAcc(:) = Acc(:)
+      Acc(:) = NewAcc(:)
+
    END SUBROUTINE EOM_Beeman   
 
+   SUBROUTINE EOM_ImpulseIntegrator( EvolData, Pos, Vel, Acc, PrePos, GetPotential, V )
+      IMPLICIT NONE
+
+      TYPE( Evolution ), INTENT(INOUT)                 :: EvolData
+      REAL, DIMENSION( EvolData%NDoF ), INTENT(INOUT)  :: Pos, Vel, Acc, PrePos
+      REAL, INTENT(OUT)                                :: V
+
+      INTERFACE
+         REAL FUNCTION GetPotential( X, Force )
+            REAL, DIMENSION(:), INTENT(IN)  :: X
+            REAL, DIMENSION(:), INTENT(OUT) :: Force
+         END FUNCTION GetPotential
+      END INTERFACE
+      
+      INTEGER :: iDoF
+
+      ! Temporary array for predicted velocity and new accelerations
+      REAL, DIMENSION( EvolData%NDoF ) :: NewPos
+      REAL  :: ExpGtau
+
+      ExpGtau = exp(-EvolData%Gamma*EvolData%dt)
+
+ 
+      IF ( .NOT. EvolData%HasThermostat ) THEN        ! Integration without Langevin thermostat
+          STOP
+
+      ELSE IF ( ( EvolData%HasThermostat ) ) THEN
+
+            ! (3) NEW ACCELERATION
+            V = GetPotential( Pos, Acc )         ! Compute new forces and store the potential value
+
+            IF ( GaussianNoise ) THEN               ! Add gaussian noise and friction
+               DO iDoF = 1, EvolData%NDoF
+                  Acc(iDoF) = ( Acc(iDoF) + GaussianRandomNr(EvolData%ThermalNoise(iDoF)) ) / EvolData%Mass(iDoF) 
+               END DO
+            ELSE IF ( .NOT. GaussianNoise ) THEN    ! add uniform noise and friction
+               DO iDoF = 1, EvolData%NDoF
+                  Acc(iDoF) = ( Acc(iDoF) + UniformRandomNr(-sqrt(3.)*EvolData%ThermalNoise(iDoF),sqrt(3.)*EvolData%ThermalNoise(iDoF)) ) &
+                                    / EvolData%Mass(iDoF) 
+               END DO
+            END IF   
+
+            Vel(:) = (EvolData%Gamma*ExpGtau/(1-ExpGtau))*(Pos(:)-PrePos(:)) + EvolData%dt* &
+                     ( 1.0- (ExpGtau-1.+EvolData%Gamma*EvolData%dt) / (EvolData%Gamma*EvolData%dt*(1-ExpGtau)) ) * Acc(:) 
+            NewPos(:) = (1+ExpGtau)*Pos(:) - ExpGtau*PrePos(:) + EvolData%dt/EvolData%Gamma*(1-ExpGtau)*Acc(:)
+
+      END IF
+    
+      ! Store new acceleration
+      PrePos(:) = Pos(:)
+      Pos(:) = NewPos(:)
+
+   END SUBROUTINE EOM_ImpulseIntegrator   
 
 
 END MODULE ClassicalEqMotion

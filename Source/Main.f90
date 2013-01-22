@@ -169,7 +169,6 @@ PROGRAM JK6
    CALL EvolutionSetup( Equilibration, nevo+3, (/ (rmh, n=1,3), (rmc, n=1,nevo) /), dt )
    CALL SetupThermostat( Equilibration, Gamma, temp )
 
-   
    !*************************************************************
    !       POTENTIAL SETUP 
    !*************************************************************
@@ -305,12 +304,13 @@ PROGRAM JK6
                EquilibrationAverage = 0.0
                EquilibrationVariance = 0.0
             ENDIF
+            A(:) = 0.0
 
             ! Compute starting potential and forces
             PotEnergy = VHSticking( X, A )
             A(1:3) = A(1:3) / rmh
             A(4:nevo+3) = A(4:nevo+3) / rmc
-            
+
             ! Do an equilibration run
             DO n = 1, NrEquilibSteps
 
