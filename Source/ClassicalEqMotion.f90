@@ -114,6 +114,7 @@ MODULE ClassicalEqMotion
       IF ( .NOT. EvolData%HasThermostat )  ALLOCATE( EvolData%ThermalNoise( EvolData%NDoF ) )
       DO iDoF = 1, EvolData%NDoF 
            EvolData%ThermalNoise(iDoF) = sqrt( 2.0*Temperature*EvolData%Mass(iDoF)*Gamma/EvolData%dt )
+           EvolData%ThermalNoise(iDoF) = sqrt( 2.0*Temperature*Gamma/EvolData%dt )
       END DO
       
       ! Themostat data is now setup
@@ -299,13 +300,15 @@ MODULE ClassicalEqMotion
 
             IF ( GaussianNoise ) THEN               ! Add gaussian noise and friction
                DO iDoF = 1, EvolData%NDoF
-                  NewAcc(iDoF) = ( NewAcc(iDoF) + GaussianRandomNr(EvolData%ThermalNoise(iDoF)) ) / EvolData%Mass(iDoF) &
-                                                                                   - EvolData%Gamma*NewVel(iDoF)
+!                   NewAcc(iDoF) = ( NewAcc(iDoF) + GaussianRandomNr(EvolData%ThermalNoise(iDoF)) ) / EvolData%Mass(iDoF) &
+!                                                                                    - EvolData%Gamma*NewVel(iDoF)
+                  NewAcc(iDoF) = ( NewAcc(iDoF) + GaussianRandomNr(EvolData%ThermalNoise(iDoF)) - EvolData%Gamma*NewVel(iDoF) ) &
+                                                        / EvolData%Mass(iDoF)
                END DO
             ELSE IF ( .NOT. GaussianNoise ) THEN    ! add uniform noise and friction
                DO iDoF = 1, EvolData%NDoF
-                  NewAcc(iDoF) = ( NewAcc(iDoF) + UniformRandomNr(-sqrt(3.)*EvolData%ThermalNoise(iDoF),sqrt(3.)*EvolData%ThermalNoise(iDoF)) ) &
-                                    / EvolData%Mass(iDoF) - EvolData%Gamma*NewVel(iDoF)
+                  NewAcc(iDoF) = ( NewAcc(iDoF) + UniformRandomNr(-sqrt(3.)*EvolData%ThermalNoise(iDoF),sqrt(3.)*EvolData%ThermalNoise(iDoF)) &
+                                              - EvolData%Gamma*NewVel(iDoF) ) / EvolData%Mass(iDoF)
                END DO
             END IF   
 

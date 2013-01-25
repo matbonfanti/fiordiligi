@@ -138,7 +138,7 @@ PROGRAM JK6
       ! set irho to remove the cycle on rho
       irho = 0
       CALL SetFieldFromInput( InputData, "Gamma", Gamma)
-      Gamma = Gamma / MyConsts_fs2AU
+      Gamma = Gamma * MyConsts_Uma2Au / MyConsts_fs2AU
       CALL SetFieldFromInput( InputData, "NrEquilibrSteps", NrEquilibSteps, int(5.0*(1.0/Gamma)/dt) )
       CALL SetFieldFromInput( InputData, "EquilibrInitAverage", EquilibrInitAverage, int(2.0*(1.0/Gamma)/dt) )
    END IF
@@ -188,7 +188,7 @@ PROGRAM JK6
    IF (RunType == SCATTERING) WRITE(*,900) ezh * MyConsts_Hartree2eV, zhi * MyConsts_Bohr2Ang
    WRITE(*,901) nevo, inum
    IF (RunType == SCATTERING) WRITE(*,902) irho, delrho * MyConsts_Bohr2Ang
-   IF (RunType == EQUILIBRIUM) WRITE(*,903) (1/gamma)/MyConsts_fs2AU,      &
+   IF (RunType == EQUILIBRIUM) WRITE(*,903) Gamma / MyConsts_Uma2Au * MyConsts_fs2AU,      &
                  dt*real(NrEquilibSteps)/MyConsts_fs2AU, real(EquilibrInitAverage)*dt/MyConsts_fs2AU
    WRITE(*,"(/)")
 
@@ -204,7 +204,7 @@ PROGRAM JK6
               " * Nr of trajectories (per rho value):          ",I4         )
    902 FORMAT(" * Nr of rho values to sample:                  ",I6,/, &
               " * Grid spacing in rho (Ang):                   ",F10.4      )
-   903 FORMAT(" * Langevin relaxation time (fs)                ",F10.4,/, &
+   903 FORMAT(" * Langevin friction constant (UMA/fs)          ",F10.4,/, &
               " * Equilibration time (fs)                      ",F10.4,/, &
               " * Equilibr averages are computed from (fs)     " F10.4      )
 
@@ -476,7 +476,7 @@ PROGRAM JK6
                   IstTemperature = 2.0*KinEnergy/(MyConsts_K2AU*(nevo+3))
                   
                   ! Store ZH-ZHeq for the autocorrelation function
-                  ZHinTime(n, i) = ( X(3) - (X(5)+X(6)+X(7))/3.0 ) - ZHEquilibrium
+                  ZHinTime(n, i) = X(3) ! ( X(3) - (X(5)+X(6)+X(7))/3.0 ) - ZHEquilibrium
                   
                   ! Increment variables for averages
                   IF ( PrintType >= FULL ) THEN
