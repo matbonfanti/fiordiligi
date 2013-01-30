@@ -35,36 +35,34 @@ PROGRAM JK6
    ! Data type with evolution information
    TYPE(Evolution) :: Equilibration, MolecularDynamics
 
-   ! Variable to store trapping probability, resolved in time and in rho
-   REAL, DIMENSION(:,:), ALLOCATABLE :: ptrap
-
-   REAL :: ImpactPar                     ! impact parameter of H
-   REAL, DIMENSION(6) :: HCoordAndVel    ! temporary array to store initial conditions of H atom
+   ! Output variables
    CHARACTER(100) :: OutFileName         ! output file name
    INTEGER  :: NWriteUnit                ! output unit number
 
-   ! Energy
-   REAL  :: KinEnergy, PotEnergy, TotEnergy, IstTemperature
+!    REAL, DIMENSION(6) :: HCoordAndVel    ! temporary array to store initial conditions of H atom
 
-   ! Equilibration analysis data
-   REAL  :: EquilibrationAverage, EquilibrationVariance, ZHEquilibrium
-   INTEGER :: NrOfEquilibrStepsAver
-   
-   ! Propagation analysis data
-   REAL  :: TempAverage, TempVariance
-   REAL, DIMENSION(3)  :: HAverage, HVariance
-   REAL  :: C1Average, C1Variance
-   
    ! Autocorrelation computation
-   REAL, DIMENSION(:,:), ALLOCATABLE  :: ZHinTime
+!    REAL, DIMENSION(:,:), ALLOCATABLE  :: ZHinTime
+   REAL  :: ZHinTime
+   ! Store in time and in frequency the single realization
+   COMPLEX, DIMENSION(:), ALLOCATABLE :: DeltaZ
+   COMPLEX, DIMENSION(:), ALLOCATABLE :: FreqGrid
+   REAL :: dOmega
+   REAL, DIMENSION(:), ALLOCATABLE :: AverageDeltaZ
+
+!> \name latt
+!> ???
+!> @{
+   REAL, DIMENSION(121) :: vzsum, zsum
+   REAL, DIMENSION(:,:), ALLOCATABLE :: vz2av, zcav
+   REAL :: vav, vsqav, zav, zsqav
+!> @}
 
    REAL, DIMENSION(501)      :: crscn
 
-   INTEGER :: iCoord
-   INTEGER :: i, ipt, j, jrho, kk, kstep, lpt, n, nn, nrho
+   INTEGER :: iCoord, iTraj, iStep, jRho, iCarbon, iOmega
+   INTEGER :: kk, kstep
 
-   REAL :: entot, rho, vv
-   REAL :: vav, vsqav, zav, zsqav
 
    PRINT "(/,     '                    ==============================')"
    PRINT "(       '                                JK6_v2            ')"
@@ -163,10 +161,10 @@ PROGRAM JK6
    END IF
 
    ! Set variables for EOM integration in the microcanonical ensamble
-   CALL EvolutionSetup( MolecularDynamics, nevo+3, (/ (rmh, n=1,3), (rmc, n=1,nevo) /), dt )
+   CALL EvolutionSetup( MolecularDynamics, nevo+3, (/ (rmh, iCoord=1,3), (rmc, iCoord=1,nevo) /), dt )
    
    ! Set variables for EOM integration with Langevin thermostat
-   CALL EvolutionSetup( Equilibration, nevo+3, (/ (rmh, n=1,3), (rmc, n=1,nevo) /), dt )
+   CALL EvolutionSetup( Equilibration, nevo+3, (/ (rmh, iCoord=1,3), (rmc, iCoord=1,nevo) /), dt )
    CALL SetupThermostat( Equilibration, Gamma, temp )
 
    !*************************************************************
@@ -174,8 +172,7 @@ PROGRAM JK6
    !*************************************************************
 
    ! Setup potential energy surface
-   CALL SetupPotential( rmh, rmc )
-   
+   CALL SetupPotential( )
    
    !*************************************************************
    !       PRINT OF THE INPUT DATA TO STD OUT
@@ -208,26 +205,26 @@ PROGRAM JK6
               " * Equilibration time (fs)                      ",F10.4,/, &
               " * Equilibr averages are computed from (fs)     " F10.4      )
 
+   ! Here the program have a fork: scattering and equilibrium simulations
+
+   !****************************************************************************
+   IF (RunType == SCATTERING) THEN
+   !****************************************************************************
 
    !*************************************************************
    !       AVERAGES VARIABLES ALLOCATION AND INITIALIZATION
    !*************************************************************
 
-   IF (RunType == SCATTERING) THEN
-
       ! Initialize average values for the INITIAL CONDITION of the lattice Z coordinates
-      zav=0.0           ! average position
-      zsqav=0.0         ! mean squared position
-      vav=0.0           ! average velocity
-      vsqav=0.0         ! mean squared velocity
+      zav    = 0.0         ! average position
+      zsqav  = 0.0         ! mean squared position
+      vav    = 0.0         ! average velocity
+      vsqav  = 0.0         ! mean squared velocity
 
       ! ????????????
-      DO kk = 1,10
-         DO nn = 1,ntime
-            zcav(kk,nn)=0.0
-            vz2av(kk,nn)=0.0
-         END DO
-      END DO
+      ALLOCATE( zcav(10,ntime), vz2av(10,ntime) )
+      zcav(:,:)  = 0.0
+      vz2av(:,:) = 0.0
 
       ! allocate and initialize trapping probability variable
       ALLOCATE( ptrap( irho+1, ntime ) )
@@ -236,210 +233,362 @@ PROGRAM JK6
       ! Initialize random generation of initial conditions for scattering simulation
       call random_seed()
 
-   ELSE IF (RunType == EQUILIBRIUM) THEN   
+      ! scan over the impact parameter... 
+      ! this cycle is a trivial DO j=1,1 in the case of an equilibrium simulation
+      DO jRho = 1,irho+1
 
-      ! ALLOCATE AND INITIALIZE THOSE DATA THAT WILL CONTAIN THE AVERAGES OVER 
-      ! THE SET OF TRAJECTORIES
-      ALLOCATE( ZHinTime(nstep, inum) )
-
-   END IF  
-
-   ! scan over the impact parameter... 
-   ! this cycle is a trivial DO j=1,1 in the case of an equilibrium simulation
-   DO j = 1,irho+1
-
-      IF (RunType == SCATTERING) THEN
          ! Set impact parameter and print message
-         ImpactPar = float(j-1)*delrho+0.000001
+         ImpactPar = float(jRho-1)*delrho+0.000001
 
          PRINT "(2/,A)",    "***************************************************"
          PRINT "(A,F10.5)", "       IMPACT PARAMETER = ", ImpactPar
          PRINT "(A,/)" ,    "***************************************************"
 
-      ELSE IF (RunType == EQUILIBRIUM) THEN
-         PRINT "(2/,A)",    "***************************************************"
-         PRINT "(A,F10.5)", "               EQUILIBRIUM SIMULATION"
-         PRINT "(A,/)" ,    "***************************************************"
+         PRINT "(A,I5,A)"," Running ", inum, " trajectories ... "
 
-      END IF  
+         !run inum number of trajectories at the current rxn parameter
+         DO iTraj = 1,inum
+         
+            PRINT "(/,A,I6,A)"," **** Trajectory Nr. ", iTraj," ****" 
 
-      PRINT "(A,I5,A)"," Running ", inum, " trajectories ... "
-      
-      !run inum number of trajectories at the current rxn parameter
-      DO i=1,inum
-      
-         PRINT "(/,A,I6,A)"," **** Trajectory Nr. ", i," ****" 
-
-         !*************************************************************
-         ! INITIALIZATION OF THE COORDINATES AND MOMENTA OF THE SYSTEM
-         !*************************************************************
-       
-         IF (RunType == SCATTERING) THEN         ! in case of scattering simulation
+            !*************************************************************
+            ! INITIALIZATION OF THE COORDINATES AND MOMENTA OF THE SYSTEM
+            !*************************************************************
 
             ! Set initial conditions
-            CALL HInitScattering( ImpactPar, zhi, ezh )
-            CALL LatticeInitialCondition( temp )
+            CALL ScatteringConditions( X, V, ImpactPar, zhi, ezh, temp, rmh, rmc )
 
-         ELSE IF (RunType == EQUILIBRIUM) THEN    ! in case of thermal equilibrium simulation
+            !*************************************************************
+            ! INFORMATION ON INITIAL CONDITIONS, INITIALIZATION, OTHER...
+            !*************************************************************
 
-            ! Set initial conditions
-            CALL ThermalEquilibriumConditions( X, V, temp, rmh, rmc )
+            ! increment average values for the initial lattice condition
+            DO iCarbon = 4,nevo+3
+               zav   = zav   + X(iCarbon)
+               zsqav = zsqav + X(iCarbon)**2
+               vav   = vav   + V(iCarbon)
+               vsqav = vsqav + V(iCarbon)**2
+            END DO
 
-            PRINT "(/,A,F6.1)"," Equilibrating the initial conditions at T = ", temp / MyConsts_K2AU
-
-            IF ( PrintType == DEBUG ) THEN
-               ! Open file to store equilibration
-               WRITE(OutFileName,"(A,I4.4,A)") "Traj_",i,".dat"
-               NWriteUnit = LookForFreeUnit()
-               OPEN( Unit=NWriteUnit, File=OutFileName )
-               WRITE( NWriteUnit, * ) "# EQUILIBRATION: time, temperature, potential, kinetic energy, total energy"
-            ENDIF
-
-            ! Equilibrium position of Z
-            ZHEquilibrium = 0.0
-            ! Nr of steps to average
-            NrOfEquilibrStepsAver = 0
-            IF ( PrintType >= FULL ) THEN
-               ! Initialize temperature average and variance
-               EquilibrationAverage = 0.0
-               EquilibrationVariance = 0.0
-            ENDIF
-            A(:) = 0.0
+            DO iCarbon = 1,121
+               zsum(iCarbon)  = 0.0
+               vzsum(iCarbon) = 0.0
+            END DO
 
             ! Compute starting potential and forces
             PotEnergy = VHSticking( X, A )
             A(1:3) = A(1:3) / rmh
             A(4:nevo+3) = A(4:nevo+3) / rmc
+            ! compute kinetic energy and total energy
+            KinEnergy = EOM_KineticEnergy( MolecularDynamics, V )
+            TotEnergy = PotEnergy + KinEnergy
+            IstTemperature = 2.0*KinEnergy/(MyConsts_K2AU*(nevo+3))
 
-            ! Do an equilibration run
-            DO n = 1, NrEquilibSteps
+            !*************************************************************
+            !         TIME EVOLUTION OF THE TRAJECTORY
+            !*************************************************************
+ 
+            ! initialize counter for printing steps
+            kstep=0
 
-                  IF ( n == 1 ) THEN           ! If first step, previous acceleration are not available
-                     ! Store initial accelerations
-                     APre(:) = A(:)
-                     ! Propagate for one timestep with Velocity-Verlet and langevin thermostat
-                     CALL EOM_VelocityVerlet( Equilibration, X, V, A, VHSticking, PotEnergy )
-                  ELSE
-                     ! Propagate for one timestep with Beeman's method and langevin thermostat
-                     CALL EOM_Beeman( Equilibration, X, V, A, APre, VHSticking, PotEnergy )
+            ! cycle over nstep velocity verlet iterations
+            DO iStep = 1,nstep
+
+               ! Propagate for one timestep only if in the interaction region
+               IF ( X(3) <= zhi )  CALL EOM_VelocityVerlet( MolecularDynamics, X, V, A, VHSticking, PotEnergy )
+
+               ! Compute kin energy and temperature
+               KinEnergy = EOM_KineticEnergy( MolecularDynamics, V )
+               TotEnergy = PotEnergy + KinEnergy
+               IstTemperature = 2.0*KinEnergy/(MyConsts_K2AU*(nevo+3))
+
+               ! compute average values of the carbon positions
+               DO iCarbon = 1,nevo
+                  zsum(iCarbon)  = zsum(iCarbon)  + X(iCarbon+3)
+                  vzsum(iCarbon) = vzsum(iCarbon) + V(iCarbon+3)**2
+               END DO
+
+               ! every nprint steps, compute trapping and write output
+               IF ( mod(iStep,nprint) == 0 ) THEN
+
+                  ! increment counter for printing steps
+                  kstep=kstep+1
+
+                  ! check if H is in the trapping region
+                  IF ( X(3) <= AdsorpLimit ) ptrap(jRho,kstep) = ptrap(jRho,kstep)+1.0
+
+                  ! average lattice velocity and positions
+                  CALL lattice( kstep )
+
+                  ! Store the trajectory for XYZ printing
+                  IF ( PrintType >= FULL ) THEN
+                        Trajectory( :, kstep ) = X(1:7)
+                        NrOfTrajSteps = kstep
                   END IF
 
-                  ! compute kinetic energy and total energy
-                  KinEnergy = EOM_KineticEnergy(Equilibration, V )
-                  TotEnergy = PotEnergy + KinEnergy
-                  IstTemperature = 2.0*KinEnergy/(MyConsts_K2AU*(nevo+3))
-
-                  ! every nprint steps, compute trapping and write debug output
-                  IF ( mod(n,nprint) == 0 ) THEN
-                     IF ( PrintType == DEBUG ) THEN
-                         WRITE(NWriteUnit,850) real(n)*dt/MyConsts_fs2AU, IstTemperature, &
-                         PotEnergy*MyConsts_Hartree2eV, KinEnergy*MyConsts_Hartree2eV,  TotEnergy*MyConsts_Hartree2eV
-                     END IF
-                  END IF
-                  850 FORMAT( F12.5, 5F15.8 )
-
-                  ! If the step is after 2.0/gamma time, store temperature averages
-                  IF ( n >= EquilibrInitAverage ) THEN
-                        NrOfEquilibrStepsAver = NrOfEquilibrStepsAver + 1
-                        ZHEquilibrium = ZHEquilibrium + ( X(3) - (X(5)+X(6)+X(7))/3.0 )
-                        IF ( PrintType >= FULL ) THEN
-                           EquilibrationAverage = EquilibrationAverage + IstTemperature
-                           EquilibrationVariance = EquilibrationVariance + IstTemperature**2
-                        ENDIF
-                        IF ( PrintType == EQUILIBRDBG ) THEN                     
-                           IF ( mod(n,10000) == 0 ) WRITE(567,* )  real(n)*dt/MyConsts_fs2AU, EquilibrationAverage/NrOfEquilibrStepsAver, &
-                                         sqrt((EquilibrationVariance/NrOfEquilibrStepsAver)-(EquilibrationAverage/NrOfEquilibrStepsAver)**2)
-                        ENDIF
-                  END IF
+               END IF 
 
             END DO
 
-            IF ( PrintType == DEBUG ) THEN
-               ! Close file to store equilibration
-               CLOSE( Unit=NWriteUnit )
-            ENDIF
-
-            ZHEquilibrium = ZHEquilibrium / NrOfEquilibrStepsAver
+            ! At the end of the propagation, write the xyz file of the trajectory, if requested
             IF ( PrintType >= FULL ) THEN
-               ! Compute average and standard deviation
-               EquilibrationAverage = EquilibrationAverage / NrOfEquilibrStepsAver 
-               EquilibrationVariance = (EquilibrationVariance/NrOfEquilibrStepsAver) - EquilibrationAverage**2
 
-               ! output message with average values
-               PRINT "(/,A)",                    " Equilibration completed! "
-               PRINT "(A,1F10.4,/,A,1F10.4,/)",  " Average temperature (K): ", EquilibrationAverage, &
-                                                 " Standard deviation (K):  ", sqrt(EquilibrationVariance), &
-                                                 " H Equilibrium Z (Ang):   ", ZHEquilibrium*MyConsts_Bohr2Ang
-            ENDIF
+               ! print the full trajectory as output file
+               WRITE(OutFileName,"(A,I4.4,A,I4.4,A)") "Traj_",jRho,"_",iTraj,".xyz"
+               CALL WriteTrajectoryXYZ( Trajectory(:,1:NrOfTrajSteps)*MyConsts_Bohr2Ang, OutFileName, &
+                                             GraphiteLatticeConstant()*MyConsts_Bohr2Ang )
 
+            END IF
+
+      END DO
+      
+      PRINT "(A)"," Done! "
+
+   END DO
+
+   ! pritn info about the average for the initial lattice condition
+   zav=zav/float(nevo*inum*(irho+1))
+   zsqav=zsqav/float(nevo*inum*(irho+1))
+   vav=vav/float(nevo*inum*(irho+1))
+   vsqav=vsqav/float(nevo*inum*(irho+1))
+
+   WRITE(*,"(/,A,/)") " * Average values for the initial lattice coordinates and velocities "
+   write(*,*) "average init zc=",zav * MyConsts_Bohr2Ang, " Ang"
+   write(*,*) "average init Vc=",0.5*zsqav*CarbonForceConstant() / MyConsts_K2AU,' K'
+   write(*,*) "average init vc=",vav, " au of velocity"
+   write(*,*) "average init Kc=",0.5*vsqav*rmc / MyConsts_K2AU,' K'
+   WRITE(*,"(/,/)")
+
+   DO kk=1,10
+      DO iStep=1,ntime
+         zcav(kk,iStep)=zcav(kk,iStep)/float(nprint*inum*(irho+1))
+         vz2av(kk,iStep)=vz2av(kk,iStep)/float(nprint*inum*(irho+1))
+         vz2av(kk,iStep)=0.5*rmc*vz2av(kk,iStep) / MyConsts_K2AU
+      END DO
+   END DO
+
+   PRINT*, " "
+   DO iStep=1,ntime
+      write(6,435) dt*real(iStep*nprint)/MyConsts_fs2AU, ( zcav(kk,iStep),  kk=1,10 )
+   END DO
+
+   PRINT*, " "
+   DO iStep=1,ntime
+      write(6,436) dt*real(iStep*nprint)/MyConsts_fs2AU, ( vz2av(kk,iStep), kk=1,10 )
+   END DO
+
+   ! write trapping data to mathematica file
+   open(unit=15,file='ptrap.nb',status='replace')
+   write(15,'(A6)') 'data={'
+   DO jRho=1,irho+1
+      write(15,'(A1)') '{'
+      DO iStep=1,ntime
+         IF(iStep.eq.ntime)THEN
+            write(15,'(F9.6)') ptrap(jRho,iStep)/inum
          END IF
+         IF(iStep.ne.ntime)THEN 
+            write(15,'(F9.6,A1)') ptrap(jRho,iStep)/inum,','
+         END IF
+      END DO
+      IF(jRho.ne.irho+1)THEN
+         write(15,'(A2)')'},'
+      END IF
+      IF(jRho.eq.irho+1)THEN
+         write(15,'(A2)') '};'
+      END IF
+   END DO
+   write(15,505)'ListPlot3D[data,ColorFunction->Hue,AxesLabel->', &
+         '{"Time(ps)","Reaction Parameter(b)","Ptrap(t,b)"},Boxed->False]'
+   CLOSE(15)
+
+   ! write cross section data 
+   write(6,*)'cross section vs time(ps):'
+
+   ! Cycle over analysis steps
+   DO iStep=1,ntime
+
+      ! integrate over rxn parameter
+      crscn(iStep)=0.0
+      DO jRho=1,irho+1
+         ImpactPar = 0.000001 + delrho * real(jRho-1) * MyConsts_Bohr2Ang
+         crscn(iStep)=crscn(iStep)+(ptrap(jRho,iStep)/float(inum))* ImpactPar
+      END DO
+      crscn(iStep) = 2.0* MyConsts_PI * delrho*MyConsts_Bohr2Ang * crscn(iStep)
+
+      ! print trapping p to file
+      write(6,605) dt*real(iStep*nprint)/MyConsts_fs2AU,  crscn(iStep)
+   END DO
+
+   435 FORMAT(1f6.3,10f7.3)
+   436 FORMAT(1f6.3,10f7.2)
+   505 FORMAT(A46,A63)
+   605 FORMAT(f8.4,3x,f10.5)
+
+
+
+   !****************************************************************************
+   ELSE IF (RunType == EQUILIBRIUM) THEN   
+   !****************************************************************************
+
+      ! ALLOCATE AND INITIALIZE THOSE DATA THAT WILL CONTAIN THE AVERAGES OVER 
+      ! THE SET OF TRAJECTORIES
+
+!       ALLOCATE( ZHinTime(nstep, inum) )
+      ! allocate arrays
+      ALLOCATE( DeltaZ(0:ntime), AverageDeltaZ(0:ntime) )
+      ALLOCATE( FreqGrid(0:ntime) )
+      ! frequency spacing
+      dOmega =  MyConsts_PI/( real(nstep) * dt )
+      ! initialize fourier coeffs
+      DO iOmega = 0, ntime
+         FreqGrid(iOmega) = MyConsts_I * (2.0*MyConsts_PI*real(iOmega)/real(ntime))
+      END DO
+
+
+      PRINT "(2/,A)",    "***************************************************"
+      PRINT "(A,F10.5)", "               EQUILIBRIUM SIMULATION"
+      PRINT "(A,/)" ,    "***************************************************"
+
+      PRINT "(A,I5,A)"," Running ", inum, " trajectories ... "
+      
+      !run inum number of trajectories at the current rxn parameter
+      DO iTraj = 1,inum
+      
+         PRINT "(/,A,I6,A)"," **** Trajectory Nr. ", iTraj," ****" 
+
+         !*************************************************************
+         ! INITIALIZATION OF THE COORDINATES AND MOMENTA OF THE SYSTEM
+         !*************************************************************
+
+         ! Set initial conditions
+         CALL ThermalEquilibriumConditions( X, V, temp, rmh, rmc )
+
+         PRINT "(/,A,F6.1)"," Equilibrating the initial conditions at T = ", temp / MyConsts_K2AU
+
+         IF ( PrintType == DEBUG ) THEN
+            ! Open file to store equilibration
+            WRITE(OutFileName,"(A,I4.4,A)") "Traj_",iTraj,".dat"
+            NWriteUnit = LookForFreeUnit()
+            OPEN( Unit=NWriteUnit, File=OutFileName )
+            WRITE( NWriteUnit, * ) "# EQUILIBRATION: time, temperature, potential, kinetic energy, total energy"
+         ENDIF
+
+         ! Nr of steps to average
+         NrOfStepsAver = 0
+         IF ( PrintType >= FULL ) THEN
+            ! Initialize temperature average and variance
+            TempAverage = 0.0
+            TempVariance = 0.0
+         ENDIF
+
+         ! Compute starting potential and forces
+         A(:) = 0.0
+         PotEnergy = VHSticking( X, A )
+         A(1:3) = A(1:3) / rmh
+         A(4:nevo+3) = A(4:nevo+3) / rmc
+
+         ! Do an equilibration run
+         DO iStep = 1, NrEquilibSteps
+
+               IF ( iStep == 1 ) THEN           ! If first step, previous acceleration are not available
+                  ! Store initial accelerations
+                  APre(:) = A(:)
+                  ! Propagate for one timestep with Velocity-Verlet and langevin thermostat
+                  CALL EOM_VelocityVerlet( Equilibration, X, V, A, VHSticking, PotEnergy )
+!                   CALL EOM_VelocityVerlet( Equilibration, X, V, A, VHarmonic, PotEnergy )
+               ELSE
+                  ! Propagate for one timestep with Beeman's method and langevin thermostat
+                  CALL EOM_Beeman( Equilibration, X, V, A, APre, VHSticking, PotEnergy )
+!                   CALL EOM_Beeman( Equilibration, X, V, A, APre, VHarmonic, PotEnergy )
+               END IF
+
+               ! compute kinetic energy and total energy
+               KinEnergy = EOM_KineticEnergy(Equilibration, V )
+               TotEnergy = PotEnergy + KinEnergy
+               IstTemperature = 2.0*KinEnergy/(MyConsts_K2AU*(nevo+3))
+
+               ! every nprint steps, compute trapping and write debug output
+               IF ( mod(iStep,nprint) == 0 ) THEN
+                  IF ( PrintType == DEBUG ) THEN
+                        WRITE(NWriteUnit,850) real(iStep)*dt/MyConsts_fs2AU, IstTemperature, &
+                        PotEnergy*MyConsts_Hartree2eV, KinEnergy*MyConsts_Hartree2eV,  TotEnergy*MyConsts_Hartree2eV
+                  END IF
+               END IF
+               850 FORMAT( F12.5, 5F15.8 )
+
+               ! If the step is after 2.0/gamma time, store temperature averages
+               IF ( iStep >= EquilibrInitAverage ) THEN
+                     NrOfStepsAver = NrOfStepsAver + 1
+                     IF ( PrintType >= FULL ) THEN
+                        TempAverage = TempAverage + IstTemperature
+                        TempVariance = TempVariance + IstTemperature**2
+                     ENDIF
+                     IF ( PrintType == EQUILIBRDBG ) THEN                     
+                        IF ( mod(iStep,10000) == 0 ) WRITE(567,* )  real(iStep)*dt/MyConsts_fs2AU, TempAverage/NrOfStepsAver, &
+                                       sqrt((TempVariance/NrOfStepsAver)-(TempAverage/NrOfStepsAver)**2)
+                     ENDIF
+               END IF
+
+         END DO
+
+         IF ( PrintType == DEBUG ) THEN
+            ! Close file to store equilibration
+            CLOSE( Unit=NWriteUnit )
+         ENDIF
+
+         IF ( PrintType >= FULL ) THEN
+            ! Compute average and standard deviation
+            TempAverage = TempAverage / NrOfStepsAver 
+            TempVariance = (TempVariance/NrOfStepsAver) - TempAverage**2
+
+            ! output message with average values
+            PRINT "(/,A)",                    " Equilibration completed! "
+            PRINT "(A,1F10.4,/,A,1F10.4,/)",  " Average temperature (K): ", TempAverage, &
+                                              " Standard deviation (K):  ", sqrt(TempVariance)
+         ENDIF
+
 
          !*************************************************************
          ! INFORMATION ON INITIAL CONDITIONS, INITIALIZATION, OTHER...
          !*************************************************************
 
-         IF (RunType == SCATTERING) THEN         ! in case of scattering simulation
-
-            ! increment average values for the initial lattice condition
-            DO nn=1,nevo
-               zav=zav+z(nn)
-               zsqav=zsqav+z(nn)**2
-               vav=vav+vzc(nn)
-               vsqav=vsqav+vzc(nn)**2
-            END DO
-
-            DO nn=1,121
-               zsum(nn)=0.0
-               vzsum(nn)=0.0
-            END DO
-
-            ! compute potential, and total energy
-            CALL ComputePotential( xh, yh, zh, z, vv, axh, ayh, azh, azc )
-            entot = vv + KineticEnergy() 
-
-         ELSE IF (RunType == EQUILIBRIUM) THEN    ! in case of thermal equilibrium simulation
-
-            ! Compute starting potential and forces
-            PotEnergy = VHSticking( X, A )
-            A(1:3) = A(1:3) / rmh
-            A(4:nevo+3) = A(4:nevo+3) / rmc
-!             CALL ComputePotential( xh, yh, zh, z, vv, axh, ayh, azh, azc )
-            ! Compute kinetic energy and total energy
-            KinEnergy = EOM_KineticEnergy( MolecularDynamics, V )
-            TotEnergy = PotEnergy + KinEnergy
-            IstTemperature = 2.0*KinEnergy/(MyConsts_K2AU*(nevo+3))
-            
-            ! PRINT INITIAL CONDITIONS of THE TRAJECTORY
-            IF ( PrintType >= FULL ) THEN
-               WRITE(*,600)  PotEnergy*MyConsts_Hartree2eV, KinEnergy*MyConsts_Hartree2eV, &
-                             TotEnergy*MyConsts_Hartree2eV, IstTemperature
-               600 FORMAT (/, " Initial condition of the MD trajectory ",/   &
-                              " * Potential Energy (eV)        ",1F10.4,/    &
-                              " * Kinetic Energy (eV)          ",1F10.4,/    &
-                              " * Total Energy (eV)            ",1F10.4,/    &
-                              " * Istantaneous temperature (K) ",1F10.4,/ ) 
-            END IF
-
-            ! INITIALIZE THE RELEVANT VARIABLES FOR THE SINGLE TRAJECTORY AVERAGE
-            IF ( PrintType >= FULL ) THEN
-               TempAverage = 0.0      ! Temperature
-               TempVariance = 0.0
-               HAverage(:) = 0.0      ! H position
-               HVariance(:) = 0.0
-               C1Average = 0.0        ! C1 position
-               C1Variance = 0.0
-            ENDIF
-
-            IF ( PrintType == DEBUG ) THEN
-               ! Open file to store trajectory information
-               WRITE(OutFileName,"(A,I4.4,A)") "Traj_",i,".dat"
-               NWriteUnit = LookForFreeUnit()
-               OPEN( Unit=NWriteUnit, File=OutFileName, Position="APPEND" )
-               WRITE( NWriteUnit, "(/,A)" ) "# TRAJECTORY "
-            ENDIF
-
+         ! Compute starting potential and forces
+         PotEnergy = VHSticking( X, A )
+         A(1:3) = A(1:3) / rmh
+         A(4:nevo+3) = A(4:nevo+3) / rmc
+         ! Compute kinetic energy and total energy
+         KinEnergy = EOM_KineticEnergy( MolecularDynamics, V )
+         TotEnergy = PotEnergy + KinEnergy
+         IstTemperature = 2.0*KinEnergy/(MyConsts_K2AU*(nevo+3))
+         
+         ! PRINT INITIAL CONDITIONS of THE TRAJECTORY
+         IF ( PrintType >= FULL ) THEN
+            WRITE(*,600)  PotEnergy*MyConsts_Hartree2eV, KinEnergy*MyConsts_Hartree2eV, &
+                           TotEnergy*MyConsts_Hartree2eV, IstTemperature
+            600 FORMAT (/, " Initial condition of the MD trajectory ",/   &
+                           " * Potential Energy (eV)        ",1F10.4,/    &
+                           " * Kinetic Energy (eV)          ",1F10.4,/    &
+                           " * Total Energy (eV)            ",1F10.4,/    &
+                           " * Istantaneous temperature (K) ",1F10.4,/ ) 
          END IF
 
+         ! Initialize the variables for the trajectory averages
+         IF ( PrintType >= FULL ) THEN
+            TempAverage = 0.0      ! Temperature
+            TempVariance = 0.0
+            HPosAverage(:) = 0.0      ! H position
+            HPosVariance(:) = 0.0
+            C1Average = 0.0        ! C1 position
+            C1Variance = 0.0
+         ENDIF
+
+         IF ( PrintType == DEBUG ) THEN
+            ! Open file to store trajectory information
+            WRITE(OutFileName,"(A,I4.4,A)") "Traj_",iTraj,".dat"
+            NWriteUnit = LookForFreeUnit()
+            OPEN( Unit=NWriteUnit, File=OutFileName, Position="APPEND" )
+            WRITE( NWriteUnit, "(/,A)" ) "# TRAJECTORY "
+         ENDIF
 
          !*************************************************************
          !         TIME EVOLUTION OF THE TRAJECTORY
@@ -448,78 +597,62 @@ PROGRAM JK6
          ! initialize counter for printing steps
          kstep=0
 
+         DeltaZ(:) = 0.0
+         GraphitePlaneZ = AverageCluster(X(4:))
+         DeltaZ(0) = X(3) - GraphitePlaneZ
+
          ! cycle over nstep velocity verlet iterations
-         DO n = 1,nstep
+         DO iStep = 1,nstep
 
-            ! propagate the traj
-            IF (RunType == SCATTERING) THEN
+            ! Propagate for one timestep
+            CALL EOM_VelocityVerlet( MolecularDynamics, X, V, A, VHSticking, PotEnergy )
+!             CALL EOM_VelocityVerlet( MolecularDynamics, X, V, A, VHarmonic, PotEnergy )
 
-                  ! if scattering simulation, propagate only if in the interaction region
-                  IF ( zh <= zhi )   CALL VelocityVerlet(  )
+            ! Compute kin energy and temperature
+            KinEnergy = EOM_KineticEnergy( MolecularDynamics, V )
+            TotEnergy = PotEnergy + KinEnergy
+            IstTemperature = 2.0*KinEnergy/(MyConsts_K2AU*(nevo+3))
+            
+            ! Compute the reference position of the graphite plane
+            GraphitePlaneZ = AverageCluster(X(4:))
 
-                  ! compute average values of the carbon positions
-                  DO nn = 1,121
-                     zsum(nn)=zsum(nn)+z(nn)
-                     vzsum(nn)=vzsum(nn)+vzc(nn)**2
-                  END DO
+            ! Store ZH-ZHeq for the autocorrelation function
+!             ZHinTime(iStep, iTraj) = X(3) - GraphitePlaneZ
+!            ZHinTime = X(3) - GraphitePlaneZ
+            ZHinTime = X(3) - X(4)
 
-            ELSE IF (RunType == EQUILIBRIUM) THEN
+            ! Necessary averages that are always computed
+            HPosAverage(3)  = HPosAverage(3)  +   ZHinTime   ! H Z Coordinate
+            HPosVariance(3) = HPosVariance(3) + ( ZHinTime )**2
+            
+            ! These averages  are computed only for a full output
+            IF ( PrintType >= FULL ) THEN
+               TempAverage = TempAverage + IstTemperature                     ! Temperature
+               TempVariance = TempVariance + IstTemperature**2
+               DO iCoord = 1, 2                                               ! H X and Y Coordinates
+                  HPosAverage(iCoord)  = HPosAverage(iCoord)  + X(iCoord)
+                  HPosVariance(iCoord) = HPosVariance(iCoord) + X(iCoord)**2
+               END DO
+               C1Average  = C1Average  + (X(4) - GraphitePlaneZ)              ! C1 Z Coordinate
+               C1Variance = C1Variance + (X(4) - GraphitePlaneZ)**2
+            ENDIF
 
-                  ! Propagate for one timestep
-                  CALL EOM_VelocityVerlet( MolecularDynamics, X, V, A, VHSticking, vv )
-!                   CALL VelocityVerlet(  )
-
-                  ! Compute kin energy and temperature
-                  PotEnergy = vv
-                  KinEnergy = EOM_KineticEnergy( MolecularDynamics, V )
-                  TotEnergy = PotEnergy + KinEnergy
-                  IstTemperature = 2.0*KinEnergy/(MyConsts_K2AU*(nevo+3))
-                  
-                  ! Store ZH-ZHeq for the autocorrelation function
-                  ZHinTime(n, i) = X(3) ! ( X(3) - (X(5)+X(6)+X(7))/3.0 ) - ZHEquilibrium
-                  
-                  ! Increment variables for averages
-                  IF ( PrintType >= FULL ) THEN
-                     TempAverage = TempAverage + IstTemperature
-                     TempVariance = TempVariance + IstTemperature**2
-                     DO iCoord = 1, 2 
-                        HAverage(iCoord) = HAverage(iCoord) + X(iCoord)
-                        HVariance(iCoord) = HVariance(iCoord) + X(iCoord)**2
-                     END DO
-                     HAverage(3) = HAverage(3) + X(3)-X(4)
-                     HVariance(3) = HVariance(3) + ( X(3)-X(4) )**2
-                     C1Average = C1Average + (X(4) - (X(5)+X(6)+X(7))/3.0)
-                     C1Variance = C1Variance + (X(4) - (X(5)+X(6)+X(7))/3.0)**2
-                  ENDIF
-                  
-            END IF
-
-            ! every nprint steps, compute trapping and write output
-            IF ( mod(n,nprint) == 0 ) THEN
+            ! output to write every nprint steps 
+            IF ( mod(iStep,nprint) == 0 ) THEN
 
                ! increment counter for printing steps
                kstep=kstep+1
 
-               IF (RunType == SCATTERING) THEN
+               DeltaZ(kstep) = ZHinTime
 
-                  ! check if H is in the trapping region
-                  IF ( zh <= AdsorpLimit ) ptrap(j,kstep) = ptrap(j,kstep)+1.0
-
-                  ! average lattice velocity
-                  CALL lattice( kstep )
-
-               ELSE IF (RunType == EQUILIBRIUM) THEN
-
-                  ! If massive level of output, print traj information to std out
-                  IF ( PrintType == DEBUG ) THEN
-                     WRITE(NWriteUnit,800) dt*real(n)/MyConsts_fs2AU, PotEnergy*MyConsts_Hartree2eV,  &
-                         KinEnergy*MyConsts_Hartree2eV, TotEnergy*MyConsts_Hartree2eV, IstTemperature                    
-                     WRITE(NWriteUnit,801)  dt*real(n)/MyConsts_fs2AU, X(1:5)*MyConsts_Bohr2Ang,  &
-                             X(8)*MyConsts_Bohr2Ang, X(14)*MyConsts_Bohr2Ang, X(17)*MyConsts_Bohr2Ang
-                     800 FORMAT("T= ",F12.5," V= ",1F15.8," K= ",1F15.8," E= ",1F15.8," Temp= ", 1F15.8)
-                     801 FORMAT("T= ",F12.5," COORDS= ", 8F8.4)
-                  END IF
-
+               ! If massive level of output, print traj information to std out
+               IF ( PrintType == DEBUG ) THEN
+                  WRITE(NWriteUnit,800) dt*real(iStep)/MyConsts_fs2AU, PotEnergy*MyConsts_Hartree2eV,  &
+                        KinEnergy*MyConsts_Hartree2eV, TotEnergy*MyConsts_Hartree2eV, IstTemperature                    
+                  WRITE(NWriteUnit,801)  dt*real(iStep)/MyConsts_fs2AU, X(1:5)*MyConsts_Bohr2Ang,  &
+                           X(8)*MyConsts_Bohr2Ang, X(14)*MyConsts_Bohr2Ang, X(17)*MyConsts_Bohr2Ang
+                  800 FORMAT("T= ",F12.5," V= ",1F15.8," K= ",1F15.8," E= ",1F15.8," Temp= ", 1F15.8)
+                  801 FORMAT("T= ",F12.5," COORDS= ", 8F8.4)
                END IF
 
                ! Store the trajectory for XYZ printing
@@ -528,30 +661,59 @@ PROGRAM JK6
                      NrOfTrajSteps = kstep
                END IF
 
+!                DO iOmega = 1, ntime
+! !                   FourierTrasf(iOmega) = FourierTrasf(iOmega) + ZHinTime(iStep, iTraj) * exp( MyConsts_I * (iStep*dt) * FreqGrid(iOmega))
+!                   FourierTrasf(iOmega) = FourierTrasf(iOmega) + ZHinTime * cos( (iStep*dt) * FreqGrid(iOmega))
+!                END DO
+
             END IF 
+
+
 
          END DO
 
-         ! At the end of the propagation, write the xyz file of the trajectory, if requested
+         ! Compute ZH averages and correct the array with deltaZ vs time
+         HPosAverage(3)  = HPosAverage(3) / nstep
+         HPosVariance(3) = (HPosVariance(3) / nstep) - ( HPosAverage(3) )**2
+         DeltaZ(:) = DeltaZ(:) -  HPosAverage(3)
+
+         
+         DO iStep = 0, ntime
+               WRITE(888,*)  dt*real(nprint*iStep)/MyConsts_fs2AU,  real(DeltaZ(iStep)), aimag(DeltaZ(iStep))         
+         END DO
+         WRITE(888,*)  " "
+
+         ! Fourier transform
+         CALL DiscreteFourier( DeltaZ )
+
+         ! Print fourier
+         DO iOmega = 0, ntime
+               WRITE(889,*)  iOmega*dOmega*MyConsts_fs2AU,  abs(DeltaZ(iOmega))         
+         END DO
+         WRITE(889,*)  " "
+
+         ! Store average
+         AverageDeltaZ(:) = AverageDeltaZ(:) + abs(DeltaZ(:))**2
+
          IF ( PrintType >= FULL ) THEN
 
-            ! print the full trajectory as output file
-            WRITE(OutFileName,"(A,I4.4,A,I4.4,A)") "Traj_",j,"_",i,".xyz"
+            ! write the xyz file of the trajectory, if requested
+            WRITE(OutFileName,"(A,I4.4,A,I4.4,A)") "Traj_",iTraj,".xyz"
             CALL WriteTrajectoryXYZ( Trajectory(:,1:NrOfTrajSteps)*MyConsts_Bohr2Ang, OutFileName, &
                                             GraphiteLatticeConstant()*MyConsts_Bohr2Ang )
 
             ! Divide averages for number of time steps and compute variances
-            TempAverage = TempAverage / nstep
+            TempAverage  = TempAverage  / nstep
             TempVariance = TempVariance / nstep - TempAverage**2
-            HAverage(:) = HAverage(:) / nstep
-            HVariance(1) = HVariance(1) / nstep - HAverage(1)**2
-            HVariance(2) = HVariance(2) / nstep - HAverage(2)**2
-            HVariance(3) = HVariance(3) / nstep - HAverage(3)**2
-            C1Average = C1Average / nstep
+            HPosAverage(1) = HPosAverage(1) / nstep
+            HPosAverage(2) = HPosAverage(2) / nstep
+            HPosVariance(1) = HPosVariance(1) / nstep - HPosAverage(1)**2
+            HPosVariance(2) = HPosVariance(2) / nstep - HPosAverage(2)**2
+            C1Average  = C1Average  / nstep
             C1Variance = C1Variance / nstep - C1Average**2        
                                             
             ! And print the average values of that trajectory 
-            WRITE(*,700)  TempAverage, sqrt(TempVariance), HAverage(:)* MyConsts_Bohr2Ang, sqrt(HVariance(:))* MyConsts_Bohr2Ang, &
+            WRITE(*,700)  TempAverage, sqrt(TempVariance), HPosAverage(:)* MyConsts_Bohr2Ang, sqrt(HPosVariance(:))* MyConsts_Bohr2Ang, &
                           C1Average* MyConsts_Bohr2Ang, sqrt(C1Variance)* MyConsts_Bohr2Ang
             700 FORMAT (/, " Time propagation completed! ",/   &
                            " * Average temperature (K)        ",1F10.4,/    &
@@ -563,7 +725,7 @@ PROGRAM JK6
                                                 
          END IF
 
-         IF ( (RunType == EQUILIBRIUM) .AND. ( PrintType == DEBUG ) ) THEN
+         IF ( PrintType == DEBUG ) THEN
                ! Close file to store equilibration
                CLOSE( Unit=NWriteUnit )
          ENDIF
@@ -572,94 +734,38 @@ PROGRAM JK6
       
       PRINT "(A)"," Done! "
 
-   END DO
-
-   !*************************************************************
-   !         OUTPUT OF THE RELEVANT AVERAGES 
-   !*************************************************************
-   
-   IF (RunType == SCATTERING) THEN
-            
-         ! pritn info about the average for the initial lattice condition
-         zav=zav/float(nevo*inum*(irho+1))
-         zsqav=zsqav/float(nevo*inum*(irho+1))
-         vav=vav/float(nevo*inum*(irho+1))
-         vsqav=vsqav/float(nevo*inum*(irho+1))
-
-         WRITE(*,"(/,A,/)") " * Average values for the initial lattice coordinates and velocities "
-         write(*,*) "average init zc=",zav * MyConsts_Bohr2Ang, " Ang"
-         write(*,*) "average init Vc=",0.5*zsqav*CarbonForceConstant() / MyConsts_K2AU,' K'
-         write(*,*) "average init vc=",vav, " au of velocity"
-         write(*,*) "average init Kc=",0.5*vsqav*rmc / MyConsts_K2AU,' K'
-         WRITE(*,"(/,/)")
-
-         DO kk=1,10
-            DO nn=1,ntime
-               zcav(kk,nn)=zcav(kk,nn)/float(nprint*inum*(irho+1))
-               vz2av(kk,nn)=vz2av(kk,nn)/float(nprint*inum*(irho+1))
-               vz2av(kk,nn)=0.5*rmc*vz2av(kk,nn) / MyConsts_K2AU
-            END DO
-         END DO
-
-         PRINT*, " "
-         DO ipt=1,ntime
-            write(6,435) dt*real(n)/MyConsts_fs2AU,(zcav(kk,ipt),kk=1,10)
-         END DO
-
-         PRINT*, " "
-         DO ipt=1,ntime
-            write(6,436) dt*real(n)/MyConsts_fs2AU,(vz2av(kk,ipt),kk=1,10)
-         END DO
-
-         ! write trapping data to mathematica file
-         open(unit=15,file='ptrap.nb',status='replace')
-         write(15,'(A6)') 'data={'
-         DO nrho=1,irho+1
-            write(15,'(A1)') '{'
-            DO lpt=1,ntime
-               IF(lpt.eq.ntime)THEN
-                  write(15,'(F9.6)') ptrap(nrho,lpt)/inum
-               END IF
-               IF(lpt.ne.ntime)THEN 
-                  write(15,'(F9.6,A1)') ptrap(nrho,lpt)/inum,','
-               END IF
-            END DO
-            IF(nrho.ne.irho+1)THEN
-               write(15,'(A2)')'},'
-            END IF
-            IF(nrho.eq.irho+1)THEN
-               write(15,'(A2)') '};'
-            END IF
-         END DO
-         write(15,505)'ListPlot3D[data,ColorFunction->Hue,AxesLabel->', &
-               '{"Time(ps)","Reaction Parameter(b)","Ptrap(t,b)"},Boxed->False]'
-         CLOSE(15)
-
-         ! write cross section data 
-         write(6,*)'cross section vs time(ps):'
-         DO ipt=1,ntime
-            crscn(ipt)=0.0
-            ! integrate over rxn parameter
-            DO jrho=1,irho+1
-               rho=0.000001 + delrho * real(jrho-1) * MyConsts_Bohr2Ang
-               crscn(ipt)=crscn(ipt)+(ptrap(jrho,ipt)/float(inum))*rho
-            END DO
-            crscn(ipt) = 2.0* MyConsts_PI * delrho*MyConsts_Bohr2Ang * crscn(ipt)
-            write(6,605) dt*real(ipt*nprint)/MyConsts_fs2AU,  crscn(ipt)
-         END DO
-
-         435 FORMAT(1f6.3,10f7.3)
-         436 FORMAT(1f6.3,10f7.2)
-         505 FORMAT(A46,A63)
-         605 FORMAT(f8.4,3x,f10.5)
-
-   ELSE IF (RunType == EQUILIBRIUM) THEN
-
-      DO i = 1, inum, 50
-         CALL PrintCorrelation( ZHinTime, i )
-      END DO
-      CALL PrintCorrelation( ZHinTime, inum )
+      !*************************************************************
+      !         OUTPUT OF THE RELEVANT AVERAGES 
+      !*************************************************************
       
+      AverageDeltaZ(:) = AverageDeltaZ(:) / real(inum )
+
+      ! Print fourier
+      DO iOmega = 0, ntime
+            WRITE(891,*)  iOmega*dOmega*MyConsts_fs2AU,  AverageDeltaZ(iOmega)         
+      END DO
+      WRITE(891,*)  " "
+
+      DeltaZ(:) = AverageDeltaZ(:)
+      CALL DiscreteInverseFourier(DeltaZ)
+
+      DO iStep = (ntime/2)+1, ntime
+         WRITE(890,*)  dt*real(nprint*(iStep-ntime-1))/MyConsts_fs2AU,  real(DeltaZ(iStep)), aimag(DeltaZ(iStep))         
+      END DO
+      DO iStep = 0, ntime/2
+         WRITE(890,*)  dt*real(nprint*iStep)/MyConsts_fs2AU,  real(DeltaZ(iStep)), aimag(DeltaZ(iStep))         
+      END DO
+      WRITE(890,*)  " "
+
+!       DO iTraj = 1, inum, 50
+!          CALL PrintCorrelation( ZHinTime, iTraj )
+!             
+!    !          DO n = 1, size( ZHinTime, 1 )
+!    !             WRITE(879,*) dt*real(n)/MyConsts_fs2AU, ZHinTime(n,i)
+!    !          END DO
+!       END DO
+!       CALL PrintCorrelation( ZHinTime, inum )
+         
    END IF
 
 
@@ -667,68 +773,6 @@ PROGRAM JK6
 
 !****************************************************************************************************************
 
-   SUBROUTINE HInitScattering( ImpPar, Z, IncEnergy )
-      IMPLICIT NONE
-      REAL, INTENT(IN) :: ImpPar, Z, IncEnergy
-
-      ! Parallel position
-      xh = ImpPar
-      yh = 0.000001
-      ! Parallel velocity
-      vxh = 0.0
-      vyh = 0.0
-      ! Perpendicular position and velocity
-      zh = Z
-      vzh = - sqrt( 2.0* IncEnergy / rmh )
-
-!       HInitScatterin(1) = 0.000001+delrho*float(j-1)
-!       HInitScatterin(3) = zhi
-!       HInitScatterin(6) = -sqrt(2.0*ezh/(ev_tu*rmh))
-
-   END SUBROUTINE HInitScattering
-
-!****************************************************************************************************************
-
-   SUBROUTINE LatticeInitialCondition( Temperature )
-      IMPLICIT NONE
-
-      REAL, INTENT(IN) :: Temperature
-      ! NO NEED for T <-> E conversion factor: T is already in Hartree!
-
-      INTEGER :: nn
-      REAL :: stdevz, stdevp
-      REAL :: gaus1, gaus2, gvar1, gvar2, gr1, gr2, gs1, gs2
-
-      ! standard deviation of the position distribution
-      stdevz = sqrt( Temperature / CarbonForceConstant() )
-      ! standard deviation of the momentum distribution
-      stdevp = sqrt( rmc * Temperature )
-
-      DO nn = 1,121
-         z(nn)   = 0.0
-         vzc(nn) = 0.0
-      END DO
-
-      DO nn=1,nevo
-         DO 
-            call random_number(gaus1)
-            call random_number(gaus2)
-            gvar1=2.0*gaus1-1
-            gvar2=2.0*gaus2-1
-            gr1=gvar1**2+gvar2**2
-            IF (gr1 < 1.0) EXIT 
-         END DO
-
-         gr2=sqrt(-2.0*alog(gr1)/gr1)
-         gs1=gvar1*gr2
-         gs2=gvar2*gr2
-         z(nn)=stdevz*gs1
-         vzc(nn)=stdevp*gs2/rmc
-      END DO
-
-   END SUBROUTINE LatticeInitialCondition
-
-!****************************************************************************************************************
 
    SUBROUTINE lattice( kstep )
       IMPLICIT NONE
@@ -757,83 +801,11 @@ PROGRAM JK6
       vz2av(9,kstep)=vz2av(9,kstep)+(vzsum(86)+vzsum(87)+vzsum(88)+vzsum(89)+vzsum(90)+vzsum(91))/6.0
       vz2av(10,kstep)=vz2av(10,kstep)+(vzsum(116)+vzsum(117)+vzsum(118)+vzsum(119)+vzsum(120)+vzsum(121))/6.0
 
-      DO nn = 1, 121
-         zsum(nn)  = 0.0
-         vzsum(nn) = 0.0
-      END DO
+      zsum(:)  = 0.0
+      vzsum(:) = 0.0
 
    END SUBROUTINE lattice
 
-! *****************************************************************************************
-   ! IF the optional argument is given, a Langevin thermostat is added to the system
-   SUBROUTINE VelocityVerlet( )
-      IMPLICIT NONE
-         REAL, DIMENSION(124) :: Position, Acceleration
-         INTEGER :: jDoF
-
-         ! (1) FULL TIME STEP FOR THE POSITIONS
-         xh=xh+vxh*dt+0.5*axh*(dt**2)
-         yh=yh+vyh*dt+0.5*ayh*(dt**2)
-         zh=zh+vzh*dt+0.5*azh*(dt**2)
-         DO nn=1,nevo
-            z(nn)=z(nn)+vzc(nn)*dt+0.5*azc(nn)*(dt**2)
-         END DO
-
-         ! (2) HALF TIME STEP FOR THE VELOCITIES
-         vxh=vxh+0.5*axh*dt
-         vyh=vyh+0.5*ayh*dt
-         vzh=vzh+0.5*azh*dt
-         DO nn = 1,nevo
-            vzc(nn)=vzc(nn)+0.5*azc(nn)*dt
-         END DO
-
-         ! (3) NEW FORCES AND ACCELERATIONS 
-         Position(1) = xh
-         Position(2) = yh
-         Position(3) = zh
-         Acceleration(1) = axh
-         Acceleration(2) = ayh
-         Acceleration(3) = azh
-         DO jDoF = 1, 121
-            Position(3+jDoF) = z(jDoF)
-            Acceleration(3+jDoF) = azc(jDoF)
-         END DO            
-         vv = VHSticking( Position, Acceleration )  
-         xh = Position(1)
-         yh = Position(2)
-         zh = Position(3)
-         axh = Acceleration(1) / rmh
-         ayh = Acceleration(2) / rmh
-         azh = Acceleration(3) / rmh
-         DO jDoF = 1, 121
-            z(jDoF) = Position(3+jDoF)
-            azc(jDoF) = Acceleration(3+jDoF) /  rmc
-         END DO                 
-!        CALL ComputePotential( xh, yh, zh, z, vv, axh, ayh, azh, azc )
-
-         ! (4) HALF TIME STEP AGAIN FOR THE VELOCITIES
-         vxh=vxh+0.5*axh*dt
-         vyh=vyh+0.5*ayh*dt
-         vzh=vzh+0.5*azh*dt
-         DO nn = 1,nevo
-            vzc(nn)=vzc(nn)+0.5*azc(nn)*dt
-         END DO
-
-   END SUBROUTINE VelocityVerlet
-
-!****************************************************************************************************************
-
-   REAL FUNCTION KineticEnergy()
-      IMPLICIT NONE
-
-         KineticEnergy = 0.5 * rmh * (vzh**2+vyh**2+vxh**2)
-         DO nn = 1,nevo
-            KineticEnergy = KineticEnergy + 0.5 * rmc * vzc(nn)**2
-         END DO
-
-   END FUNCTION KineticEnergy
-
-!****************************************************************************************************************
 
 !*******************************************************************************
 ! WriteTrajectoryXYZ
@@ -887,7 +859,8 @@ PROGRAM JK6
       
       INTEGER :: NrOfTStep, iStep, iTraj, OutUnit
       REAL :: Correlation
-      CHARACTER(100) :: FileName
+      CHARACTER(100) :: FileName, WarnMessage
+      LOGICAL, DIMENSION( NrOfTraj ) :: TrajIsOK
       
       NrOfTStep = size( ZArray, 1 )
       CALL ERROR( NrOfTraj > size( ZArray, 2 ), "PrintCorrelation: wrong trajectories number " )
@@ -895,19 +868,96 @@ PROGRAM JK6
       OutUnit = LookForFreeUnit()
       WRITE(FileName,"(A,I4.4,A)") "Correlation_",NrOfTraj,".dat"
       OPEN( Unit=OutUnit, File=FileName )
+
+      DO iTraj = 1, NrOfTraj
+         TrajIsOK( iTraj ) = .TRUE.
+         TStepCycle: DO iStep = 1, NrOfTStep
+            IF ( abs(ZArray(iStep, iTraj)) > 5.0 )  THEN
+               TrajIsOK( iTraj ) = .FALSE.
+               WRITE(WarnMessage, *) " Excluding trajectory ",iTraj," from autocorrelation average "
+               CALL ShowWarning( WarnMessage )
+               EXIT TStepCycle
+            END IF
+         END DO TStepCycle
+      END DO
       
       DO iStep = 1, NrOfTStep
           Correlation = 0.0
           DO iTraj = 1, NrOfTraj
-             Correlation = Correlation + ZArray(1, iTraj)*ZArray(iStep, iTraj)
+             IF ( TrajIsOK( iTraj ) ) Correlation = Correlation + ZArray(1, iTraj)*ZArray(iStep, iTraj)
           END DO
-          Correlation = Correlation / NrOfTraj
+          Correlation = Correlation / COUNT( TrajIsOK )
           WRITE(OutUnit,*) dt*real(iStep-1)/MyConsts_fs2AU, Correlation
       END DO
       
       CLOSE(OutUnit)
       
    END SUBROUTINE PrintCorrelation
+
+   REAL FUNCTION AverageCluster( Z )
+      IMPLICIT NONE
+      REAL, DIMENSION(:), INTENT(IN) :: Z
+
+      INTEGER :: k
+
+      IF (nevo == 121) THEN
+         AverageCluster = Z(82)+Z(83)+Z(84)
+         DO k = 96,101
+            AverageCluster =   AverageCluster + Z(k)
+         END DO
+         DO k = 104,121
+            AverageCluster =   AverageCluster + Z(k)
+         END DO
+         AverageCluster = AverageCluster / real(27)
+      ELSE 
+         AverageCluster = 0.0
+      ENDIF
+
+   END FUNCTION AverageCluster
+
+   SUBROUTINE DiscreteFourier( Vector )
+      IMPLICIT NONE
+      COMPLEX, DIMENSION(:), INTENT(INOUT) :: Vector
+      COMPLEX, DIMENSION(size(Vector)) :: Transform
+      INTEGER :: N, i, j
+      COMPLEX :: Factor
+
+      N = size( Vector )
+
+      Transform(:) = 0.0
+
+      DO i = 0, N-1
+         Factor = 2.0 * MyConsts_I * MyConsts_PI * real(i) / real(N)
+         DO j = 0, N-1
+            Transform(i+1) = Transform(i+1) + Vector(j+1) * exp( Factor * real(j) )
+         END DO
+      END DO
+
+      Vector(:) = Transform(:) / (N-1)
+
+   END SUBROUTINE
+
+   SUBROUTINE DiscreteInverseFourier( Vector )
+      IMPLICIT NONE
+      COMPLEX, DIMENSION(:), INTENT(INOUT) :: Vector
+      COMPLEX, DIMENSION(size(Vector)) :: Transform
+      INTEGER :: N, i, j
+      COMPLEX :: Factor
+
+      N = size( Vector )
+
+      Transform(:) = 0.0
+
+      DO i = 0, N-1
+         Factor = - MyConsts_I * 2.0 * MyConsts_PI * real(i) / real(N)
+         DO j = 0, N-1
+            Transform(i+1) = Transform(i+1) + Vector(j+1) * exp( Factor * real(j) )
+         END DO
+      END DO
+
+      Vector(:) = Transform(:)
+
+   END SUBROUTINE
 
 !****************************************************************************************************************
 

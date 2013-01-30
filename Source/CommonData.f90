@@ -63,42 +63,35 @@ MODULE CommonData
    REAL, DIMENSION(:), SAVE, ALLOCATABLE :: A    ! Acceleration at ginve timestep
    REAL, DIMENSION(:), SAVE, ALLOCATABLE :: APre ! Acceleration from the previous time step
 
+   ! ISTANTANEOUS PROPERTIES
+
+   REAL  :: KinEnergy                   ! Kinetic energy
+   REAL  :: PotEnergy                   ! Potential energy
+   REAL  :: TotEnergy                   ! Total energy
+   REAL  :: IstTemperature              ! Istantaneous temperature
+   REAL  :: GraphitePlaneZ              ! Estimate on the reference Z for the slab
+
+   ! TRAJECTORY AVERAGES
+
+   INTEGER :: NrOfStepsAver             ! Number of steps of the average computation
+   REAL  :: TempAverage                 ! To accumulate average temperature over time
+   REAL  :: TempVariance                ! To accumulate squared temperature over time
+   REAL, DIMENSION(3) :: HPosAverage    ! To accumulate average displacement of the H atom
+   REAL, DIMENSION(3) :: HPosVariance   ! To accumulate squared displacement of the H atom
+   REAL  :: C1Average                   ! To accumulate average displacement of the C1 atom
+   REAL  :: C1Variance                  ! To accumulate squared displacement of the C1 atom
+
    ! OTHER DATA
      
    REAL, DIMENSION(:,:), ALLOCATABLE :: Trajectory   ! Real array to store a trajectory for XYZ printing
    INTEGER :: NrOfTrajSteps                          ! Nr of snapshot in the trajectory
+   REAL :: ImpactPar                                 ! impact parameter of H in scattering calculations
+   REAL, DIMENSION(:,:), ALLOCATABLE :: ptrap        ! Variable to store trapping probability, resolved in time and in rho
 
    
+
+
    !********************************************************************
    
-!> \name POSITIONS
-!> Positions of the atoms
-!> @{
-   REAL, SAVE :: xh, yh, zh           !< X,Y,Z positions of the H atom
-   REAL, DIMENSION(121), SAVE :: z    !< Z positions of the C atoms
-!> @}
-
-!> \name VELOCITIES
-!> Positions of the atoms
-!> @{
-   REAL, SAVE :: vxh, vyh, vzh        !< X,Y,Z velocity of the H atom
-   REAL, DIMENSION(121), SAVE :: vzc  !< Z velocity of the C atoms
-!> @}
-
-!> \name ACCELERATIONS
-!> Positions of the atoms
-!> @{
-   REAL, SAVE :: axh, ayh, azh        !< X,Y,Z acceleration of the H atom
-   REAL, DIMENSION(121), SAVE :: azc  !< Z acceleration of the C atoms
-!> @}
-
-!> \name latt
-!> ???
-!> @{
-   REAL, DIMENSION(121), SAVE :: vzsum, zsum
-   REAL, DIMENSION(10,501), SAVE :: vz2av, zcav
-!> @}
-
-
    
 END MODULE CommonData
