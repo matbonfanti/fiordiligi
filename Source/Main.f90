@@ -39,15 +39,12 @@ PROGRAM JK6
    CHARACTER(100) :: OutFileName         ! output file name
    INTEGER  :: NWriteUnit                ! output unit number
 
-!    REAL, DIMENSION(6) :: HCoordAndVel    ! temporary array to store initial conditions of H atom
-
    ! Autocorrelation computation
-!    REAL, DIMENSION(:,:), ALLOCATABLE  :: ZHinTime
    REAL  :: ZHinTime
+   ! Frequency spacing of the fourier transform
+   REAL :: dOmega
    ! Store in time and in frequency the single realization
    COMPLEX, DIMENSION(:), ALLOCATABLE :: DeltaZ
-   COMPLEX, DIMENSION(:), ALLOCATABLE :: FreqGrid
-   REAL :: dOmega
    REAL, DIMENSION(:), ALLOCATABLE :: AverageDeltaZ
 
 !> \name latt
@@ -136,9 +133,11 @@ PROGRAM JK6
       ! set irho to remove the cycle on rho
       irho = 0
       CALL SetFieldFromInput( InputData, "Gamma", Gamma)
-      Gamma = Gamma * MyConsts_Uma2Au / MyConsts_fs2AU
+!       Gamma = Gamma * MyConsts_Uma2Au / MyConsts_fs2AU
+      Gamma = Gamma / MyConsts_fs2AU
       CALL SetFieldFromInput( InputData, "NrEquilibrSteps", NrEquilibSteps, int(5.0*(1.0/Gamma)/dt) )
       CALL SetFieldFromInput( InputData, "EquilibrInitAverage", EquilibrInitAverage, int(2.0*(1.0/Gamma)/dt) )
+      CALL SetFieldFromInput( InputData, "EquilTStep",  EquilTStep, dt )
    END IF
 
    ! close input file
@@ -164,7 +163,7 @@ PROGRAM JK6
    CALL EvolutionSetup( MolecularDynamics, nevo+3, (/ (rmh, iCoord=1,3), (rmc, iCoord=1,nevo) /), dt )
    
    ! Set variables for EOM integration with Langevin thermostat
-   CALL EvolutionSetup( Equilibration, nevo+3, (/ (rmh, iCoord=1,3), (rmc, iCoord=1,nevo) /), dt )
+   CALL EvolutionSetup( Equilibration, nevo+3, (/ (rmh, iCoord=1,3), (rmc, iCoord=1,nevo) /), EquilTStep )
    CALL SetupThermostat( Equilibration, Gamma, temp )
 
    !*************************************************************
@@ -185,8 +184,8 @@ PROGRAM JK6
    IF (RunType == SCATTERING) WRITE(*,900) ezh * MyConsts_Hartree2eV, zhi * MyConsts_Bohr2Ang
    WRITE(*,901) nevo, inum
    IF (RunType == SCATTERING) WRITE(*,902) irho, delrho * MyConsts_Bohr2Ang
-   IF (RunType == EQUILIBRIUM) WRITE(*,903) Gamma / MyConsts_Uma2Au * MyConsts_fs2AU,      &
-                 dt*real(NrEquilibSteps)/MyConsts_fs2AU, real(EquilibrInitAverage)*dt/MyConsts_fs2AU
+   IF (RunType == EQUILIBRIUM) WRITE(*,903) Gamma / MyConsts_Uma2Au * MyConsts_fs2AU,  EquilTStep/MyConsts_fs2AU,   &
+                 EquilTStep*real(NrEquilibSteps)/MyConsts_fs2AU, real(EquilibrInitAverage)*EquilTStep/MyConsts_fs2AU
    WRITE(*,"(/)")
 
    898 FORMAT(" * Mass of the H atom (UMA):                    ",F10.4,/, &
@@ -201,8 +200,10 @@ PROGRAM JK6
               " * Nr of trajectories (per rho value):          ",I4         )
    902 FORMAT(" * Nr of rho values to sample:                  ",I6,/, &
               " * Grid spacing in rho (Ang):                   ",F10.4      )
-   903 FORMAT(" * Langevin friction constant (UMA/fs)          ",F10.4,/, &
-              " * Equilibration time (fs)                      ",F10.4,/, &
+!    903 FORMAT(" * Langevin friction constant (UMA/fs)          ",F10.4,/, &
+   903 FORMAT(" * Langevin friction constant (1/fs)            ",F10.4,/, &
+              " * Equilibration time step (fs)                 ",F10.4,/, &
+              " * Equilibration total time (fs)                ",F10.4,/, &
               " * Equilibr averages are computed from (fs)     " F10.4      )
 
    ! Here the program have a fork: scattering and equilibrium simulations
@@ -430,20 +431,16 @@ PROGRAM JK6
    ELSE IF (RunType == EQUILIBRIUM) THEN   
    !****************************************************************************
 
-      ! ALLOCATE AND INITIALIZE THOSE DATA THAT WILL CONTAIN THE AVERAGES OVER 
-      ! THE SET OF TRAJECTORIES
+      ! ALLOCATE AND INITIALIZE DATA WITH THE AVERAGES OVER THE SET OF TRAJECTORIES
 
-!       ALLOCATE( ZHinTime(nstep, inum) )
-      ! allocate arrays
+      ! allocate arrays for deltaZ, its average and and its fourier transform
       ALLOCATE( DeltaZ(0:ntime), AverageDeltaZ(0:ntime) )
-      ALLOCATE( FreqGrid(0:ntime) )
-      ! frequency spacing
+      AverageDeltaZ(:) = cmplx(0.0, 0.0)
+      ! frequency spacing of the fourier transform
       dOmega =  MyConsts_PI/( real(nstep) * dt )
-      ! initialize fourier coeffs
-      DO iOmega = 0, ntime
-         FreqGrid(iOmega) = MyConsts_I * (2.0*MyConsts_PI*real(iOmega)/real(ntime))
-      END DO
 
+      ! Initialize global temperature average
+      GlobalTemperature = 0.0
 
       PRINT "(2/,A)",    "***************************************************"
       PRINT "(A,F10.5)", "               EQUILIBRIUM SIMULATION"
@@ -475,11 +472,9 @@ PROGRAM JK6
 
          ! Nr of steps to average
          NrOfStepsAver = 0
-         IF ( PrintType >= FULL ) THEN
-            ! Initialize temperature average and variance
-            TempAverage = 0.0
-            TempVariance = 0.0
-         ENDIF
+         ! Initialize temperature average and variance
+         TempAverage = 0.0
+         TempVariance = 0.0
 
          ! Compute starting potential and forces
          A(:) = 0.0
@@ -516,15 +511,14 @@ PROGRAM JK6
                END IF
                850 FORMAT( F12.5, 5F15.8 )
 
-               ! If the step is after 2.0/gamma time, store temperature averages
+               ! If the step is after some time, store temperature averages
                IF ( iStep >= EquilibrInitAverage ) THEN
                      NrOfStepsAver = NrOfStepsAver + 1
-                     IF ( PrintType >= FULL ) THEN
-                        TempAverage = TempAverage + IstTemperature
-                        TempVariance = TempVariance + IstTemperature**2
-                     ENDIF
-                     IF ( PrintType == EQUILIBRDBG ) THEN                     
-                        IF ( mod(iStep,10000) == 0 ) WRITE(567,* )  real(iStep)*dt/MyConsts_fs2AU, TempAverage/NrOfStepsAver, &
+                     TempAverage = TempAverage + IstTemperature
+                     TempVariance = TempVariance + IstTemperature**2
+                     IF ( PrintType == EQUILIBRDBG ) THEN
+                        IF (NrOfStepsAver == 1) WRITE(567,* ) " "
+                        IF ( mod(iStep,nprint) == 0 ) WRITE(567,* )  real(iStep)*dt/MyConsts_fs2AU, TempAverage/NrOfStepsAver, &
                                        sqrt((TempVariance/NrOfStepsAver)-(TempAverage/NrOfStepsAver)**2)
                      ENDIF
                END IF
@@ -597,9 +591,9 @@ PROGRAM JK6
          ! initialize counter for printing steps
          kstep=0
 
+         ! Initialize array with C-H distance
          DeltaZ(:) = 0.0
-         GraphitePlaneZ = AverageCluster(X(4:))
-         DeltaZ(0) = X(3) - GraphitePlaneZ
+         DeltaZ(0) = X(3) -  X(4)
 
          ! cycle over nstep velocity verlet iterations
          DO iStep = 1,nstep
@@ -612,13 +606,8 @@ PROGRAM JK6
             KinEnergy = EOM_KineticEnergy( MolecularDynamics, V )
             TotEnergy = PotEnergy + KinEnergy
             IstTemperature = 2.0*KinEnergy/(MyConsts_K2AU*(nevo+3))
-            
-            ! Compute the reference position of the graphite plane
-            GraphitePlaneZ = AverageCluster(X(4:))
 
-            ! Store ZH-ZHeq for the autocorrelation function
-!             ZHinTime(iStep, iTraj) = X(3) - GraphitePlaneZ
-!            ZHinTime = X(3) - GraphitePlaneZ
+            ! Store C-H distance for the autocorrelation function
             ZHinTime = X(3) - X(4)
 
             ! Necessary averages that are always computed
@@ -633,9 +622,12 @@ PROGRAM JK6
                   HPosAverage(iCoord)  = HPosAverage(iCoord)  + X(iCoord)
                   HPosVariance(iCoord) = HPosVariance(iCoord) + X(iCoord)**2
                END DO
-               C1Average  = C1Average  + (X(4) - GraphitePlaneZ)              ! C1 Z Coordinate
-               C1Variance = C1Variance + (X(4) - GraphitePlaneZ)**2
+               C1Average  = C1Average  + ( X(4) - (X(5)+X(6)+X(7))/3.0 )      ! C1 Z Coordinate
+               C1Variance = C1Variance + ( X(4) - (X(5)+X(6)+X(7))/3.0 )**2
             ENDIF
+
+            ! Increment global temperature average
+            GlobalTemperature = GlobalTemperature + IstTemperature
 
             ! output to write every nprint steps 
             IF ( mod(iStep,nprint) == 0 ) THEN
@@ -643,6 +635,7 @@ PROGRAM JK6
                ! increment counter for printing steps
                kstep=kstep+1
 
+               ! Store DeltaZ only in the print steps
                DeltaZ(kstep) = ZHinTime
 
                ! If massive level of output, print traj information to std out
@@ -661,38 +654,27 @@ PROGRAM JK6
                      NrOfTrajSteps = kstep
                END IF
 
-!                DO iOmega = 1, ntime
-! !                   FourierTrasf(iOmega) = FourierTrasf(iOmega) + ZHinTime(iStep, iTraj) * exp( MyConsts_I * (iStep*dt) * FreqGrid(iOmega))
-!                   FourierTrasf(iOmega) = FourierTrasf(iOmega) + ZHinTime * cos( (iStep*dt) * FreqGrid(iOmega))
-!                END DO
-
             END IF 
-
-
 
          END DO
 
-         ! Compute ZH averages and correct the array with deltaZ vs time
+         ! Compute ZH averages and 
          HPosAverage(3)  = HPosAverage(3) / nstep
          HPosVariance(3) = (HPosVariance(3) / nstep) - ( HPosAverage(3) )**2
-         DeltaZ(:) = DeltaZ(:) -  HPosAverage(3)
 
+         ! correct the array with deltaZ vs time
+         DeltaZ(:) = DeltaZ(:) -  HPosAverage(3)
          
+         ! PRINT deltaZ vs TIME to output file
          DO iStep = 0, ntime
-               WRITE(888,*)  dt*real(nprint*iStep)/MyConsts_fs2AU,  real(DeltaZ(iStep)), aimag(DeltaZ(iStep))         
+               WRITE(888,*)  dt*real(nprint*iStep)/MyConsts_fs2AU,  real(DeltaZ(iStep))
          END DO
          WRITE(888,*)  " "
 
          ! Fourier transform
          CALL DiscreteFourier( DeltaZ )
 
-         ! Print fourier
-         DO iOmega = 0, ntime
-               WRITE(889,*)  iOmega*dOmega*MyConsts_fs2AU,  abs(DeltaZ(iOmega))         
-         END DO
-         WRITE(889,*)  " "
-
-         ! Store average
+         ! Store average of DeltaZ fourier components
          AverageDeltaZ(:) = AverageDeltaZ(:) + abs(DeltaZ(:))**2
 
          IF ( PrintType >= FULL ) THEN
@@ -738,9 +720,17 @@ PROGRAM JK6
       !         OUTPUT OF THE RELEVANT AVERAGES 
       !*************************************************************
       
+      ! Normalize global average of the temperature
+      GlobalTemperature = GlobalTemperature / real( inum*nstep )
+
+      WRITE(*,701)  GlobalTemperature
+      701 FORMAT (/, " Average temperature for all trajs and time steps ",/   &
+                     " * Average temperature (K)        ",1F10.4,/ ) 
+
+      ! Normalize average of deltaZ fourier components
       AverageDeltaZ(:) = AverageDeltaZ(:) / real(inum )
 
-      ! Print fourier
+      ! Print fourier 
       DO iOmega = 0, ntime
             WRITE(891,*)  iOmega*dOmega*MyConsts_fs2AU,  AverageDeltaZ(iOmega)         
       END DO
@@ -757,15 +747,6 @@ PROGRAM JK6
       END DO
       WRITE(890,*)  " "
 
-!       DO iTraj = 1, inum, 50
-!          CALL PrintCorrelation( ZHinTime, iTraj )
-!             
-!    !          DO n = 1, size( ZHinTime, 1 )
-!    !             WRITE(879,*) dt*real(n)/MyConsts_fs2AU, ZHinTime(n,i)
-!    !          END DO
-!       END DO
-!       CALL PrintCorrelation( ZHinTime, inum )
-         
    END IF
 
 
@@ -852,69 +833,6 @@ PROGRAM JK6
 
 !****************************************************************************************************************
 
-   SUBROUTINE PrintCorrelation( ZArray, NrOfTraj )
-      IMPLICIT NONE
-      REAL, INTENT(IN), DIMENSION(:,:) :: ZArray
-      INTEGER, INTENT(IN) :: NrOfTraj
-      
-      INTEGER :: NrOfTStep, iStep, iTraj, OutUnit
-      REAL :: Correlation
-      CHARACTER(100) :: FileName, WarnMessage
-      LOGICAL, DIMENSION( NrOfTraj ) :: TrajIsOK
-      
-      NrOfTStep = size( ZArray, 1 )
-      CALL ERROR( NrOfTraj > size( ZArray, 2 ), "PrintCorrelation: wrong trajectories number " )
-      
-      OutUnit = LookForFreeUnit()
-      WRITE(FileName,"(A,I4.4,A)") "Correlation_",NrOfTraj,".dat"
-      OPEN( Unit=OutUnit, File=FileName )
-
-      DO iTraj = 1, NrOfTraj
-         TrajIsOK( iTraj ) = .TRUE.
-         TStepCycle: DO iStep = 1, NrOfTStep
-            IF ( abs(ZArray(iStep, iTraj)) > 5.0 )  THEN
-               TrajIsOK( iTraj ) = .FALSE.
-               WRITE(WarnMessage, *) " Excluding trajectory ",iTraj," from autocorrelation average "
-               CALL ShowWarning( WarnMessage )
-               EXIT TStepCycle
-            END IF
-         END DO TStepCycle
-      END DO
-      
-      DO iStep = 1, NrOfTStep
-          Correlation = 0.0
-          DO iTraj = 1, NrOfTraj
-             IF ( TrajIsOK( iTraj ) ) Correlation = Correlation + ZArray(1, iTraj)*ZArray(iStep, iTraj)
-          END DO
-          Correlation = Correlation / COUNT( TrajIsOK )
-          WRITE(OutUnit,*) dt*real(iStep-1)/MyConsts_fs2AU, Correlation
-      END DO
-      
-      CLOSE(OutUnit)
-      
-   END SUBROUTINE PrintCorrelation
-
-   REAL FUNCTION AverageCluster( Z )
-      IMPLICIT NONE
-      REAL, DIMENSION(:), INTENT(IN) :: Z
-
-      INTEGER :: k
-
-      IF (nevo == 121) THEN
-         AverageCluster = Z(82)+Z(83)+Z(84)
-         DO k = 96,101
-            AverageCluster =   AverageCluster + Z(k)
-         END DO
-         DO k = 104,121
-            AverageCluster =   AverageCluster + Z(k)
-         END DO
-         AverageCluster = AverageCluster / real(27)
-      ELSE 
-         AverageCluster = 0.0
-      ENDIF
-
-   END FUNCTION AverageCluster
-
    SUBROUTINE DiscreteFourier( Vector )
       IMPLICIT NONE
       COMPLEX, DIMENSION(:), INTENT(INOUT) :: Vector
@@ -935,7 +853,9 @@ PROGRAM JK6
 
       Vector(:) = Transform(:) / (N-1)
 
-   END SUBROUTINE
+   END SUBROUTINE DiscreteFourier
+
+!****************************************************************************************************************
 
    SUBROUTINE DiscreteInverseFourier( Vector )
       IMPLICIT NONE
@@ -957,7 +877,7 @@ PROGRAM JK6
 
       Vector(:) = Transform(:)
 
-   END SUBROUTINE
+   END SUBROUTINE DiscreteInverseFourier
 
 !****************************************************************************************************************
 

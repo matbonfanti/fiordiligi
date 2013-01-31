@@ -52,6 +52,7 @@ MODULE CommonData
       
    ! THE FOLLOWING INPUT DATA ARE RELEVANT FOR AN EQUILIBRIUM CALCULATION ONLY
    
+   REAL    :: EquilTStep           !< Time step for integrating equilibration dynamics
    REAL    :: Gamma                !< Friction parameter of the Langevin equation
    INTEGER :: NrEquilibSteps       !< Nr of time step of the equilibration
    INTEGER :: EquilibrInitAverage  !< Nr of time step to skip in computing averages during equilibration
@@ -69,7 +70,6 @@ MODULE CommonData
    REAL  :: PotEnergy                   ! Potential energy
    REAL  :: TotEnergy                   ! Total energy
    REAL  :: IstTemperature              ! Istantaneous temperature
-   REAL  :: GraphitePlaneZ              ! Estimate on the reference Z for the slab
 
    ! TRAJECTORY AVERAGES
 
@@ -87,7 +87,7 @@ MODULE CommonData
    INTEGER :: NrOfTrajSteps                          ! Nr of snapshot in the trajectory
    REAL :: ImpactPar                                 ! impact parameter of H in scattering calculations
    REAL, DIMENSION(:,:), ALLOCATABLE :: ptrap        ! Variable to store trapping probability, resolved in time and in rho
-
+   REAL :: GlobalTemperature                         ! Variable to compute the average of the temperature for all time steps and trajs
    
 
 

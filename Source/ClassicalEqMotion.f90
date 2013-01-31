@@ -111,10 +111,17 @@ MODULE ClassicalEqMotion
       EvolData%Gamma = Gamma
       
       ! Set standard deviations of the thermal noise
+!       IF ( .NOT. EvolData%HasThermostat )  ALLOCATE( EvolData%ThermalNoise( EvolData%NDoF ) )
+!       DO iDoF = 1, EvolData%NDoF 
+!            EvolData%ThermalNoise(iDoF) = sqrt( 2.0*Temperature*EvolData%Mass(iDoF)*Gamma/EvolData%dt )
+!            EvolData%ThermalNoise(iDoF) = sqrt( 2.0*Temperature*Gamma/EvolData%dt )
+!       END DO
       IF ( .NOT. EvolData%HasThermostat )  ALLOCATE( EvolData%ThermalNoise( EvolData%NDoF ) )
-      DO iDoF = 1, EvolData%NDoF 
+      DO iDoF = 1, 4                               ! H atom and C1 atom
+           EvolData%ThermalNoise(iDoF) = 0.0
+      END DO                                       ! other carbon atoms
+      DO iDoF = 5, EvolData%NDoF 
            EvolData%ThermalNoise(iDoF) = sqrt( 2.0*Temperature*EvolData%Mass(iDoF)*Gamma/EvolData%dt )
-           EvolData%ThermalNoise(iDoF) = sqrt( 2.0*Temperature*Gamma/EvolData%dt )
       END DO
       
       ! Themostat data is now setup
@@ -288,38 +295,47 @@ MODULE ClassicalEqMotion
             ! (2) NEW ACCELERATION
             V = GetPotential( NewPos, NewAcc )         ! Compute new forces and store the potential value
             NewAcc(:) =  NewAcc(:) / EvolData%Mass(:)   ! Devide by the mass
-! 
-!             ! (3) NEW VELOCITIES
-!             Vel(:) = Vel(:) + (2.*PreAcc(:) +5.*Acc(:) -1.*NewAcc(:))*EvolData%dt/6.0
 
       ELSE IF ( ( EvolData%HasThermostat ) ) THEN
             
-
             ! (3) NEW ACCELERATION
             V = GetPotential( NewPos, NewAcc )         ! Compute new forces and store the potential value
 
+            DO iDoF = 1, 4     ! H and C1 atoms are not Langevin particles
+               NewAcc(iDoF) = NewAcc(iDoF)  / EvolData%Mass(iDoF)
+            END DO
+
             IF ( GaussianNoise ) THEN               ! Add gaussian noise and friction
-               DO iDoF = 1, EvolData%NDoF
-!                   NewAcc(iDoF) = ( NewAcc(iDoF) + GaussianRandomNr(EvolData%ThermalNoise(iDoF)) ) / EvolData%Mass(iDoF) &
-!                                                                                    - EvolData%Gamma*NewVel(iDoF)
-                  NewAcc(iDoF) = ( NewAcc(iDoF) + GaussianRandomNr(EvolData%ThermalNoise(iDoF)) - EvolData%Gamma*NewVel(iDoF) ) &
-                                                        / EvolData%Mass(iDoF)
+               DO iDoF = 5, EvolData%NDoF
+                  NewAcc(iDoF) = ( NewAcc(iDoF) + GaussianRandomNr(EvolData%ThermalNoise(iDoF)) ) / EvolData%Mass(iDoF) &
+                                                                                   - EvolData%Gamma*NewVel(iDoF)
                END DO
             ELSE IF ( .NOT. GaussianNoise ) THEN    ! add uniform noise and friction
-               DO iDoF = 1, EvolData%NDoF
-                  NewAcc(iDoF) = ( NewAcc(iDoF) + UniformRandomNr(-sqrt(3.)*EvolData%ThermalNoise(iDoF),sqrt(3.)*EvolData%ThermalNoise(iDoF)) &
-                                              - EvolData%Gamma*NewVel(iDoF) ) / EvolData%Mass(iDoF)
+               DO iDoF = 5, EvolData%NDoF
+                  NewAcc(iDoF) = ( NewAcc(iDoF) + UniformRandomNr(-sqrt(3.)*EvolData%ThermalNoise(iDoF),sqrt(3.)*EvolData%ThermalNoise(iDoF)) ) &
+                                        / EvolData%Mass(iDoF) - EvolData%Gamma*NewVel(iDoF)
                END DO
             END IF   
+
+!             IF ( GaussianNoise ) THEN               ! Add gaussian noise and friction
+!                DO iDoF = 1, EvolData%NDoF
+!                   NewAcc(iDoF) = ( NewAcc(iDoF) + GaussianRandomNr(EvolData%ThermalNoise(iDoF)) ) / EvolData%Mass(iDoF) &
+!                                                                                    - EvolData%Gamma*NewVel(iDoF)
+! !                   NewAcc(iDoF) = ( NewAcc(iDoF) + GaussianRandomNr(EvolData%ThermalNoise(iDoF)) - EvolData%Gamma*NewVel(iDoF) ) &
+! !                                                         / EvolData%Mass(iDoF)
+!                END DO
+!             ELSE IF ( .NOT. GaussianNoise ) THEN    ! add uniform noise and friction
+!                DO iDoF = 1, EvolData%NDoF
+!                   NewAcc(iDoF) = ( NewAcc(iDoF) + UniformRandomNr(-sqrt(3.)*EvolData%ThermalNoise(iDoF),sqrt(3.)*EvolData%ThermalNoise(iDoF)) &
+!                                               - EvolData%Gamma*NewVel(iDoF) ) / EvolData%Mass(iDoF)
+!                END DO
+!             END IF   
 
 
       END IF
 
       ! CORRECTED POSITIONS
       Pos(:) = Pos(:) + Vel(:)*EvolData%dt + (NewAcc(:)+2*Acc(:))*(EvolData%dt**2)/6.0
-
-!       ! (4) CORRECTED VELOCITIES
-!       Vel(:) = Vel(:) + (5.*PreAcc(:) +8.*Acc(:) -1.*NewAcc(:))*EvolData%dt/12.0    
 ! 
       ! (4) CORRECTED VELOCITIES
       Vel(:) = Vel(:) + (Acc(:) + NewAcc(:))*EvolData%dt/2.0    
