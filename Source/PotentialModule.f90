@@ -167,7 +167,7 @@ MODULE PotentialModule
                gvar1=2.0*gaus1-1
                gvar2=2.0*gaus2-1
                gr1=gvar1**2+gvar2**2
-               IF (gr1 < 1.0) EXIT 
+               IF (gr1 < 1.0) EXIT
             END DO
             gr2=sqrt(-2.0*alog(gr1)/gr1)
             gs1=gvar1*gr2
@@ -245,7 +245,9 @@ MODULE PotentialModule
          
          ! Setup force constants of harmonic potentials
          CForceConstant = CarbonForceConstant()
-         HForceConstant = 0.32115248540922697
+         CForceConstant = 12.0107*MyConsts_Uma2Au * (MyConsts_PI*2./(200.*MyConsts_fs2AU))**2 
+!          HForceConstant = 0.32115248540922697
+         HForceConstant = 0.3
 
          ! Compute potential and forces
          VHarmonic = 0.0

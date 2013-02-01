@@ -137,7 +137,8 @@ PROGRAM JK6
       Gamma = Gamma / MyConsts_fs2AU
       CALL SetFieldFromInput( InputData, "NrEquilibrSteps", NrEquilibSteps, int(5.0*(1.0/Gamma)/dt) )
       CALL SetFieldFromInput( InputData, "EquilibrInitAverage", EquilibrInitAverage, int(2.0*(1.0/Gamma)/dt) )
-      CALL SetFieldFromInput( InputData, "EquilTStep",  EquilTStep, dt )
+      CALL SetFieldFromInput( InputData, "EquilTStep",  EquilTStep, dt/MyConsts_fs2AU )
+      EquilTStep = EquilTStep * MyConsts_fs2AU
    END IF
 
    ! close input file
@@ -161,10 +162,16 @@ PROGRAM JK6
 
    ! Set variables for EOM integration in the microcanonical ensamble
    CALL EvolutionSetup( MolecularDynamics, nevo+3, (/ (rmh, iCoord=1,3), (rmc, iCoord=1,nevo) /), dt )
+   CALL SetupThermostat( MolecularDynamics, Gamma, temp )
    
    ! Set variables for EOM integration with Langevin thermostat
    CALL EvolutionSetup( Equilibration, nevo+3, (/ (rmh, iCoord=1,3), (rmc, iCoord=1,nevo) /), EquilTStep )
    CALL SetupThermostat( Equilibration, Gamma, temp )
+
+   print*, "temperature (au) :",temp
+   print*, "mass (au) :", rmc
+   print*, "force constant (au) :", 12.0107*MyConsts_Uma2Au * (MyConsts_PI*2./(200.*MyConsts_fs2AU))**2 
+   print*, "sqrt(<x^2>) (ang) :", sqrt( temp / (12.0107*MyConsts_Uma2Au * (MyConsts_PI*2./(200.*MyConsts_fs2AU))**2 ) )*MyConsts_Bohr2Ang
 
    !*************************************************************
    !       POTENTIAL SETUP 
@@ -341,89 +348,89 @@ PROGRAM JK6
 
             END IF
 
-      END DO
+         END DO
       
-      PRINT "(A)"," Done! "
+         PRINT "(A)"," Done! "
 
-   END DO
-
-   ! pritn info about the average for the initial lattice condition
-   zav=zav/float(nevo*inum*(irho+1))
-   zsqav=zsqav/float(nevo*inum*(irho+1))
-   vav=vav/float(nevo*inum*(irho+1))
-   vsqav=vsqav/float(nevo*inum*(irho+1))
-
-   WRITE(*,"(/,A,/)") " * Average values for the initial lattice coordinates and velocities "
-   write(*,*) "average init zc=",zav * MyConsts_Bohr2Ang, " Ang"
-   write(*,*) "average init Vc=",0.5*zsqav*CarbonForceConstant() / MyConsts_K2AU,' K'
-   write(*,*) "average init vc=",vav, " au of velocity"
-   write(*,*) "average init Kc=",0.5*vsqav*rmc / MyConsts_K2AU,' K'
-   WRITE(*,"(/,/)")
-
-   DO kk=1,10
-      DO iStep=1,ntime
-         zcav(kk,iStep)=zcav(kk,iStep)/float(nprint*inum*(irho+1))
-         vz2av(kk,iStep)=vz2av(kk,iStep)/float(nprint*inum*(irho+1))
-         vz2av(kk,iStep)=0.5*rmc*vz2av(kk,iStep) / MyConsts_K2AU
       END DO
-   END DO
 
-   PRINT*, " "
-   DO iStep=1,ntime
-      write(6,435) dt*real(iStep*nprint)/MyConsts_fs2AU, ( zcav(kk,iStep),  kk=1,10 )
-   END DO
+      ! pritn info about the average for the initial lattice condition
+      zav=zav/float(nevo*inum*(irho+1))
+      zsqav=zsqav/float(nevo*inum*(irho+1))
+      vav=vav/float(nevo*inum*(irho+1))
+      vsqav=vsqav/float(nevo*inum*(irho+1))
 
-   PRINT*, " "
-   DO iStep=1,ntime
-      write(6,436) dt*real(iStep*nprint)/MyConsts_fs2AU, ( vz2av(kk,iStep), kk=1,10 )
-   END DO
+      WRITE(*,"(/,A,/)") " * Average values for the initial lattice coordinates and velocities "
+      write(*,*) "average init zc=",zav * MyConsts_Bohr2Ang, " Ang"
+      write(*,*) "average init Vc=",0.5*zsqav*CarbonForceConstant() / MyConsts_K2AU,' K'
+      write(*,*) "average init vc=",vav, " au of velocity"
+      write(*,*) "average init Kc=",0.5*vsqav*rmc / MyConsts_K2AU,' K'
+      WRITE(*,"(/,/)")
 
-   ! write trapping data to mathematica file
-   open(unit=15,file='ptrap.nb',status='replace')
-   write(15,'(A6)') 'data={'
-   DO jRho=1,irho+1
-      write(15,'(A1)') '{'
-      DO iStep=1,ntime
-         IF(iStep.eq.ntime)THEN
-            write(15,'(F9.6)') ptrap(jRho,iStep)/inum
-         END IF
-         IF(iStep.ne.ntime)THEN 
-            write(15,'(F9.6,A1)') ptrap(jRho,iStep)/inum,','
-         END IF
+      DO kk=1,10
+         DO iStep=1,ntime
+            zcav(kk,iStep)=zcav(kk,iStep)/float(nprint*inum*(irho+1))
+            vz2av(kk,iStep)=vz2av(kk,iStep)/float(nprint*inum*(irho+1))
+            vz2av(kk,iStep)=0.5*rmc*vz2av(kk,iStep) / MyConsts_K2AU
+         END DO
       END DO
-      IF(jRho.ne.irho+1)THEN
-         write(15,'(A2)')'},'
-      END IF
-      IF(jRho.eq.irho+1)THEN
-         write(15,'(A2)') '};'
-      END IF
-   END DO
-   write(15,505)'ListPlot3D[data,ColorFunction->Hue,AxesLabel->', &
-         '{"Time(ps)","Reaction Parameter(b)","Ptrap(t,b)"},Boxed->False]'
-   CLOSE(15)
 
-   ! write cross section data 
-   write(6,*)'cross section vs time(ps):'
+      PRINT*, " "
+      DO iStep=1,ntime
+         write(6,435) dt*real(iStep*nprint)/MyConsts_fs2AU, ( zcav(kk,iStep),  kk=1,10 )
+      END DO
 
-   ! Cycle over analysis steps
-   DO iStep=1,ntime
+      PRINT*, " "
+      DO iStep=1,ntime
+         write(6,436) dt*real(iStep*nprint)/MyConsts_fs2AU, ( vz2av(kk,iStep), kk=1,10 )
+      END DO
 
-      ! integrate over rxn parameter
-      crscn(iStep)=0.0
+      ! write trapping data to mathematica file
+      open(unit=15,file='ptrap.nb',status='replace')
+      write(15,'(A6)') 'data={'
       DO jRho=1,irho+1
-         ImpactPar = 0.000001 + delrho * real(jRho-1) * MyConsts_Bohr2Ang
-         crscn(iStep)=crscn(iStep)+(ptrap(jRho,iStep)/float(inum))* ImpactPar
+         write(15,'(A1)') '{'
+         DO iStep=1,ntime
+            IF(iStep.eq.ntime)THEN
+               write(15,'(F9.6)') ptrap(jRho,iStep)/inum
+            END IF
+            IF(iStep.ne.ntime)THEN 
+               write(15,'(F9.6,A1)') ptrap(jRho,iStep)/inum,','
+            END IF
+         END DO
+         IF(jRho.ne.irho+1)THEN
+            write(15,'(A2)')'},'
+         END IF
+         IF(jRho.eq.irho+1)THEN
+            write(15,'(A2)') '};'
+         END IF
       END DO
-      crscn(iStep) = 2.0* MyConsts_PI * delrho*MyConsts_Bohr2Ang * crscn(iStep)
+      write(15,505)'ListPlot3D[data,ColorFunction->Hue,AxesLabel->', &
+            '{"Time(ps)","Reaction Parameter(b)","Ptrap(t,b)"},Boxed->False]'
+      CLOSE(15)
 
-      ! print trapping p to file
-      write(6,605) dt*real(iStep*nprint)/MyConsts_fs2AU,  crscn(iStep)
-   END DO
+      ! write cross section data 
+      write(6,*)'cross section vs time(ps):'
 
-   435 FORMAT(1f6.3,10f7.3)
-   436 FORMAT(1f6.3,10f7.2)
-   505 FORMAT(A46,A63)
-   605 FORMAT(f8.4,3x,f10.5)
+      ! Cycle over analysis steps
+      DO iStep=1,ntime
+
+         ! integrate over rxn parameter
+         crscn(iStep)=0.0
+         DO jRho=1,irho+1
+            ImpactPar = 0.000001 + delrho * real(jRho-1) * MyConsts_Bohr2Ang
+            crscn(iStep)=crscn(iStep)+(ptrap(jRho,iStep)/float(inum))* ImpactPar
+         END DO
+         crscn(iStep) = 2.0* MyConsts_PI * delrho*MyConsts_Bohr2Ang * crscn(iStep)
+
+         ! print trapping p to file
+         write(6,605) dt*real(iStep*nprint)/MyConsts_fs2AU,  crscn(iStep)
+      END DO
+
+      435 FORMAT(1f6.3,10f7.3)
+      436 FORMAT(1f6.3,10f7.2)
+      505 FORMAT(A46,A63)
+      605 FORMAT(f8.4,3x,f10.5)
 
 
 
@@ -489,12 +496,12 @@ PROGRAM JK6
                   ! Store initial accelerations
                   APre(:) = A(:)
                   ! Propagate for one timestep with Velocity-Verlet and langevin thermostat
-                  CALL EOM_VelocityVerlet( Equilibration, X, V, A, VHSticking, PotEnergy )
-!                   CALL EOM_VelocityVerlet( Equilibration, X, V, A, VHarmonic, PotEnergy )
+!                   CALL EOM_VelocityVerlet( Equilibration, X, V, A, VHSticking, PotEnergy )
+                  CALL EOM_VelocityVerlet( Equilibration, X, V, A, VHarmonic, PotEnergy )
                ELSE
                   ! Propagate for one timestep with Beeman's method and langevin thermostat
-                  CALL EOM_Beeman( Equilibration, X, V, A, APre, VHSticking, PotEnergy )
-!                   CALL EOM_Beeman( Equilibration, X, V, A, APre, VHarmonic, PotEnergy )
+!                   CALL EOM_Beeman( Equilibration, X, V, A, APre, VHSticking, PotEnergy )
+                  CALL EOM_Beeman( Equilibration, X, V, A, APre, VHarmonic, PotEnergy )
                END IF
 
                ! compute kinetic energy and total energy
@@ -546,10 +553,6 @@ PROGRAM JK6
          ! INFORMATION ON INITIAL CONDITIONS, INITIALIZATION, OTHER...
          !*************************************************************
 
-         ! Compute starting potential and forces
-         PotEnergy = VHSticking( X, A )
-         A(1:3) = A(1:3) / rmh
-         A(4:nevo+3) = A(4:nevo+3) / rmc
          ! Compute kinetic energy and total energy
          KinEnergy = EOM_KineticEnergy( MolecularDynamics, V )
          TotEnergy = PotEnergy + KinEnergy
@@ -593,14 +596,15 @@ PROGRAM JK6
 
          ! Initialize array with C-H distance
          DeltaZ(:) = 0.0
-         DeltaZ(0) = X(3) -  X(4)
+!         DeltaZ(0) = X(3)  -  X(4)
+         DeltaZ(0) = X(5) 
 
          ! cycle over nstep velocity verlet iterations
          DO iStep = 1,nstep
 
             ! Propagate for one timestep
-            CALL EOM_VelocityVerlet( MolecularDynamics, X, V, A, VHSticking, PotEnergy )
-!             CALL EOM_VelocityVerlet( MolecularDynamics, X, V, A, VHarmonic, PotEnergy )
+!             CALL EOM_VelocityVerlet( MolecularDynamics, X, V, A, VHSticking, PotEnergy )
+            CALL EOM_Beeman( MolecularDynamics, X, V, A, APre, VHarmonic, PotEnergy )
 
             ! Compute kin energy and temperature
             KinEnergy = EOM_KineticEnergy( MolecularDynamics, V )
@@ -608,7 +612,8 @@ PROGRAM JK6
             IstTemperature = 2.0*KinEnergy/(MyConsts_K2AU*(nevo+3))
 
             ! Store C-H distance for the autocorrelation function
-            ZHinTime = X(3) - X(4)
+!            ZHinTime = X(3)  - X(4)
+            ZHinTime = X(5)
 
             ! Necessary averages that are always computed
             HPosAverage(3)  = HPosAverage(3)  +   ZHinTime   ! H Z Coordinate
