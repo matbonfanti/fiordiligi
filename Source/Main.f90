@@ -130,15 +130,17 @@ PROGRAM JK6
       delrho = delrho / MyConsts_Bohr2Ang
 
    ELSE IF (RunType == EQUILIBRIUM) THEN
-      ! set irho to remove the cycle on rho
-      irho = 0
       CALL SetFieldFromInput( InputData, "Gamma", Gamma)
-!       Gamma = Gamma * MyConsts_Uma2Au / MyConsts_fs2AU
       Gamma = Gamma / MyConsts_fs2AU
       CALL SetFieldFromInput( InputData, "NrEquilibrSteps", NrEquilibSteps, int(5.0*(1.0/Gamma)/dt) )
       CALL SetFieldFromInput( InputData, "EquilibrInitAverage", EquilibrInitAverage, int(2.0*(1.0/Gamma)/dt) )
       CALL SetFieldFromInput( InputData, "EquilTStep",  EquilTStep, dt/MyConsts_fs2AU )
       EquilTStep = EquilTStep * MyConsts_fs2AU
+
+   ELSE IF (RunType == HARMONICMODEL) THEN
+      CALL SetFieldFromInput( InputData, "Gamma", Gamma)
+      Gamma = Gamma / MyConsts_fs2AU
+      CALL SetFieldFromInput( InputData, "NrEquilibrSteps", NrEquilibSteps, int(10.0*(1.0/Gamma)/dt) )
    END IF
 
    ! close input file
@@ -152,26 +154,38 @@ PROGRAM JK6
    ! number of analysis step
    ntime=int(nstep/nprint)
 
-   ! Allocation of position, velocity, acceleration arrays
-   ALLOCATE( X(nevo+3), V(nevo+3), A(nevo+3), APre(nevo+3) )
-   
-   ! if XYZ files of the trajectories are required, allocate memory to store the traj
-   IF ( PrintType >= FULL ) THEN
-         ALLOCATE( Trajectory( 7, ntime ) )
+   IF ( (RunType == SCATTERING) .OR. (RunType == EQUILIBRIUM) ) THEN
+
+         ! Allocation of position, velocity, acceleration arrays
+         ALLOCATE( X(nevo+3), V(nevo+3), A(nevo+3), APre(nevo+3) )
+         
+         ! if XYZ files of the trajectories are required, allocate memory to store the traj
+         IF ( PrintType >= FULL ) THEN
+               ALLOCATE( Trajectory( 7, ntime ) )
+         END IF
+
+         ! Set variables for EOM integration in the microcanonical ensamble
+         CALL EvolutionSetup( MolecularDynamics, nevo+3, (/ (rmh, iCoord=1,3), (rmc, iCoord=1,nevo) /), dt )
+         
+         ! Set variables for EOM integration with Langevin thermostat
+         CALL EvolutionSetup( Equilibration, nevo+3, (/ (rmh, iCoord=1,3), (rmc, iCoord=1,nevo) /), EquilTStep )
+         CALL SetupThermostat( Equilibration, Gamma, temp, (/ (.FALSE., iCoord=1,4), (.TRUE., iCoord=1,nevo-1) /) )
+
+   ELSE IF (RunType == HARMONICMODEL) THEN 
+
+         print*, "temperature (au) :",temp
+         print*, "mass (au) :", rmh
+         print*, "force constant (au) :", rmh*MyConsts_Uma2Au * (MyConsts_PI*2./(100.*MyConsts_fs2AU))**2 
+         print*, "sqrt(<x^2>) (ang) :", sqrt( temp / (rmh*MyConsts_Uma2Au * (MyConsts_PI*2./(100.*MyConsts_fs2AU))**2 ) )*MyConsts_Bohr2Ang
+
+         ! Allocation of position, velocity, acceleration arrays
+         ALLOCATE( X(nevo), V(nevo), A(nevo), APre(nevo) )
+
+         ! Set variables for EOM integration with Langevin thermostat
+         CALL EvolutionSetup( Equilibration, nevo, (/ (rmh, iCoord=1,nevo) /), dt )
+         CALL SetupThermostat( Equilibration, Gamma, temp, (/ (.TRUE., iCoord=1,nevo) /) )
+
    END IF
-
-   ! Set variables for EOM integration in the microcanonical ensamble
-   CALL EvolutionSetup( MolecularDynamics, nevo+3, (/ (rmh, iCoord=1,3), (rmc, iCoord=1,nevo) /), dt )
-   CALL SetupThermostat( MolecularDynamics, Gamma, temp )
-   
-   ! Set variables for EOM integration with Langevin thermostat
-   CALL EvolutionSetup( Equilibration, nevo+3, (/ (rmh, iCoord=1,3), (rmc, iCoord=1,nevo) /), EquilTStep )
-   CALL SetupThermostat( Equilibration, Gamma, temp )
-
-   print*, "temperature (au) :",temp
-   print*, "mass (au) :", rmc
-   print*, "force constant (au) :", 12.0107*MyConsts_Uma2Au * (MyConsts_PI*2./(200.*MyConsts_fs2AU))**2 
-   print*, "sqrt(<x^2>) (ang) :", sqrt( temp / (12.0107*MyConsts_Uma2Au * (MyConsts_PI*2./(200.*MyConsts_fs2AU))**2 ) )*MyConsts_Bohr2Ang
 
    !*************************************************************
    !       POTENTIAL SETUP 
@@ -207,7 +221,6 @@ PROGRAM JK6
               " * Nr of trajectories (per rho value):          ",I4         )
    902 FORMAT(" * Nr of rho values to sample:                  ",I6,/, &
               " * Grid spacing in rho (Ang):                   ",F10.4      )
-!    903 FORMAT(" * Langevin friction constant (UMA/fs)          ",F10.4,/, &
    903 FORMAT(" * Langevin friction constant (1/fs)            ",F10.4,/, &
               " * Equilibration time step (fs)                 ",F10.4,/, &
               " * Equilibration total time (fs)                ",F10.4,/, &
@@ -229,7 +242,6 @@ PROGRAM JK6
       vav    = 0.0         ! average velocity
       vsqav  = 0.0         ! mean squared velocity
 
-      ! ????????????
       ALLOCATE( zcav(10,ntime), vz2av(10,ntime) )
       zcav(:,:)  = 0.0
       vz2av(:,:) = 0.0
@@ -242,7 +254,6 @@ PROGRAM JK6
       call random_seed()
 
       ! scan over the impact parameter... 
-      ! this cycle is a trivial DO j=1,1 in the case of an equilibrium simulation
       DO jRho = 1,irho+1
 
          ! Set impact parameter and print message
@@ -496,12 +507,10 @@ PROGRAM JK6
                   ! Store initial accelerations
                   APre(:) = A(:)
                   ! Propagate for one timestep with Velocity-Verlet and langevin thermostat
-!                   CALL EOM_VelocityVerlet( Equilibration, X, V, A, VHSticking, PotEnergy )
-                  CALL EOM_VelocityVerlet( Equilibration, X, V, A, VHarmonic, PotEnergy )
+                   CALL EOM_VelocityVerlet( Equilibration, X, V, A, VHSticking, PotEnergy )
                ELSE
                   ! Propagate for one timestep with Beeman's method and langevin thermostat
-!                   CALL EOM_Beeman( Equilibration, X, V, A, APre, VHSticking, PotEnergy )
-                  CALL EOM_Beeman( Equilibration, X, V, A, APre, VHarmonic, PotEnergy )
+                  CALL EOM_Beeman( Equilibration, X, V, A, APre, VHSticking, PotEnergy )
                END IF
 
                ! compute kinetic energy and total energy
@@ -596,15 +605,13 @@ PROGRAM JK6
 
          ! Initialize array with C-H distance
          DeltaZ(:) = 0.0
-!         DeltaZ(0) = X(3)  -  X(4)
-         DeltaZ(0) = X(5) 
+         DeltaZ(0) = X(3)  -  X(4)
 
          ! cycle over nstep velocity verlet iterations
          DO iStep = 1,nstep
 
             ! Propagate for one timestep
-!             CALL EOM_VelocityVerlet( MolecularDynamics, X, V, A, VHSticking, PotEnergy )
-            CALL EOM_Beeman( MolecularDynamics, X, V, A, APre, VHarmonic, PotEnergy )
+            CALL EOM_VelocityVerlet( MolecularDynamics, X, V, A, VHSticking, PotEnergy )
 
             ! Compute kin energy and temperature
             KinEnergy = EOM_KineticEnergy( MolecularDynamics, V )
@@ -612,8 +619,7 @@ PROGRAM JK6
             IstTemperature = 2.0*KinEnergy/(MyConsts_K2AU*(nevo+3))
 
             ! Store C-H distance for the autocorrelation function
-!            ZHinTime = X(3)  - X(4)
-            ZHinTime = X(5)
+            ZHinTime = X(3)  - X(4)
 
             ! Necessary averages that are always computed
             HPosAverage(3)  = HPosAverage(3)  +   ZHinTime   ! H Z Coordinate
@@ -751,6 +757,248 @@ PROGRAM JK6
          WRITE(890,*)  dt*real(nprint*iStep)/MyConsts_fs2AU,  real(DeltaZ(iStep)), aimag(DeltaZ(iStep))         
       END DO
       WRITE(890,*)  " "
+
+
+
+   !****************************************************************************
+   ELSE IF (RunType == HARMONICMODEL) THEN   
+   !****************************************************************************
+
+
+
+
+
+
+
+
+
+
+
+
+
+      ! ALLOCATE AND INITIALIZE DATA WITH THE AVERAGES OVER THE SET OF TRAJECTORIES
+
+      ! allocate arrays for deltaZ, its average and and its fourier transform
+      ALLOCATE( DeltaZ(0:ntime), AverageDeltaZ(0:ntime) )
+      AverageDeltaZ(:) = cmplx(0.0, 0.0)
+      ! frequency spacing of the fourier transform
+      dOmega =  MyConsts_PI/( real(nstep) * dt )
+
+      ! Initialize global temperature average
+      GlobalTemperature = 0.0
+
+      PRINT "(2/,A)",    "***************************************************"
+      PRINT "(A,F10.5)", "               HARMONIC BROWNIAN TEST"
+      PRINT "(A,/)" ,    "***************************************************"
+
+      PRINT "(A,I5,A)"," Running ", inum, " trajectories ... "
+      
+      !run inum number of trajectories at the current rxn parameter
+      DO iTraj = 1,inum
+      
+         PRINT "(/,A,I6,A)"," **** Trajectory Nr. ", iTraj," ****" 
+
+         !*************************************************************
+         ! INITIALIZATION OF THE COORDINATES AND MOMENTA OF THE SYSTEM
+         !*************************************************************
+
+         ! Set initial conditions
+         CALL HarmonicConditions( X, V )
+
+         PRINT "(/,A,F6.1)"," Equilibrating the initial conditions at T = ", temp / MyConsts_K2AU
+
+         ! Nr of steps to average
+         NrOfStepsAver = 0
+         ! Initialize temperature average and variance
+         TempAverage = 0.0
+         TempVariance = 0.0
+
+         ! Compute starting potential and forces
+         A(:) = 0.0
+         PotEnergy = VHarmonic( X, A )
+         A(1:nevo) = A(1:nevo) / rmh
+
+         ! Do an equilibration run
+         DO iStep = 1, NrEquilibSteps
+
+               IF ( iStep == 1 ) THEN           ! If first step, previous acceleration are not available
+                  ! Store initial accelerations
+                  APre(:) = A(:)
+                  ! Propagate for one timestep with Velocity-Verlet and langevin thermostat
+                  CALL EOM_VelocityVerlet( Equilibration, X, V, A, VHarmonic, PotEnergy )
+               ELSE
+                  ! Propagate for one timestep with Beeman's method and langevin thermostat
+                  CALL EOM_Beeman( Equilibration, X, V, A, APre, VHarmonic, PotEnergy )
+               END IF
+
+               ! compute kinetic energy and total energy
+               KinEnergy = EOM_KineticEnergy( Equilibration, V )
+               TotEnergy = PotEnergy + KinEnergy
+               IstTemperature = 2.0*KinEnergy/(MyConsts_K2AU*nevo)
+
+               TempAverage = TempAverage + IstTemperature
+               TempVariance = TempVariance + IstTemperature**2
+
+               IF ( PrintType == EQUILIBRDBG ) THEN
+                  IF (iStep == 1) WRITE(567,* ) " "
+                  IF ( mod(iStep,nprint) == 0 ) WRITE(567,* )  real(iStep)*dt/MyConsts_fs2AU, TempAverage/iStep, &
+                                 sqrt((TempVariance/iStep)-(TempAverage/iStep)**2)
+               END IF
+
+         END DO
+
+         IF ( PrintType >= FULL ) THEN
+            
+            ! Compute average and standard deviation
+            TempAverage = TempAverage / NrEquilibSteps 
+            TempVariance = (TempVariance/NrEquilibSteps) - TempAverage**2
+
+            ! output message with average values
+            PRINT "(/,A)",                    " Equilibration completed! "
+            PRINT "(A,1F10.4,/,A,1F10.4,/)",  " Average temperature (K): ", TempAverage, &
+                                              " Standard deviation (K):  ", sqrt(TempVariance)
+         ENDIF
+
+
+         !*************************************************************
+         ! INFORMATION ON INITIAL CONDITIONS, INITIALIZATION, OTHER...
+         !*************************************************************
+
+         ! Compute kinetic energy and total energy
+         KinEnergy = EOM_KineticEnergy( Equilibration, V )
+         TotEnergy = PotEnergy + KinEnergy
+         IstTemperature = 2.0*KinEnergy/(MyConsts_K2AU*nevo)
+         
+         ! Initialize the variables for the trajectory averages
+         TempAverage  = 0.0      ! Temperature
+         TempVariance = 0.0
+         HPosAverage(1)  = 0.0
+         HPosVariance(1) = 0.0
+
+         !*************************************************************
+         !         TIME EVOLUTION OF THE TRAJECTORY
+         !*************************************************************
+ 
+         ! initialize counter for printing steps
+         kstep=0
+
+         ! Initialize array with C-H distance
+         DeltaZ(:) = 0.0
+         DeltaZ(0) = X(1) 
+
+         ! cycle over nstep velocity verlet iterations
+         DO iStep = 1,nstep
+
+            ! Propagate for one timestep
+            CALL EOM_Beeman( Equilibration, X, V, A, APre, VHarmonic, PotEnergy )
+
+            ! Compute kin energy and temperature
+            KinEnergy = EOM_KineticEnergy( Equilibration, V )
+            TotEnergy = PotEnergy + KinEnergy
+            IstTemperature = 2.0*KinEnergy/(MyConsts_K2AU*nevo)
+
+            ! Store first dof for the autocorrelation function
+            ZHinTime = X(1)
+
+            ! Necessary averages that are always computed
+            HPosAverage(1)  = HPosAverage(1)  +   ZHinTime   ! H Z Coordinate
+            HPosVariance(1) = HPosVariance(1) + ( ZHinTime )**2
+            TempAverage = TempAverage + IstTemperature                     ! Temperature
+            TempVariance = TempVariance + IstTemperature**2
+
+            ! Increment global temperature average
+            GlobalTemperature = GlobalTemperature + IstTemperature
+
+            ! output to write every nprint steps 
+            IF ( mod(iStep,nprint) == 0 ) THEN
+               ! increment counter for printing steps
+               kstep=kstep+1
+               ! Store DeltaZ only in the print steps
+               DeltaZ(kstep) = ZHinTime
+            END IF 
+
+         END DO
+
+         ! Compute ZH averages and 
+         HPosAverage(1)  = HPosAverage(1) / nstep
+         HPosVariance(1) = (HPosVariance(1) / nstep) - ( HPosAverage(1) )**2
+
+         ! correct the array with deltaZ vs time
+         DeltaZ(:) = DeltaZ(:) -  HPosAverage(1)
+         
+         ! PRINT deltaZ vs TIME to output file
+         DO iStep = 0, ntime
+               WRITE(888,*)  dt*real(nprint*iStep)/MyConsts_fs2AU,  real(DeltaZ(iStep))
+         END DO
+         WRITE(888,*)  " "
+
+         ! Fourier transform
+         CALL DiscreteFourier( DeltaZ )
+
+         ! Store average of DeltaZ fourier components
+         AverageDeltaZ(:) = AverageDeltaZ(:) + abs(DeltaZ(:))**2
+
+         ! Divide averages for number of time steps and compute variances
+         TempAverage  = TempAverage  / nstep
+         TempVariance = TempVariance / nstep - TempAverage**2
+                                            
+         ! And print the average values of that trajectory 
+         WRITE(*,710)  TempAverage, sqrt(TempVariance), HPosAverage(1)* MyConsts_Bohr2Ang, sqrt(HPosVariance(1))* MyConsts_Bohr2Ang
+         710 FORMAT (/, " Time propagation completed! ",/   &
+                           " * Average temperature (K)        ",1F10.4,/    &
+                           "   Standard deviation (K)         ",1F10.4,/    &
+                           " * Average coordinates (Ang)      ",3F10.4,/    &
+                           "   Standard deviation (Ang)       ",3F10.4,/ ) 
+                                                
+
+      END DO
+      
+      PRINT "(A)"," Done! "
+
+      !*************************************************************
+      !         OUTPUT OF THE RELEVANT AVERAGES 
+      !*************************************************************
+      
+      ! Normalize global average of the temperature
+      GlobalTemperature = GlobalTemperature / real( inum*nstep )
+
+      WRITE(*,702)  GlobalTemperature
+      702 FORMAT (/, " Average temperature for all trajs and time steps ",/   &
+                     " * Average temperature (K)        ",1F10.4,/ ) 
+
+      ! Normalize average of deltaZ fourier components
+      AverageDeltaZ(:) = AverageDeltaZ(:) / real(inum )
+
+      ! Print fourier 
+      DO iOmega = 0, ntime
+            WRITE(891,*)  iOmega*dOmega*MyConsts_fs2AU,  AverageDeltaZ(iOmega)         
+      END DO
+      WRITE(891,*)  " "
+
+      DeltaZ(:) = AverageDeltaZ(:)
+      CALL DiscreteInverseFourier(DeltaZ)
+
+      DO iStep = (ntime/2)+1, ntime
+         WRITE(890,*)  dt*real(nprint*(iStep-ntime-1))/MyConsts_fs2AU,  real(DeltaZ(iStep)), aimag(DeltaZ(iStep))         
+      END DO
+      DO iStep = 0, ntime/2
+         WRITE(890,*)  dt*real(nprint*iStep)/MyConsts_fs2AU,  real(DeltaZ(iStep)), aimag(DeltaZ(iStep))         
+      END DO
+      WRITE(890,*)  " "
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
    END IF
 

@@ -4,7 +4,8 @@ MODULE PotentialModule
    USE RandomNumberGenerator
 
    PRIVATE
-   PUBLIC :: SetupPotential, VHSticking, VHarmonic, ThermalEquilibriumConditions, ScatteringConditions
+   PUBLIC :: SetupPotential, VHSticking, VHarmonic
+   PUBLIC :: ThermalEquilibriumConditions, ScatteringConditions, HarmonicConditions
    PUBLIC :: CarbonForceConstant, GraphiteLatticeConstant
 
    !> Setup variable for the potential
@@ -185,6 +186,32 @@ MODULE PotentialModule
 ! ************************************************************************************
 
 
+      ! Setup initial conditions for the harmonic potential
+      ! data are initialized in ATOMIC UNITS
+      SUBROUTINE HarmonicConditions( Positions, Velocities )
+         IMPLICIT NONE
+
+         REAL, DIMENSION(:), INTENT(OUT) :: Positions, Velocities
+         INTEGER           :: NDoF
+
+         ! Check the number of non frozen degree of freedom
+         NDoF = size( Positions )
+         CALL ERROR( size(Velocities) /= NDoF, "PotentialModule.HarmonicConditions: array dimension mismatch" )
+
+         ! Check if the nr of dimension is compatible with the slab maximum size
+         CALL ERROR(  (NDoF < 1), "PotentialModule.HarmonicConditions: wrong number of DoFs" )
+            
+         ! Equilibrium position of H atom
+         Positions(:) = 0.0
+         Velocities(:) = 0.0
+
+
+      END SUBROUTINE HarmonicConditions
+
+
+! ************************************************************************************
+
+
       REAL FUNCTION GraphiteLatticeConstant()
          IMPLICIT NONE
 
@@ -214,7 +241,7 @@ MODULE PotentialModule
 
 
 !*******************************************************************************
-!> H-Graphene test harmonic potential (input and output in AU).
+!> test harmonic potential (input and output in AU).
 !>
 !> @param Positions    Array with 3 cartesian coordinates for the H atom and 
 !>                     121 Z coordinates for the carbon atoms (in au)
@@ -231,7 +258,7 @@ MODULE PotentialModule
          INTEGER :: NrNonFrozen, i       
 
          ! Force constants
-         REAL :: HForceConstant, CForceConstant
+         REAL :: ForceConstant
          
          ! Error if module not have been setup yet
          CALL ERROR( .NOT. PotentialModuleIsSetup, "PotentialModule.VHarmonic : Module not Setup" )
@@ -241,23 +268,16 @@ MODULE PotentialModule
          CALL ERROR( size(Forces) /= NrNonFrozen, "PotentialModule.VHarmonic: array dimension mismatch" )
 
          ! Check if the nr of dimension is compatible with the slab maximum size
-         CALL ERROR( (NrNonFrozen > 124) .OR. (NrNonFrozen < 7), "PotentialModule.VHarmonic: wrong number of DoFs" )
+         CALL ERROR( (NrNonFrozen < 1), "PotentialModule.VHarmonic: wrong number of DoFs" )
          
          ! Setup force constants of harmonic potentials
-         CForceConstant = CarbonForceConstant()
-         CForceConstant = 12.0107*MyConsts_Uma2Au * (MyConsts_PI*2./(200.*MyConsts_fs2AU))**2 
-!          HForceConstant = 0.32115248540922697
-         HForceConstant = 0.3
+         ForceConstant = 1.00782503207*MyConsts_Uma2Au * (MyConsts_PI*2./(100.*MyConsts_fs2AU))**2 
 
          ! Compute potential and forces
          VHarmonic = 0.0
-         DO i = 1, 3
-            VHarmonic = VHarmonic + 0.5 * HForceConstant * Positions(i)**2
-            Forces(i) = -  HForceConstant * Positions(i)
-         END DO
-         DO i = 4, NrNonFrozen
-            VHarmonic = VHarmonic + 0.5 * CForceConstant * Positions(i)**2
-            Forces(i) = -  CForceConstant * Positions(i)
+         DO i = 1, NrNonFrozen
+            VHarmonic = VHarmonic + 0.5 * ForceConstant * Positions(i)**2
+            Forces(i) = -  ForceConstant * Positions(i)
          END DO
          
       END FUNCTION VHarmonic
