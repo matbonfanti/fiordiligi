@@ -38,6 +38,20 @@ PROGRAM JK6
    ! Output variables
    CHARACTER(100) :: OutFileName         ! output file name
    INTEGER  :: NWriteUnit                ! output unit number
+   INTEGER  :: TrajOutputUnit            ! unit nr for the trajectory output
+   INTEGER  :: TimeCorrelationUnit       ! unit nr for the correlation function in time
+   INTEGER  :: SpectrDensUnit            ! unit nr for the spectral density
+   INTEGER  :: InitialTDistrib           ! unit nr to print the initial temperatures distribution
+
+   ! Distribution of the initial istantaneous temperatures
+   INTEGER, DIMENSION( 200:400 ) :: InitTempDistribution
+
+   ! Real parameters to compute the analytical autocorrelation function
+   REAL :: NoiseVariance
+   REAL :: OsciFreq
+   REAL :: DistortedFreq
+   REAL :: MotionVariance
+   REAL :: Time
 
    ! Autocorrelation computation
    REAL  :: ZHinTime
@@ -172,11 +186,6 @@ PROGRAM JK6
          CALL SetupThermostat( Equilibration, Gamma, temp, (/ (.FALSE., iCoord=1,4), (.TRUE., iCoord=1,nevo-1) /) )
 
    ELSE IF (RunType == HARMONICMODEL) THEN 
-
-         print*, "temperature (au) :",temp
-         print*, "mass (au) :", rmh
-         print*, "force constant (au) :", rmh*MyConsts_Uma2Au * (MyConsts_PI*2./(100.*MyConsts_fs2AU))**2 
-         print*, "sqrt(<x^2>) (ang) :", sqrt( temp / (rmh*MyConsts_Uma2Au * (MyConsts_PI*2./(100.*MyConsts_fs2AU))**2 ) )*MyConsts_Bohr2Ang
 
          ! Allocation of position, velocity, acceleration arrays
          ALLOCATE( X(nevo), V(nevo), A(nevo), APre(nevo) )
@@ -765,17 +774,6 @@ PROGRAM JK6
    !****************************************************************************
 
 
-
-
-
-
-
-
-
-
-
-
-
       ! ALLOCATE AND INITIALIZE DATA WITH THE AVERAGES OVER THE SET OF TRAJECTORIES
 
       ! allocate arrays for deltaZ, its average and and its fourier transform
@@ -786,6 +784,27 @@ PROGRAM JK6
 
       ! Initialize global temperature average
       GlobalTemperature = 0.0
+
+      ! Initialize temperatures distribution
+      InitTempDistribution(:) = 0
+
+      ! Open output file to print the distribution of initial temperatures after equilibration
+      InitialTDistrib = LookForFreeUnit()
+      OPEN( FILE="InitialTemp.dat", UNIT=InitialTDistrib )
+      WRITE(InitialTDistrib, "(A,I6,A,/)") "# Distribution of initial temperatures after equilibration - ", inum, " trajectories "
+      ! Open output file to print the brownian realizations vs time
+      TrajOutputUnit = LookForFreeUnit()
+      OPEN( FILE="Trajectories.dat", UNIT=TrajOutputUnit )
+      WRITE(TrajOutputUnit, "(A,I6,A,/)") "# ", inum, " realizations of harmonic brownian motion "
+      ! Open output file to print the spectral density of the brownian motion
+      SpectrDensUnit = LookForFreeUnit()
+      OPEN( FILE="SpectralDensity.dat", UNIT=SpectrDensUnit )
+      WRITE(SpectrDensUnit, "(A,I6,A,/)") "# Spectral density of harmonic brownian motion - ", inum, " trajectories "
+      ! Open output file to print the  autocorrelation function of the brownian motion
+      TimeCorrelationUnit = LookForFreeUnit()
+      OPEN( FILE="Autocorrelation.dat", UNIT=TimeCorrelationUnit )
+      WRITE(TimeCorrelationUnit, "(A,I6,A,/)") "# Autocorrelation func of harmonic brownian motion - ", inum, " trajectories "
+
 
       PRINT "(2/,A)",    "***************************************************"
       PRINT "(A,F10.5)", "               HARMONIC BROWNIAN TEST"
@@ -847,6 +866,8 @@ PROGRAM JK6
 
          END DO
 
+         PRINT "(A)", " Equilibration completed! "
+
          IF ( PrintType >= FULL ) THEN
             
             ! Compute average and standard deviation
@@ -854,11 +875,13 @@ PROGRAM JK6
             TempVariance = (TempVariance/NrEquilibSteps) - TempAverage**2
 
             ! output message with average values
-            PRINT "(/,A)",                    " Equilibration completed! "
-            PRINT "(A,1F10.4,/,A,1F10.4,/)",  " Average temperature (K): ", TempAverage, &
-                                              " Standard deviation (K):  ", sqrt(TempVariance)
+            PRINT "(/,A,1F10.4,/,A,1F10.4,/)",  " * Average temperature (K): ", TempAverage, &
+                                                " * Standard deviation (K):  ", sqrt(TempVariance)
          ENDIF
 
+         ! Store the initial temperature
+         IF ( (INT( TempAverage ) >= 200) .AND. (INT( TempAverage ) <= 400) ) &
+               InitTempDistribution( INT( TempAverage ) ) = InitTempDistribution( INT( TempAverage ) ) + 1 
 
          !*************************************************************
          ! INFORMATION ON INITIAL CONDITIONS, INITIALIZATION, OTHER...
@@ -868,6 +891,7 @@ PROGRAM JK6
          KinEnergy = EOM_KineticEnergy( Equilibration, V )
          TotEnergy = PotEnergy + KinEnergy
          IstTemperature = 2.0*KinEnergy/(MyConsts_K2AU*nevo)
+
          
          ! Initialize the variables for the trajectory averages
          TempAverage  = 0.0      ! Temperature
@@ -885,6 +909,8 @@ PROGRAM JK6
          ! Initialize array with C-H distance
          DeltaZ(:) = 0.0
          DeltaZ(0) = X(1) 
+
+         PRINT "(/,A)", " Propagating the harmonic brownian motion in time... "
 
          ! cycle over nstep velocity verlet iterations
          DO iStep = 1,nstep
@@ -925,12 +951,12 @@ PROGRAM JK6
 
          ! correct the array with deltaZ vs time
          DeltaZ(:) = DeltaZ(:) -  HPosAverage(1)
-         
+
          ! PRINT deltaZ vs TIME to output file
          DO iStep = 0, ntime
-               WRITE(888,*)  dt*real(nprint*iStep)/MyConsts_fs2AU,  real(DeltaZ(iStep))
+               WRITE(TrajOutputUnit,"(F14.8,F14.8)")  dt*real(nprint*iStep)/MyConsts_fs2AU,  real(DeltaZ(iStep))
          END DO
-         WRITE(888,*)  " "
+         WRITE(TrajOutputUnit,*)  " "
 
          ! Fourier transform
          CALL DiscreteFourier( DeltaZ )
@@ -943,13 +969,14 @@ PROGRAM JK6
          TempVariance = TempVariance / nstep - TempAverage**2
                                             
          ! And print the average values of that trajectory 
-         WRITE(*,710)  TempAverage, sqrt(TempVariance), HPosAverage(1)* MyConsts_Bohr2Ang, sqrt(HPosVariance(1))* MyConsts_Bohr2Ang
-         710 FORMAT (/, " Time propagation completed! ",/   &
-                           " * Average temperature (K)        ",1F10.4,/    &
-                           "   Standard deviation (K)         ",1F10.4,/    &
-                           " * Average coordinates (Ang)      ",3F10.4,/    &
-                           "   Standard deviation (Ang)       ",3F10.4,/ ) 
-                                                
+         PRINT "(A)", " Time propagation completed! "
+         IF ( PrintType >= FULL ) THEN
+            PRINT 710, TempAverage, sqrt(TempVariance), HPosAverage(1)* MyConsts_Bohr2Ang, sqrt(HPosVariance(1))* MyConsts_Bohr2Ang
+            710 FORMAT (/,    " * Average temperature (K)        ",1F10.4,/    &
+                              "   Standard deviation (K)         ",1F10.4,/    &
+                              " * Average coordinates (Ang)      ",3F10.4,/    &
+                              "   Standard deviation (Ang)       ",3F10.4,/ ) 
+         END IF                                       
 
       END DO
       
@@ -958,7 +985,12 @@ PROGRAM JK6
       !*************************************************************
       !         OUTPUT OF THE RELEVANT AVERAGES 
       !*************************************************************
-      
+
+      ! PRint the distribution of initial istant temperatures
+      DO iStep = 200,400
+         WRITE(InitialTDistrib,*)  iStep, InitTempDistribution( iStep )
+      END DO
+
       ! Normalize global average of the temperature
       GlobalTemperature = GlobalTemperature / real( inum*nstep )
 
@@ -967,36 +999,47 @@ PROGRAM JK6
                      " * Average temperature (K)        ",1F10.4,/ ) 
 
       ! Normalize average of deltaZ fourier components
-      AverageDeltaZ(:) = AverageDeltaZ(:) / real(inum )
+      AverageDeltaZ(:) = AverageDeltaZ(:)  / real(inum)
+!* real(nstep) !* dt / real(inum ) / (2.*MyConsts_PI)
 
-      ! Print fourier 
+      ! Print spectral density of the stocastic process X(t)
       DO iOmega = 0, ntime
-            WRITE(891,*)  iOmega*dOmega*MyConsts_fs2AU,  AverageDeltaZ(iOmega)         
+            WRITE(SpectrDensUnit,*)  iOmega*dOmega*MyConsts_fs2AU,  AverageDeltaZ(iOmega)         
       END DO
-      WRITE(891,*)  " "
 
+      ! fourier transform the spectral density to obtain the autocorrelation function
       DeltaZ(:) = AverageDeltaZ(:)
       CALL DiscreteInverseFourier(DeltaZ)
 
+      ! Print the autocorrelation function
       DO iStep = (ntime/2)+1, ntime
-         WRITE(890,*)  dt*real(nprint*(iStep-ntime-1))/MyConsts_fs2AU,  real(DeltaZ(iStep)), aimag(DeltaZ(iStep))         
+         WRITE(TimeCorrelationUnit,*)  dt*real(nprint*(iStep-ntime-1))/MyConsts_fs2AU,  real(DeltaZ(iStep))
       END DO
       DO iStep = 0, ntime/2
-         WRITE(890,*)  dt*real(nprint*iStep)/MyConsts_fs2AU,  real(DeltaZ(iStep)), aimag(DeltaZ(iStep))         
+         WRITE(TimeCorrelationUnit,*)  dt*real(nprint*iStep)/MyConsts_fs2AU,  real(DeltaZ(iStep))
       END DO
-      WRITE(890,*)  " "
+      WRITE(TimeCorrelationUnit,"(/,A,/)") "# analytical result"
 
+      ! Compute the variables needed for the analytical autocorrelation function
+      NoiseVariance = 2.0*temp*rmh*Gamma
+      OsciFreq = (MyConsts_PI*2./(100.*MyConsts_fs2AU)) 
+      DistortedFreq = sqrt( OsciFreq**2 - Gamma**2/4.0 )
+      MotionVariance = NoiseVariance / ( 2 * rmh**2 * Gamma * OsciFreq**2 )
 
+      PRINT*, " * Expected standard deviation of the brownian oscillator: ", sqrt(MotionVariance)*MyConsts_Bohr2Ang
 
+      ! print in the autocorrelation file the analytic prediction
+      DO iStep = 0, ntime/2
+         Time = dt*real(nprint*iStep)
+         WRITE(TimeCorrelationUnit,*)  Time/MyConsts_fs2AU,  &
+            MotionVariance * ( cos(DistortedFreq*Time) + Gamma/(2.*DistortedFreq) * sin(DistortedFreq*Time) ) * exp( - Gamma * Time /2.)
+      END DO
 
-
-
-
-
-
-
-
-
+      ! Close output files
+      CLOSE( TrajOutputUnit )
+      CLOSE( TimeCorrelationUnit )
+      CLOSE( SpectrDensUnit )
+      CLOSE( InitialTDistrib )
 
 
 
