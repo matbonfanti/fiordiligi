@@ -791,19 +791,19 @@ PROGRAM JK6
       ! Open output file to print the distribution of initial temperatures after equilibration
       InitialTDistrib = LookForFreeUnit()
       OPEN( FILE="InitialTemp.dat", UNIT=InitialTDistrib )
-      WRITE(InitialTDistrib, "(A,I6,A,/)") "# Distribution of initial temperatures after equilibration - ", inum, " trajectories "
+      WRITE(InitialTDistrib, "(A,I6,A,/)") "# Distribution of initial temperatures after equilibration - ", inum, " trajectories (K)"
       ! Open output file to print the brownian realizations vs time
       TrajOutputUnit = LookForFreeUnit()
       OPEN( FILE="Trajectories.dat", UNIT=TrajOutputUnit )
-      WRITE(TrajOutputUnit, "(A,I6,A,/)") "# ", inum, " realizations of harmonic brownian motion "
+      WRITE(TrajOutputUnit, "(A,I6,A,/)") "# ", inum, " realizations of harmonic brownian motion (fs | Angstrom)"
       ! Open output file to print the spectral density of the brownian motion
       SpectrDensUnit = LookForFreeUnit()
       OPEN( FILE="SpectralDensity.dat", UNIT=SpectrDensUnit )
-      WRITE(SpectrDensUnit, "(A,I6,A,/)") "# Spectral density of harmonic brownian motion - ", inum, " trajectories "
+      WRITE(SpectrDensUnit, "(A,I6,A,/)") "# Spectral density of harmonic brownian motion - ", inum, " trajectories (fs | au)"
       ! Open output file to print the  autocorrelation function of the brownian motion
       TimeCorrelationUnit = LookForFreeUnit()
       OPEN( FILE="Autocorrelation.dat", UNIT=TimeCorrelationUnit )
-      WRITE(TimeCorrelationUnit, "(A,I6,A,/)") "# Autocorrelation func of harmonic brownian motion - ", inum, " trajectories "
+      WRITE(TimeCorrelationUnit, "(A,I6,A,/)") "# Autocorrelation func of harmonic brownian motion - ", inum, " trajectories (fs | Angstrom^2)"
 
 
       PRINT "(2/,A)",    "***************************************************"
@@ -954,7 +954,7 @@ PROGRAM JK6
 
          ! PRINT deltaZ vs TIME to output file
          DO iStep = 0, ntime
-               WRITE(TrajOutputUnit,"(F14.8,F14.8)")  dt*real(nprint*iStep)/MyConsts_fs2AU,  real(DeltaZ(iStep))
+               WRITE(TrajOutputUnit,"(F14.8,F14.8)")  dt*real(nprint*iStep)/MyConsts_fs2AU,  real(DeltaZ(iStep))*MyConsts_Bohr2Ang
          END DO
          WRITE(TrajOutputUnit,*)  " "
 
@@ -1000,7 +1000,6 @@ PROGRAM JK6
 
       ! Normalize average of deltaZ fourier components
       AverageDeltaZ(:) = AverageDeltaZ(:)  / real(inum)
-!* real(nstep) !* dt / real(inum ) / (2.*MyConsts_PI)
 
       ! Print spectral density of the stocastic process X(t)
       DO iOmega = 0, ntime
@@ -1013,10 +1012,10 @@ PROGRAM JK6
 
       ! Print the autocorrelation function
       DO iStep = (ntime/2)+1, ntime
-         WRITE(TimeCorrelationUnit,*)  dt*real(nprint*(iStep-ntime-1))/MyConsts_fs2AU,  real(DeltaZ(iStep))
+         WRITE(TimeCorrelationUnit,*)  dt*real(nprint*(iStep-ntime-1))/MyConsts_fs2AU,  real(DeltaZ(iStep))*MyConsts_Bohr2Ang**2
       END DO
       DO iStep = 0, ntime/2
-         WRITE(TimeCorrelationUnit,*)  dt*real(nprint*iStep)/MyConsts_fs2AU,  real(DeltaZ(iStep))
+         WRITE(TimeCorrelationUnit,*)  dt*real(nprint*iStep)/MyConsts_fs2AU,  real(DeltaZ(iStep))*MyConsts_Bohr2Ang**2
       END DO
       WRITE(TimeCorrelationUnit,"(/,A,/)") "# analytical result"
 
@@ -1027,12 +1026,14 @@ PROGRAM JK6
       MotionVariance = NoiseVariance / ( 2 * rmh**2 * Gamma * OsciFreq**2 )
 
       PRINT*, " * Expected standard deviation of the brownian oscillator: ", sqrt(MotionVariance)*MyConsts_Bohr2Ang
+      PRINT*, " * Computed standard deviation of the brownian oscillator: ", sqrt(real(DeltaZ(0)))*MyConsts_Bohr2Ang
 
       ! print in the autocorrelation file the analytic prediction
       DO iStep = 0, ntime/2
          Time = dt*real(nprint*iStep)
          WRITE(TimeCorrelationUnit,*)  Time/MyConsts_fs2AU,  &
-            MotionVariance * ( cos(DistortedFreq*Time) + Gamma/(2.*DistortedFreq) * sin(DistortedFreq*Time) ) * exp( - Gamma * Time /2.)
+            MotionVariance * ( cos(DistortedFreq*Time) + Gamma/(2.*DistortedFreq) * sin(DistortedFreq*Time) )        &
+                                                               * exp( - Gamma * Time /2.)*MyConsts_Bohr2Ang**2
       END DO
 
       ! Close output files
