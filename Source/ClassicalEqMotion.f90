@@ -134,7 +134,7 @@ MODULE ClassicalEqMotion
 
 #if defined(VERBOSE_OUTPUT)
       WRITE(*,"(/,A,1F8.3,A,1F8.3)") "Thermostat is setup with Gamma = ",Gamma," and Temperature = ", Temperature
-      WRITE(*,*) " Langevin DoFs: ", EvolData%ThermoSwitch(iDoF)
+      WRITE(*,*) " Langevin DoFs: ", EvolData%ThermoSwitch(:)
 #endif
       
    END SUBROUTINE SetupThermostat

@@ -38,7 +38,7 @@ MODULE RandomNumberGenerator
    INTEGER, PARAMETER :: K4B=selected_int_kind(9)
 
    ! The seed of the pseudo-random series of number is stored internally in the module
-   INTEGER(K4B), SAVE :: StoredSeed = -99
+   INTEGER(K4B), SAVE :: StoredSeed
 
    ! Since the gaussian random nr are generated in couples, the following variable
    ! store the non used gaussian number for later calls of the subroutine
@@ -94,9 +94,7 @@ CONTAINS
       INTEGER(K4B), INTENT(IN) :: Seed
       REAL :: Temp
 
-      CALL ERROR( Seed >=0, " RandomNumberGenerator.SetSeed: seed has to be negative to initialize the random number generator" )
-      StoredSeed = Seed
-      Temp = ran( StoredSeed ) ! Call to initialize
+      CALL RANDOM_SEED( put= (/ Seed /) )
 
    END SUBROUTINE SetSeed
 
@@ -106,8 +104,7 @@ CONTAINS
       IMPLICIT NONE
       REAL, INTENT(IN), OPTIONAL  :: X0, X1
 
-      ! Generate random number in ( 0, 1 )
-      RandNr = ran( StoredSeed )
+      CALL RANDOM_NUMBER( RandNr )  
 
       IF ( PRESENT(X1) .AND. PRESENT(X0) ) THEN    ! both input values are present: generate nr in (X0, X1)
             RandNr = X0 + RandNr * ( X1 - X0 )
@@ -152,31 +149,31 @@ CONTAINS
   
    END FUNCTION GaussianRandomNr
 
-   !****************************************************************************
-
-    ! taken from Numerical Recipes for Fortran (for details, see pag 1142)
-   FUNCTION ran(idum)
-      IMPLICIT NONE
-      INTEGER(K4B), INTENT(INOUT) :: idum
-      REAL :: ran
-      INTEGER(K4B), PARAMETER :: IA=16807, IM=2147483647, IQ=127773, IR=2836
-      REAL, SAVE :: am
-      INTEGER(K4B), SAVE :: ix=-1, iy=-1, k
-
-      if (idum <= 0 .or. iy < 0) then 
-         am = nearest(1.0,-1.0)/IM
-         iy = ior(ieor(888889999,abs(idum)),1)
-         ix = ieor(777755555,abs(idum))
-         idum = abs(idum)+1
-      end if
-      ix = ieor(ix, ishft(ix,13))
-      ix = ieor(ix, ishft(ix,-17))
-      ix = ieor(ix, ishft(ix,5))
-      k=iy/IQ
-      iy=IA*(iy-k*IQ)-IR*k
-      if (iy < 0) iy=iy+IM
-      ran=am*ior(iand(IM,ieor(ix,iy)),1)
-
-   END FUNCTION ran
+!    !****************************************************************************
+! 
+!     ! taken from Numerical Recipes for Fortran (for details, see pag 1142)
+!    FUNCTION ran(idum)
+!       IMPLICIT NONE
+!       INTEGER(K4B), INTENT(INOUT) :: idum
+!       REAL :: ran
+!       INTEGER(K4B), PARAMETER :: IA=16807, IM=2147483647, IQ=127773, IR=2836
+!       REAL, SAVE :: am
+!       INTEGER(K4B), SAVE :: ix=-1, iy=-1, k
+! 
+!       if (idum <= 0 .or. iy < 0) then 
+!          am = nearest(1.0,-1.0)/IM
+!          iy = ior(ieor(888889999,abs(idum)),1)
+!          ix = ieor(777755555,abs(idum))
+!          idum = abs(idum)+1
+!       end if
+!       ix = ieor(ix, ishft(ix,13))
+!       ix = ieor(ix, ishft(ix,-17))
+!       ix = ieor(ix, ishft(ix,5))
+!       k=iy/IQ
+!       iy=IA*(iy-k*IQ)-IR*k
+!       if (iy < 0) iy=iy+IM
+!       ran=am*ior(iand(IM,ieor(ix,iy)),1)
+! 
+!    END FUNCTION ran
   
 END MODULE RandomNumberGenerator

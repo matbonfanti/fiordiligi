@@ -469,6 +469,9 @@ PROGRAM JK6
       ! Initialize global temperature average
       GlobalTemperature = 0.0
 
+      ! Initialize random number seed
+      CALL SetSeed( 1 )
+
       PRINT "(2/,A)",    "***************************************************"
       PRINT "(A,F10.5)", "               EQUILIBRIUM SIMULATION"
       PRINT "(A,/)" ,    "***************************************************"

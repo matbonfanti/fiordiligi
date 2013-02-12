@@ -87,8 +87,8 @@ MODULE PotentialModule
          CALL ERROR( (NDoF > 124) .OR. (NDoF < 7), "PotentialModule.ThermalEquilibriumConditions: wrong number of DoFs" )
             
          ! Equilibrium position of H atom
-         Positions(1) = 0.00001
-         Positions(2) = 0.00001
+         Positions(1) = 0.0000
+         Positions(2) = 0.0000
          Positions(3) = 1.483 / MyConsts_Bohr2Ang
 
          ! Equilibrium position of C1 atom
@@ -312,8 +312,8 @@ MODULE PotentialModule
 
          REAL :: a, b, c1, c2, d0
 
-         REAL :: dbdzc, dc1dzc, dc2dzc, dd0dzc, df2dr, dkrdzc, dkrdzh, drdxh
-         REAL :: drdyh, dswdr, dvdzc, dvdzh, dvidzc, dvidzh, dvqdr, dvqdzc
+         REAL :: dbdzc, dc1dzc, dc2dzc, dd0dzc, df2dr, dkrdzc, dkrdzh
+         REAL :: dswdr, dvdzc, dvdzh, dvidzc, dvidzh, dvqdr, dvqdzc
          REAL :: dvqdzh, dvtdrho, dvtds1, dvtds2
          REAL :: dzgdzc, dzmdzc
 
@@ -1790,10 +1790,13 @@ MODULE PotentialModule
          vv = vv / MyConsts_Hartree2eV
 
          ! Forces (negative sign because F = -dV/dx )
-         drdxh=xh/rho
-         drdyh=yh/rho
-         Forces(1)=-dvtdrho*drdxh
-         Forces(2)=-dvtdrho*drdyh
+         IF ( rho == 0.0 ) THEN
+            Forces(1) = 0.0
+            Forces(2) = 0.0
+         ELSE
+            Forces(1) = -dvtdrho*xh/rho
+            Forces(2) = -dvtdrho*yh/rho
+         ENDIF
          Forces(3)=-dvtds1
          Forces(4)=-(dvtds2+ddz(1)-rkc*(z(1)-qqq))
          Forces(5)=-(-(dvtds1+dvtds2)/3.0+ddz(2)+rkc*(z(1)-qqq)/3.0)
