@@ -469,6 +469,19 @@ PROGRAM JK6
       ! Initialize global temperature average
       GlobalTemperature = 0.0
 
+      ! Open output file to print the brownian realizations vs time
+      TrajOutputUnit = LookForFreeUnit()
+      OPEN( FILE="Trajectories.dat", UNIT=TrajOutputUnit )
+      WRITE(TrajOutputUnit, "(A,I6,A,/)") "# ", inum, " realizations of harmonic brownian motion (fs | Angstrom)"
+      ! Open output file to print the spectral density of the brownian motion
+      SpectrDensUnit = LookForFreeUnit()
+      OPEN( FILE="SpectralDensity.dat", UNIT=SpectrDensUnit )
+      WRITE(SpectrDensUnit, "(A,I6,A,/)") "# Spectral density of harmonic brownian motion - ", inum, " trajectories (fs | au)"
+      ! Open output file to print the  autocorrelation function of the brownian motion
+      TimeCorrelationUnit = LookForFreeUnit()
+      OPEN( FILE="Autocorrelation.dat", UNIT=TimeCorrelationUnit )
+      WRITE(TimeCorrelationUnit, "(A,I6,A,/)") "# Autocorrelation func of harmonic brownian motion - ", inum, " trajectories (fs | Angstrom^2)"
+      
       ! Initialize random number seed
       CALL SetSeed( 1 )
 
@@ -497,7 +510,7 @@ PROGRAM JK6
             WRITE(OutFileName,"(A,I4.4,A)") "Traj_",iTraj,".dat"
             NWriteUnit = LookForFreeUnit()
             OPEN( Unit=NWriteUnit, File=OutFileName )
-            WRITE( NWriteUnit, * ) "# EQUILIBRATION: time, temperature, potential, kinetic energy, total energy"
+            WRITE( NWriteUnit, * ) "# EQUILIBRATION: time, potential E, kinetic E, X_H, Y_H, Z_H, Z_C1"
          ENDIF
 
          ! Nr of steps to average
@@ -533,11 +546,10 @@ PROGRAM JK6
                ! every nprint steps, compute trapping and write debug output
                IF ( mod(iStep,nprint) == 0 ) THEN
                   IF ( PrintType == DEBUG ) THEN
-                        WRITE(NWriteUnit,850) real(iStep)*dt/MyConsts_fs2AU, IstTemperature, &
-                        PotEnergy*MyConsts_Hartree2eV, KinEnergy*MyConsts_Hartree2eV,  TotEnergy*MyConsts_Hartree2eV
+                        WRITE(NWriteUnit,850) real(iStep)*dt/MyConsts_fs2AU, PotEnergy*MyConsts_Hartree2eV, KinEnergy*MyConsts_Hartree2eV,  X(1:4)
                   END IF
                END IF
-               850 FORMAT( F12.5, 5F15.8 )
+               850 FORMAT( F12.5, 6F13.6 )
 
                ! If the step is after some time, store temperature averages
                IF ( iStep >= EquilibrInitAverage ) THEN
@@ -558,17 +570,17 @@ PROGRAM JK6
             CLOSE( Unit=NWriteUnit )
          ENDIF
 
+         PRINT "(A)", " Equilibration completed! "
+         
          IF ( PrintType >= FULL ) THEN
             ! Compute average and standard deviation
             TempAverage = TempAverage / NrOfStepsAver 
             TempVariance = (TempVariance/NrOfStepsAver) - TempAverage**2
-
+            
             ! output message with average values
-            PRINT "(/,A)",                    " Equilibration completed! "
-            PRINT "(A,1F10.4,/,A,1F10.4,/)",  " Average temperature (K): ", TempAverage, &
-                                              " Standard deviation (K):  ", sqrt(TempVariance)
+            PRINT "(/,A,1F10.4,/,A,1F10.4,/)",  " * Average temperature (K): ", TempAverage, &
+                                                " * Standard deviation (K):  ", sqrt(TempVariance)
          ENDIF
-
 
          !*************************************************************
          ! INFORMATION ON INITIAL CONDITIONS, INITIALIZATION, OTHER...
@@ -619,6 +631,8 @@ PROGRAM JK6
          DeltaZ(:) = 0.0
          DeltaZ(0) = X(3)  -  X(4)
 
+         PRINT "(/,A)", " Propagating the equilibrium H-Graphene in time... "
+         
          ! cycle over nstep velocity verlet iterations
          DO iStep = 1,nstep
 
@@ -687,18 +701,20 @@ PROGRAM JK6
 
          ! correct the array with deltaZ vs time
          DeltaZ(:) = DeltaZ(:) -  HPosAverage(3)
-         
+
          ! PRINT deltaZ vs TIME to output file
          DO iStep = 0, ntime
-               WRITE(888,*)  dt*real(nprint*iStep)/MyConsts_fs2AU,  real(DeltaZ(iStep))
+               WRITE(TrajOutputUnit,"(F14.8,F14.8)")  dt*real(nprint*iStep)/MyConsts_fs2AU,  real(DeltaZ(iStep))*MyConsts_Bohr2Ang
          END DO
-         WRITE(888,*)  " "
-
+         WRITE(TrajOutputUnit,*)  " "
+         
          ! Fourier transform
          CALL DiscreteFourier( DeltaZ )
 
          ! Store average of DeltaZ fourier components
          AverageDeltaZ(:) = AverageDeltaZ(:) + abs(DeltaZ(:))**2
+
+         PRINT "(A)", " Time propagation completed! "
 
          IF ( PrintType >= FULL ) THEN
 
@@ -720,8 +736,7 @@ PROGRAM JK6
             ! And print the average values of that trajectory 
             WRITE(*,700)  TempAverage, sqrt(TempVariance), HPosAverage(:)* MyConsts_Bohr2Ang, sqrt(HPosVariance(:))* MyConsts_Bohr2Ang, &
                           C1Average* MyConsts_Bohr2Ang, sqrt(C1Variance)* MyConsts_Bohr2Ang
-            700 FORMAT (/, " Time propagation completed! ",/   &
-                           " * Average temperature (K)        ",1F10.4,/    &
+            700 FORMAT (/, " * Average temperature (K)        ",1F10.4,/    &
                            "   Standard deviation (K)         ",1F10.4,/    &
                            " * Average H coordinates (Ang)    ",3F10.4,/    &
                            "   Standard deviation (Ang)       ",3F10.4,/    &
@@ -753,25 +768,29 @@ PROGRAM JK6
       ! Normalize average of deltaZ fourier components
       AverageDeltaZ(:) = AverageDeltaZ(:) / real(inum )
 
-      ! Print fourier 
+      ! Print spectral density of the stocastic process X(t)
       DO iOmega = 0, ntime
-            WRITE(891,*)  iOmega*dOmega*MyConsts_fs2AU,  AverageDeltaZ(iOmega)         
+            WRITE(SpectrDensUnit,*)  iOmega*dOmega*MyConsts_fs2AU,  AverageDeltaZ(iOmega)         
       END DO
-      WRITE(891,*)  " "
 
       DeltaZ(:) = AverageDeltaZ(:)
       CALL DiscreteInverseFourier(DeltaZ)
 
+      ! Print the autocorrelation function
       DO iStep = (ntime/2)+1, ntime
-         WRITE(890,*)  dt*real(nprint*(iStep-ntime-1))/MyConsts_fs2AU,  real(DeltaZ(iStep)), aimag(DeltaZ(iStep))         
+         WRITE(TimeCorrelationUnit,*)  dt*real(nprint*(iStep-ntime-1))/MyConsts_fs2AU,  real(DeltaZ(iStep))*MyConsts_Bohr2Ang**2
       END DO
       DO iStep = 0, ntime/2
-         WRITE(890,*)  dt*real(nprint*iStep)/MyConsts_fs2AU,  real(DeltaZ(iStep)), aimag(DeltaZ(iStep))         
+         WRITE(TimeCorrelationUnit,*)  dt*real(nprint*iStep)/MyConsts_fs2AU,  real(DeltaZ(iStep))*MyConsts_Bohr2Ang**2
       END DO
-      WRITE(890,*)  " "
 
+      ! Close output files
+      CLOSE( TrajOutputUnit )
+      CLOSE( TimeCorrelationUnit )
+      CLOSE( SpectrDensUnit )
 
-
+      
+      
    !****************************************************************************
    ELSE IF (RunType == HARMONICMODEL) THEN   
    !****************************************************************************
