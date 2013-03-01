@@ -74,6 +74,9 @@ PROGRAM JK6
    INTEGER :: iCoord, iTraj, iStep, jRho, iCarbon, iOmega
    INTEGER :: kk, kstep
 
+   REAL :: DynamicsGamma
+   LOGICAL, DIMENSION(121) :: LangevinSwitchOn
+
 
    PRINT "(/,     '                    ==============================')"
    PRINT "(       '                                JK6_v2            ')"
@@ -150,6 +153,8 @@ PROGRAM JK6
       CALL SetFieldFromInput( InputData, "EquilibrInitAverage", EquilibrInitAverage, int(2.0*(1.0/Gamma)/dt) )
       CALL SetFieldFromInput( InputData, "EquilTStep",  EquilTStep, dt/MyConsts_fs2AU )
       EquilTStep = EquilTStep * MyConsts_fs2AU
+      CALL SetFieldFromInput( InputData, "DynamicsGamma",  DynamicsGamma, 0.0 ) 
+      DynamicsGamma = DynamicsGamma / MyConsts_fs2AU
 
    ELSE IF (RunType == HARMONICMODEL) THEN
       CALL SetFieldFromInput( InputData, "Gamma", Gamma)
@@ -178,9 +183,17 @@ PROGRAM JK6
                ALLOCATE( Trajectory( 7, ntime ) )
          END IF
 
-         ! Set variables for EOM integration in the microcanonical ensamble
-         CALL EvolutionSetup( MolecularDynamics, nevo+3, (/ (rmh, iCoord=1,3), (rmc, iCoord=1,nevo) /), dt )
-         
+         IF ( DynamicsGamma == 0.0 ) THEN 
+            ! Set variables for EOM integration in the microcanonical ensamble
+            CALL EvolutionSetup( MolecularDynamics, nevo+3, (/ (rmh, iCoord=1,3), (rmc, iCoord=1,nevo) /), dt )
+         ELSE
+            ! Set variables for EOM integration in the canonical ensamble
+            CALL EvolutionSetup( MolecularDynamics, nevo+3, (/ (rmh, iCoord=1,3), (rmc, iCoord=1,nevo) /), dt )
+            LangevinSwitchOn = .TRUE.
+            LangevinSwitchOn( 1: MIN( 73, nevo )+3 ) = .FALSE.
+            CALL SetupThermostat( MolecularDynamics, DynamicsGamma, temp, LangevinSwitchOn(1:nevo+3) )
+         END IF
+
          ! Set variables for EOM integration with Langevin thermostat
          CALL EvolutionSetup( Equilibration, nevo+3, (/ (rmh, iCoord=1,3), (rmc, iCoord=1,nevo) /), EquilTStep )
          CALL SetupThermostat( Equilibration, Gamma, temp, (/ (.FALSE., iCoord=1,4), (.TRUE., iCoord=1,nevo-1) /) )
@@ -709,7 +722,7 @@ PROGRAM JK6
          WRITE(TrajOutputUnit,*)  " "
          
          ! Fourier transform
-         CALL DiscreteFourier( DeltaZ )
+        CALL DiscreteFourier( DeltaZ )
 
          ! Store average of DeltaZ fourier components
          AverageDeltaZ(:) = AverageDeltaZ(:) + abs(DeltaZ(:))**2
@@ -774,7 +787,7 @@ PROGRAM JK6
       END DO
 
       DeltaZ(:) = AverageDeltaZ(:)
-      CALL DiscreteInverseFourier(DeltaZ)
+     CALL DiscreteInverseFourier(DeltaZ)
 
       ! Print the autocorrelation function
       DO iStep = (ntime/2)+1, ntime
