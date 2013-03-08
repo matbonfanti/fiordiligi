@@ -273,3 +273,6 @@ ${OBJDIR}/RandomNumberGenerator.o  : ${SRCDIR}/RandomNumberGenerator.f90 ${COMMO
 
 # Module containing the integrator for the classical eq of motion
 ${OBJDIR}/ClassicalEqMotion.o  : ${SRCDIR}/ClassicalEqMotion.f90 ${OBJDIR}/RandomNumberGenerator.o ${COMMONDEP}
+
+# Module containing the definitions of the independent oscillator model
+${OBJDIR}/IndependentOscillatorsModel.o  : ${SRCDIR}/IndependentOscillatorsModel.f90 ${OBJDIR}/MyConsts.o ${COMMONDEP}

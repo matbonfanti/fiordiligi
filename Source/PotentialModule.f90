@@ -11,6 +11,9 @@ MODULE PotentialModule
    !> Setup variable for the potential
    LOGICAL :: PotentialModuleIsSetup = .FALSE.
 
+   !> Fix the collinear geometry
+   LOGICAL :: CollinearPES = .FALSE.
+
 !> \name STICKING POTENTIAL
 !> Parameters of the 4D Potential for C-H
 !> @{
@@ -45,14 +48,23 @@ MODULE PotentialModule
 ! ************************************************************************************
 
 
-      SUBROUTINE SetupPotential( )
+      SUBROUTINE SetupPotential( Collinear )
          IMPLICIT NONE
+         LOGICAL, OPTIONAL :: Collinear
 
          ! exit if module is setup
          IF ( PotentialModuleIsSetup ) RETURN
 
          ! setup force constant ( in eV per Ang^2 )
          rkc = (36.0*gam2+6.0*delt)/(bndprm**2)
+
+         ! Setup if potential is collinear or not
+         IF ( PRESENT( Collinear ) ) THEN
+            CollinearPES =  Collinear
+         ELSE
+            CollinearPES = .FALSE.
+         END IF
+
          PotentialModuleIsSetup = .TRUE.
 
 #if defined(VERBOSE_OUTPUT)
@@ -84,7 +96,7 @@ MODULE PotentialModule
          CALL ERROR( size(Velocities) /= NDoF, "PotentialModule.ThermalEquilibriumConditions: array dimension mismatch" )
 
          ! Check if the nr of dimension is compatible with the slab maximum size
-         CALL ERROR( (NDoF > 124) .OR. (NDoF < 7), "PotentialModule.ThermalEquilibriumConditions: wrong number of DoFs" )
+         CALL ERROR( (NDoF > 124) .OR. (NDoF < 4), "PotentialModule.ThermalEquilibriumConditions: wrong number of DoFs" )
             
          ! Equilibrium position of H atom
          Positions(1) = 0.0000
@@ -104,12 +116,18 @@ MODULE PotentialModule
          SigmaHydroVelocity  = sqrt( Temperature / MassHydro )
 
          ! Random velocities according to Maxwell-Boltzmann
-         Velocities(1) = GaussianRandomNr( SigmaHydroVelocity ) 
-         Velocities(2) = GaussianRandomNr( SigmaHydroVelocity ) 
+         IF ( CollinearPES ) THEN
+               Velocities(1) = 0.0
+               Velocities(2) = 0.0
+         ELSE 
+               Velocities(1) = GaussianRandomNr( SigmaHydroVelocity ) 
+               Velocities(2) = GaussianRandomNr( SigmaHydroVelocity ) 
+         END IF
          Velocities(3) = GaussianRandomNr( SigmaHydroVelocity ) 
          DO nCarbon = 4,NDoF
             Velocities(nCarbon) = GaussianRandomNr( SigmaCarbonVelocity ) 
          END DO
+!          Velocities(4) = 0.0
 
       END SUBROUTINE ThermalEquilibriumConditions
 
@@ -137,7 +155,7 @@ MODULE PotentialModule
          CALL ERROR( size(Velocities) /= NDoF, "PotentialModule.ScatteringConditions: array dimension mismatch" )
 
          ! Check if the nr of dimension is compatible with the slab maximum size
-         CALL ERROR( (NDoF > 124) .OR. (NDoF < 7), "PotentialModule.ScatteringConditions: wrong number of DoFs" )
+         CALL ERROR( (NDoF > 124) .OR. (NDoF < 4), "PotentialModule.ScatteringConditions: wrong number of DoFs" )
 
          ! Scattering position of H atom
          Positions(1) = ImpactParam
@@ -285,10 +303,201 @@ MODULE PotentialModule
 
 ! ******************************************************************************************      
 
+!*******************************************************************************
+!> 4D H-Graphene potential by Jackson and coworkers.
+!> This subroutine is used to compute the system potential only, without any
+!> force field for the graphite slab... 
+!> @ref http://pubs.acs.org/doi/abs/10.1021/jp057136%2B [ J.Phys.Chem.B 2006,110,18811 ]
+!>
+!> @param Positions    Array with 3 cartesian coordinates for the H atom and 
+!>                     a Z coordinates for the nearest carbon atoms (in au)
+!> @param Forces       Output array with the derivatives of the potential (in au)
+!> @param vv           output potential in atomic units
+!*******************************************************************************     
+      REAL FUNCTION CH_4Dimensional( Positions, Forces ) RESULT(vv) 
+         IMPLICIT NONE
+         REAL, DIMENSION(4), INTENT(IN)  :: Positions
+         REAL, DIMENSION(4), INTENT(OUT) :: Forces 
+
+         ! temporary variables to store positions in Ang units
+         REAL :: xh, yh
+
+         REAL :: a, b, c1, c2, d0
+
+         REAL :: dbdzc, dc1dzc, dc2dzc, dd0dzc, df2dr, dkrdzc, dkrdzh
+         REAL :: dswdr, dvdzc, dvdzh, dvidzc, dvidzh, dvqdr, dvqdzc
+         REAL :: dvqdzh, dvtdrho, dvtds1, dvtds2
+         REAL :: dzgdzc, dzmdzc
+
+         REAL :: fexp, ff1, ff2, ff3
+         REAL :: rho, rkrho, sub1, sub2, sw
+         REAL :: v, vi, vq, vt
+         REAL :: zg, zm
+
+         ! Error if module not have been setup yet
+!          CALL ERROR( .NOT. PotentialModuleIsSetup, "PotentialModule.VHSticking : Module not Setup" )
+
+         ! If collinear calculation, fix the inpact parameter to zero
+         IF ( CollinearPES ) THEN
+            xh  = 0.0
+            yh  = 0.0
+            rho = 0.0
+         ELSE           ! Transform input coordinate from AU to Angstrom
+            xh = (Positions(1) * MyConsts_Bohr2Ang)
+            yh = (Positions(2) * MyConsts_Bohr2Ang)
+            rho=sqrt( (Positions(1) * MyConsts_Bohr2Ang)**2 + (Positions(2) * MyConsts_Bohr2Ang)**2 )
+         ENDIF
+
+         ! Compute the parameters for the morse + gaussian 
+         ! functional form for the collinear potential
+
+         ! D_0 is the morse depth (eV)
+         d0=0.474801+0.9878257*sub2-1.3921499*sub2**2              &
+         +0.028278*sub2**3-1.8879928*sub2**4                       &
+         +0.11*exp(-8.0*(sub2-0.28)**2)
+         dd0dzc=0.9878257-2.7842998*sub2+0.084834*sub2**2-         &
+         7.5519712*sub2**3+(                                       &
+         -1.76*(sub2-0.28)*exp(-8.0*(sub2-0.28)**2))
+
+         ! A is the morse curvature (Ang)
+         a=2.276211
+
+         ! Z_M is the morse equilibrium distance (Ang)
+         zm=0.87447*(sub2)+1.17425
+         dzmdzc=0.87447
+
+         ! C_1 is the asympotic harmonic potential for C1 vibrations (eV)
+         c1=0.5*rkc*(sub2)**2-0.00326
+         dc1dzc=rkc*(sub2)
+
+         ! C_2 is the gaussian height (eV)
+         c2= 0.3090344*exp(-2.741813*(sub2-0.2619756))+            &
+         0.03113325*exp(3.1844857*(sub2-0.186741))+                &
+         0.02*exp(-20.0*(sub2-0.1)**2) 
+         dc2dzc=-0.8473145*exp(-2.741813*(sub2-0.2619756))+        &
+         0.0991434*exp(3.1844857*(sub2-0.186741))+(                &
+         -0.8*(sub2-0.1)*exp(-20.0*(sub2-0.1)**2))
+
+         ! B is the gaussian curvature (Ang-2)
+         b=4.00181*exp(1.25965*(sub2-0.58729)) 
+         dbdzc=5.0408799*exp(1.25965*(sub2-0.58729))
+
+         ! Z_G is the center of the gaussian (Ang)
+         zg=1.99155*(sub2)+1.46095
+         dzgdzc=1.99155
+
+         ! Compute the potential and the derivatives of the 
+         ! collinear potential V_0
+
+         v=c1+(c1+d0)*(exp(-2.0*a*(sub1-zm))-2.0*exp(-a*(sub1-zm)))+       &
+         c2*exp(-b*(sub1-zg)**2)
+
+         dvdzh=-b*c2*(sub1-zg)*2.0*exp(-b*(sub1-zg)**2) +                  &
+         (c1+d0)*2.0*(-a*exp(-2.0*a*(sub1-zm))+a*exp(-a*(sub1-zm)))
+
+         dvdzc=dc1dzc+(dc1dzc+dd0dzc)*                             &
+         (exp(-2.0*a*(sub1-zm))-2.0*exp(-a*(sub1-zm)))+            &
+         (c1+d0)*(a*dzmdzc*2.0*exp(-2.0*a*(sub1-zm))+              &
+         (-a*dzmdzc)*2.0*exp(-a*(sub1-zm)))+                       &
+         dc2dzc*exp(-b*(sub1-zg)**2)+                              &
+         (-c2*dbdzc*(sub1-zg)**2+c2*b*2.0*(sub1-zg)*dzgdzc)*       &
+         exp(-b*(sub1-zg)**2)
+
+         ! Compute the force constant (and derivatives) for small rho 
+         ! potential rkrho(zh-q,zc-q)
+
+         rkrho=3.866259*exp(-17.038588*(sub2-0.537621)**2+         &
+         0.312355*(sub2-0.537621)*(sub1-2.003753)-                 &
+         4.479864*(sub1-2.003753)**2)+                             &
+         4.317415*exp(-11.931770*(sub2-0.286858)**2+               &
+         18.540974*(sub2-0.286858)*(sub1-1.540947)-                &
+         14.537321*(sub1-1.540947)**2)
+
+         dkrdzc=(-34.077176*(sub2-0.537621)+0.312355*              &
+         (sub1-2.003753))                                          &
+         *3.866259*exp(-17.038588*(sub2-0.537621)**2+              &
+         0.312355*(sub2-0.537621)*(sub1-2.003753)-                 &
+         4.479864*(sub1-2.003753)**2)+                             &
+         (-23.86354*(sub2-0.286858)+18.540974*(sub1-1.540947))     &
+         *4.317415*exp(-11.931770*(sub2-0.286858)**2+              &
+         18.540974*(sub2-0.286858)*(sub1-1.540947)-                &
+         14.537321*(sub1-1.540947)**2)
+
+         dkrdzh=(0.312355*(sub2-0.537621)-8.959728*(sub1-2.003753))        &
+         *3.866259*exp(-17.038588*(sub2-0.537621)**2+                      &
+         0.312355*(sub2-0.537621)*(sub1-2.003753)-                         &
+         4.479864*(sub1-2.003753)**2)+                                     &
+         (18.540974*(sub2-0.286858)-29.074642*(sub1-1.540947))             &
+         *4.317415*exp(-11.931770*(sub2-0.286858)**2+                      &
+         18.540974*(sub2-0.286858)*(sub1-1.540947)-                        &
+         14.537321*(sub1-1.540947)**2)
+
+         ! Compute the small rho potential/derivatives
+
+         vq=v+0.5*rkrho*rho**2
+         dvqdzh=dvdzh+0.5*dkrdzh*rho**2
+         dvqdzc=dvdzc+0.5*dkrdzc*rho**2
+         dvqdr=rkrho*rho
+
+         ! Compute the  "infinite" rho potential/derivatives
+
+         vi=0.5*rkc*sub2**2-0.00326+                                       &
+         di*(exp(-2.0*alphi*(sub1-ai))-2.0*exp(-alphi*(sub1-ai)))
+         dvidzh=di*(-2.0*alphi*exp(-2.0*alphi*(sub1-ai))+                  &
+               2.0*alphi*exp(-alphi*(sub1-ai)))
+         dvidzc=rkc*sub2
+
+         ! Switching function and associated functions
+
+         fexp=exp(-ba*(rho-rhoa))
+         ff1=1.0+fexp
+         ff2=exp(-2.0*alp*rho)-2.0*exp(-alp*rho)*exp(-alp2*rho/ff1)
+         ff3=(vi-v)*ff2+vi
+         sw=1.0/(1.0+exp(-bs*(rho-rhos)))
+
+         ! Total H,C1 potential/derivatives
+
+         vt=vq*(1.0-sw)+ff3*sw
+      
+         df2dr=-2.0*alp*exp(-2.0*alp*rho)-                &
+            2.0*exp(-alp*rho)*exp(-alp2*rho/ff1)*       &
+            (-alp-(alp2/ff1)-alp2*rho*ba*fexp/(ff1**2))
+         dswdr=(bs*exp(-bs*(rho-rhos)))/((1.0+exp(-bs*(rho-rhos)))**2)
+
+         dvtds1=dvqdzh*(1.0-sw)+sw*((dvidzh-dvdzh)*ff2+dvidzh)
+         dvtds2=dvqdzc*(1.0-sw)+sw*((dvidzc-dvdzc)*ff2+dvidzc)
+         dvtdrho=dvqdr*(1.0-sw)+vq*(-dswdr)+sw*(vi-v)*df2dr+ff3*dswdr
+
+         ! Total Potential 
+         vv=vt
+
+         ! Forces (negative sign because F = -dV/dx )
+         IF ( rho == 0.0 ) THEN
+            Forces(1) = 0.0
+            Forces(2) = 0.0
+         ELSE
+            Forces(1) = -dvtdrho*xh/rho
+            Forces(2) = -dvtdrho*yh/rho
+         ENDIF
+         Forces(3)=-dvtds1
+         Forces(4)=-dvtds2
+
+         ! Convert total potential to AU
+         vv = vv / MyConsts_Hartree2eV
+
+         ! Transform forces in atomic units (from eV Ang^-1 to Hartree Bohr^-1) 
+         Forces(:) = Forces(:) * MyConsts_Bohr2Ang / MyConsts_Hartree2eV
+
+      END FUNCTION CH_4Dimensional
+
+
+! ******************************************************************************************      
+
 
 !*******************************************************************************
 !> H-Graphene potential by Jackson and coworkers.
-!> @ref paper jackson
+!> @ref http://pubs.acs.org/doi/abs/10.1021/jp057136%2B [ J.Phys.Chem.B 2006,110,18811 ]
+!> @ref other papers jackson
 !>
 !> @param Positions    Array with 3 cartesian coordinates for the H atom and 
 !>                     121 Z coordinates for the carbon atoms (in au)
@@ -332,11 +541,16 @@ MODULE PotentialModule
          CALL ERROR( size(Forces) /= NrNonFrozen, "PotentialModule.VHSticking: array dimension mismatch" )
 
          ! Check if the nr of dimension is compatible with the slab maximum size
-         CALL ERROR( (NrNonFrozen > 124) .OR. (NrNonFrozen < 7), "PotentialModule.VHSticking: wrong number of DoFs" )
+         CALL ERROR( (NrNonFrozen > 124) .OR. (NrNonFrozen < 4), "PotentialModule.VHSticking: wrong number of DoFs" )
          
          ! Transform input coordinate from AU to Angstrom
-         xh = Positions(1) * MyConsts_Bohr2Ang
-         yh = Positions(2) * MyConsts_Bohr2Ang
+         IF ( CollinearPES ) THEN
+            xh = 0.0
+            yh = 0.0
+         ELSE
+            xh = Positions(1) * MyConsts_Bohr2Ang
+            yh = Positions(2) * MyConsts_Bohr2Ang
+         ENDIF
          zh = Positions(3) * MyConsts_Bohr2Ang
          z(:) = 0.0 ! frozen coordinates are set to zero
          z(1:NrNonFrozen-3) = Positions(4:NrNonFrozen) * MyConsts_Bohr2Ang
@@ -1799,6 +2013,7 @@ MODULE PotentialModule
          ENDIF
          Forces(3)=-dvtds1
          Forces(4)=-(dvtds2+ddz(1)-rkc*(z(1)-qqq))
+!          Forces(4)= 0.0
          Forces(5)=-(-(dvtds1+dvtds2)/3.0+ddz(2)+rkc*(z(1)-qqq)/3.0)
          Forces(6)=-(-(dvtds1+dvtds2)/3.0+ddz(3)+rkc*(z(1)-qqq)/3.0)
          Forces(7)=-(-(dvtds1+dvtds2)/3.0+ddz(4)+rkc*(z(1)-qqq)/3.0)

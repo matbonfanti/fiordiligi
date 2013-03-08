@@ -214,7 +214,7 @@ PROGRAM JK6
    !*************************************************************
 
    ! Setup potential energy surface
-   CALL SetupPotential( )
+   CALL SetupPotential( .FALSE. )
    
    !*************************************************************
    !       PRINT OF THE INPUT DATA TO STD OUT
@@ -516,6 +516,13 @@ PROGRAM JK6
          ! Set initial conditions
          CALL ThermalEquilibriumConditions( X, V, temp, rmh, rmc )
 
+!          DO iStep = 1, 1000
+!              X(3) = 1.0 + iStep * 0.005
+!              PotEnergy = VHSticking( X, A )
+!              WRITE(200,*) X(3)*MyConsts_Bohr2Ang, PotEnergy*MyConsts_Hartree2eV
+!          END DO
+!          STOP
+
          PRINT "(/,A,F6.1)"," Equilibrating the initial conditions at T = ", temp / MyConsts_K2AU
 
          IF ( PrintType == DEBUG ) THEN
@@ -700,7 +707,8 @@ PROGRAM JK6
 
                ! Store the trajectory for XYZ printing
                IF ( PrintType >= FULL ) THEN
-                     Trajectory( :, kstep ) = X(1:7)
+                     Trajectory( :, kstep ) = 0.0
+                     Trajectory( 1:min(7,3+nevo) , kstep ) = X( 1:min(7,3+nevo) ) 
                      NrOfTrajSteps = kstep
                END IF
 
