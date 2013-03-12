@@ -289,7 +289,8 @@ MODULE PotentialModule
          CALL ERROR( (NrNonFrozen < 1), "PotentialModule.VHarmonic: wrong number of DoFs" )
          
          ! Setup force constants of harmonic potentials
-         ForceConstant = 1.00782503207*MyConsts_Uma2Au * (MyConsts_PI*2./(100.*MyConsts_fs2AU))**2 
+!         ForceConstant = 1.00782503207*MyConsts_Uma2Au * (MyConsts_PI*2./(100.*MyConsts_fs2AU))**2 
+         ForceConstant = 1.00782503207*MyConsts_Uma2Au * ( 0.484969 / MyConsts_fs2AU )**2 
 
          ! Compute potential and forces
          VHarmonic = 0.0

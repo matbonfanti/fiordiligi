@@ -477,7 +477,7 @@ PROGRAM JK6
       ALLOCATE( DeltaZ(0:ntime), AverageDeltaZ(0:ntime) )
       AverageDeltaZ(:) = cmplx(0.0, 0.0)
       ! frequency spacing of the fourier transform
-      dOmega =  MyConsts_PI/( real(nstep) * dt )
+      dOmega =  2.*MyConsts_PI/( real(nstep) * dt )
 
       ! Initialize global temperature average
       GlobalTemperature = 0.0
@@ -823,7 +823,7 @@ PROGRAM JK6
       ALLOCATE( DeltaZ(0:ntime), AverageDeltaZ(0:ntime) )
       AverageDeltaZ(:) = cmplx(0.0, 0.0)
       ! frequency spacing of the fourier transform
-      dOmega =  MyConsts_PI/( real(nstep) * dt )
+      dOmega = 2.*MyConsts_PI/( real(nstep) * dt )
 
       ! Initialize global temperature average
       GlobalTemperature = 0.0
@@ -1064,7 +1064,8 @@ PROGRAM JK6
 
       ! Compute the variables needed for the analytical autocorrelation function
       NoiseVariance = 2.0*temp*rmh*Gamma
-      OsciFreq = (MyConsts_PI*2./(100.*MyConsts_fs2AU)) 
+!      OsciFreq = (MyConsts_PI*2./(100.*MyConsts_fs2AU)) 
+      OsciFreq =  ( 0.484969 / MyConsts_fs2AU ) 
       DistortedFreq = sqrt( OsciFreq**2 - Gamma**2/4.0 )
       MotionVariance = NoiseVariance / ( 2 * rmh**2 * Gamma * OsciFreq**2 )
 
