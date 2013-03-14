@@ -11,6 +11,10 @@
 !>  \version       2.0
 !>  \date          10 January 2013
 !>
+!>  \todo          Fix temperature boundaries in the istogram of temperature
+!>                 sampling (in Langevin HO test)
+!>  \todo          Fix normalization of DFT and inverse DFT 
+!>
 !***************************************************************************************
 PROGRAM JK6
    USE CommonData
@@ -60,6 +64,7 @@ PROGRAM JK6
    ! Store in time and in frequency the single realization
    COMPLEX, DIMENSION(:), ALLOCATABLE :: DeltaZ
    REAL, DIMENSION(:), ALLOCATABLE :: AverageDeltaZ
+   COMPLEX, DIMENSION(:), ALLOCATABLE :: Analytic
 
 !> \name latt
 !> ???
@@ -730,7 +735,7 @@ PROGRAM JK6
          WRITE(TrajOutputUnit,*)  " "
          
          ! Fourier transform
-        CALL DiscreteFourier( DeltaZ )
+        CALL DiscreteInverseFourier( DeltaZ )
 
          ! Store average of DeltaZ fourier components
          AverageDeltaZ(:) = AverageDeltaZ(:) + abs(DeltaZ(:))**2
@@ -1002,7 +1007,7 @@ PROGRAM JK6
          WRITE(TrajOutputUnit,*)  " "
 
          ! Fourier transform
-         CALL DiscreteFourier( DeltaZ )
+         CALL DiscreteInverseFourier( DeltaZ )
 
          ! Store average of DeltaZ fourier components
          AverageDeltaZ(:) = AverageDeltaZ(:) + abs(DeltaZ(:))**2
@@ -1044,14 +1049,44 @@ PROGRAM JK6
       ! Normalize average of deltaZ fourier components
       AverageDeltaZ(:) = AverageDeltaZ(:)  / real(inum)
 
+      ! For comparison, compute the spectral density from the analytic results of the Langevin HO
+
+      ! Compute the variables needed for the analytical autocorrelation function
+      NoiseVariance = 2.0*temp*rmh*Gamma
+!      OsciFreq = (MyConsts_PI*2./(100.*MyConsts_fs2AU))
+      OsciFreq =  ( 0.484969 / MyConsts_fs2AU )
+      DistortedFreq = sqrt( OsciFreq**2 - Gamma**2/4.0 )
+      MotionVariance = NoiseVariance / ( 2 * rmh**2 * Gamma * OsciFreq**2 )
+
+      ! Store the autocorrelation function
+      ALLOCATE( Analytic( 0: ntime ) )
+      DO iStep = (ntime/2)+1, ntime
+          Time = dt*real(nprint*(iStep-ntime-1)) 
+          Analytic( iStep ) = MotionVariance * ( cos(DistortedFreq*Time) + Gamma/(2.*DistortedFreq) & 
+                                * sin( - DistortedFreq*Time) ) * exp( Gamma * Time /2.)
+      END DO   
+      DO iStep = 0, ntime/2
+          Time = dt*real(nprint*iStep)
+          Analytic( iStep ) = MotionVariance * ( cos(DistortedFreq*Time) + Gamma/(2.*DistortedFreq) & 
+                                * sin( DistortedFreq*Time) ) * exp( - Gamma * Time /2.)
+      ENDDO
+      
+      DO iStep = 0, ntime
+         WRITE(999,*) dt*real(nprint*iStep)/MyConsts_fs2AU, real( Analytic( iStep ) )
+      ENDDO
+
+      ! Fourier transform to get the spectral density
+      CALL DiscreteInverseFourier( Analytic )
+
       ! Print spectral density of the stocastic process X(t)
       DO iOmega = 0, ntime
-            WRITE(SpectrDensUnit,*)  iOmega*dOmega*MyConsts_fs2AU,  AverageDeltaZ(iOmega)         
+            WRITE(SpectrDensUnit,"(1F12.6,3F24.18)")  iOmega*dOmega*MyConsts_fs2AU,  AverageDeltaZ(iOmega)/dOmega, real( Analytic(iOmega) )/dOmega, &
+                         NoiseVariance/(2*rmh**2*MyConsts_PI) / ( (OsciFreq**2 - (iOmega*dOmega)**2)**2 + (Gamma*iOmega*dOmega)**2  )
       END DO
 
       ! fourier transform the spectral density to obtain the autocorrelation function
       DeltaZ(:) = AverageDeltaZ(:)
-      CALL DiscreteInverseFourier(DeltaZ)
+      CALL DiscreteFourier(DeltaZ)
 
       ! Print the autocorrelation function
       DO iStep = (ntime/2)+1, ntime
@@ -1062,15 +1097,10 @@ PROGRAM JK6
       END DO
       WRITE(TimeCorrelationUnit,"(/,A,/)") "# analytical result"
 
-      ! Compute the variables needed for the analytical autocorrelation function
-      NoiseVariance = 2.0*temp*rmh*Gamma
-!      OsciFreq = (MyConsts_PI*2./(100.*MyConsts_fs2AU)) 
-      OsciFreq =  ( 0.484969 / MyConsts_fs2AU ) 
-      DistortedFreq = sqrt( OsciFreq**2 - Gamma**2/4.0 )
-      MotionVariance = NoiseVariance / ( 2 * rmh**2 * Gamma * OsciFreq**2 )
-
-      PRINT*, " * Expected standard deviation of the brownian oscillator: ", sqrt(MotionVariance)*MyConsts_Bohr2Ang
-      PRINT*, " * Computed standard deviation of the brownian oscillator: ", sqrt(real(DeltaZ(0)))*MyConsts_Bohr2Ang
+      PRINT*, " "
+      PRINT*, " * Expected standard deviation of the brownian oscillator: ", sqrt(MotionVariance)*MyConsts_Bohr2Ang,  " Ang "
+      PRINT*, " * Computed standard deviation of the brownian oscillator: ", sqrt(real(DeltaZ(0)))*MyConsts_Bohr2Ang, " Ang "
+      PRINT*, " "
 
       ! print in the autocorrelation file the analytic prediction
       DO iStep = 0, ntime/2
@@ -1192,7 +1222,7 @@ PROGRAM JK6
          END DO
       END DO
 
-      Vector(:) = Transform(:) / (N-1)
+      Vector(:) = Transform(:)
 
    END SUBROUTINE DiscreteFourier
 
@@ -1216,7 +1246,7 @@ PROGRAM JK6
          END DO
       END DO
 
-      Vector(:) = Transform(:)
+      Vector(:) = Transform(:) / ( N-1 )
 
    END SUBROUTINE DiscreteInverseFourier
 

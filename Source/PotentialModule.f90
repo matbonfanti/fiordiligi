@@ -127,7 +127,7 @@ MODULE PotentialModule
          DO nCarbon = 4,NDoF
             Velocities(nCarbon) = GaussianRandomNr( SigmaCarbonVelocity ) 
          END DO
-!          Velocities(4) = 0.0
+!         Velocities(4) = 0.0      ! TO FIX EVEN C1 ATOM
 
       END SUBROUTINE ThermalEquilibriumConditions
 
@@ -2013,13 +2013,20 @@ MODULE PotentialModule
             Forces(2) = -dvtdrho*yh/rho
          ENDIF
          Forces(3)=-dvtds1
-         Forces(4)=-(dvtds2+ddz(1)-rkc*(z(1)-qqq))
-!          Forces(4)= 0.0
-         Forces(5)=-(-(dvtds1+dvtds2)/3.0+ddz(2)+rkc*(z(1)-qqq)/3.0)
-         Forces(6)=-(-(dvtds1+dvtds2)/3.0+ddz(3)+rkc*(z(1)-qqq)/3.0)
-         Forces(7)=-(-(dvtds1+dvtds2)/3.0+ddz(4)+rkc*(z(1)-qqq)/3.0)
-         DO nn = 8, NrNonFrozen
-            Forces(nn) = -ddz(nn-3)
+         
+         DO nn = 4, NrNonFrozen
+            IF ( nn == 4 ) THEN
+               Forces(4)=-(dvtds2+ddz(1)-rkc*(z(1)-qqq))
+!               Forces(4)= 0.0  ! TO FIX EVEN C1 ATOM
+            ELSE IF ( nn == 5 ) THEN
+               Forces(5)=-(-(dvtds1+dvtds2)/3.0+ddz(2)+rkc*(z(1)-qqq)/3.0)
+            ELSE IF ( nn == 6 ) THEN
+               Forces(6)=-(-(dvtds1+dvtds2)/3.0+ddz(3)+rkc*(z(1)-qqq)/3.0)
+            ELSE IF ( nn == 7 ) THEN
+               Forces(7)=-(-(dvtds1+dvtds2)/3.0+ddz(4)+rkc*(z(1)-qqq)/3.0)
+            ELSE 
+               Forces(nn) = -ddz(nn-3)
+            END IF
          END DO
 
 !          ! Accelerations 
