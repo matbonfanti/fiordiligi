@@ -14,6 +14,7 @@
 !>  \todo          Fix temperature boundaries in the istogram of temperature
 !>                 sampling (in Langevin HO test)
 !>  \todo          Fix normalization of DFT and inverse DFT 
+!>  \todo          Introduce more C atoms in the slab when printing the traj
 !>
 !***************************************************************************************
 PROGRAM JK6
@@ -1071,10 +1072,6 @@ PROGRAM JK6
                                 * sin( DistortedFreq*Time) ) * exp( - Gamma * Time /2.)
       ENDDO
       
-      DO iStep = 0, ntime
-         WRITE(999,*) dt*real(nprint*iStep)/MyConsts_fs2AU, real( Analytic( iStep ) )
-      ENDDO
-
       ! Fourier transform to get the spectral density
       CALL DiscreteInverseFourier( Analytic )
 

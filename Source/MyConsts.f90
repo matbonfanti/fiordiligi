@@ -176,6 +176,32 @@ CONTAINS
 
    END FUNCTION NumberToString
    
+!*******************************************************************************
+! CountLinesInFile
+!*******************************************************************************
+!>  Count the number of lines in a file with a given filename.
+!> 
+!> @param    FileName     Input string with the file name.
+!> @returns               The integer number of rows of file FileName.
+!*******************************************************************************
+   INTEGER FUNCTION CountLinesInFile( FileName )
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: FileName
+      INTEGER             :: Stat, UnitNr
+      CHARACTER(1)        :: String
+
+      UnitNr=LookForFreeUnit()
+      OPEN( FILE=TRIM(ADJUSTL(FileName)), UNIT=UnitNr )
+      DO CountLinesInFile = 0,100000
+         READ( UnitNr, *, IOSTAT=Stat ) String
+         IF (Stat /= 0) EXIT
+      END DO
+      CLOSE( UnitNr )
+
+   END FUNCTION CountLinesInFile
+
+
+
 END MODULE MyConsts
 
 !********************************************* END OF FILE *******************************
