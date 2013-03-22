@@ -76,11 +76,12 @@ CONTAINS
 !> 
 !> @param    FileName       Name of the file with the input parameters.
 !*******************************************************************************
-   SUBROUTINE SetupIndepOscillatorsModel( N, SetBathType, FileName, CutOffFreq )
+   SUBROUTINE SetupIndepOscillatorsModel( N, SetBathType, FileName, Mass, CutOffFreq )
       IMPLICIT NONE
       INTEGER, INTENT(IN)        :: N
       INTEGER, INTENT(IN)        :: SetBathType
       CHARACTER(*), INTENT(IN)   :: FileName
+      REAL, INTENT(IN)           :: Mass
       REAL, OPTIONAL, INTENT(IN) :: CutOffFreq
 
       INTEGER :: InpUnit, RdStatus

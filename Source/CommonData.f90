@@ -21,13 +21,14 @@ MODULE CommonData
    
    !> Variable to define which kind of calculation is required 
    INTEGER :: RunType
-   INTEGER, PARAMETER :: SCATTERING    = 1, &  ! Scattering calculation with H coming from gas-phase
-                         EQUILIBRIUM   = 2, &  ! Equilibrium calculation with H already adsorbed
-                         HARMONICMODEL = 3     ! Test the parameters with a 1D harmonic langevin model 
+   INTEGER, PARAMETER :: SCATTERING     = 1, &  ! Scattering calculation with H coming from gas-phase
+                         EQUILIBRIUM    = 2, &  ! Equilibrium calculation with H already adsorbed
+                         HARMONICMODEL  = 3, &  ! Test the parameters with a 1D harmonic langevin model 
+                         POTENTIALPRINT = 10    ! Print cuts of the H-graphite potential 
 
    !> Variable to set the print level of the calculation
    INTEGER :: PrintType
-   INTEGER, PARAMETER :: EQUILIBRDBG = 4, &   ! fully detailed information about the trajs
+   INTEGER, PARAMETER :: EQUILIBRDBG = 4, &   ! fully detailed information about the equilibration
                          DEBUG       = 3, &   ! fully detailed information about the trajs
                          FULL        = 2, &   ! files to plot the make animations, averages for each traj
                          MINIMAL     = 1      ! minimal level of output, only final averages
@@ -56,7 +57,6 @@ MODULE CommonData
    REAL    :: EquilTStep           !< Time step for integrating equilibration dynamics
    REAL    :: Gamma                !< Friction parameter of the Langevin equation
    INTEGER :: NrEquilibSteps       !< Nr of time step of the equilibration
-   INTEGER :: EquilibrInitAverage  !< Nr of time step to skip in computing averages during equilibration
    
    ! POSITION, VELOCITY, ACCELERATION 
 
@@ -74,7 +74,6 @@ MODULE CommonData
 
    ! TRAJECTORY AVERAGES
 
-   INTEGER :: NrOfStepsAver             ! Number of steps of the average computation
    REAL  :: TempAverage                 ! To accumulate average temperature over time
    REAL  :: TempVariance                ! To accumulate squared temperature over time
    REAL, DIMENSION(3) :: HPosAverage    ! To accumulate average displacement of the H atom

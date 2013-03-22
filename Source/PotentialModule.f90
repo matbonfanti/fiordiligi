@@ -4,7 +4,7 @@ MODULE PotentialModule
    USE RandomNumberGenerator
 
    PRIVATE
-   PUBLIC :: SetupPotential, VHSticking, VHarmonic
+   PUBLIC :: SetupPotential, VHSticking, VHarmonic, CH_4Dimensional, MinimizePotential
    PUBLIC :: ThermalEquilibriumConditions, ScatteringConditions, HarmonicConditions
    PUBLIC :: CarbonForceConstant, GraphiteLatticeConstant
 
@@ -13,6 +13,14 @@ MODULE PotentialModule
 
    !> Fix the collinear geometry
    LOGICAL :: CollinearPES = .FALSE.
+
+   !> C1 Puckering displacement of the H-graphite potential (in bohr)
+   REAL, PARAMETER, PUBLIC :: C1Puckering =  0.37 / MyConsts_Bohr2Ang
+
+   !> Max nr of iterations for potential optimization
+   INTEGER, PARAMETER :: MaxIter = 10000
+   !> Threshold for conjugate gradient convergence
+   REAL, PARAMETER :: GradEps = 1.0E-4
 
 !> \name STICKING POTENTIAL
 !> Parameters of the 4D Potential for C-H
@@ -104,7 +112,7 @@ MODULE PotentialModule
          Positions(3) = 1.483 / MyConsts_Bohr2Ang
 
          ! Equilibrium position of C1 atom
-         Positions(4) = 0.37 / MyConsts_Bohr2Ang
+         Positions(4) = C1Puckering
 
          ! Equilibrium position of the other carbon atoms 
          DO nCarbon = 5,NDoF
@@ -256,6 +264,59 @@ MODULE PotentialModule
 
 
 ! ******************************************************************************************      
+
+      REAL FUNCTION MinimizePotential( Coords, Mask ) RESULT( Pot )
+         IMPLICIT NONE
+         REAL, INTENT(INOUT), DIMENSION(:)               :: Coords
+         LOGICAL, INTENT(IN), DIMENSION(size(Coords)) :: Mask
+
+         INTEGER :: NrDimension, NrOptimization
+         INTEGER :: iIter, iCoord
+         REAL, DIMENSION(size(Coords)) :: Gradient
+         REAL :: Norm
+
+         ! Set dimension number
+         NrDimension = size(Coords)
+         ! Set optimization coordinates nr
+         NrOptimization = count( Mask )
+         ! Check if the nr of dimension is compatible with the slab maximum size
+         CALL ERROR( (NrDimension > 124) .OR. (NrDimension < 4), "PotentialModule.MinimizePotential: wrong number of DoFs" )
+
+         ! Cycle over steepest descent iterations
+         DO iIter = 1, MaxIter
+
+            ! compute negative of the gradient
+            Pot = VHSticking( Coords, Gradient )
+!             print*, Pot
+!             print*, Gradient
+!             Gradient(:) = - Gradient(:)
+!             print*, Gradient
+
+            ! compute norm of the gradient
+            Norm = 0.0
+            DO iCoord = 1, NrDimension
+               IF ( Mask( iCoord ) ) THEN
+                  Norm = Norm + Gradient(iCoord)**2
+               END IF
+            END DO
+            Norm = SQRT( Norm / NrOptimization )
+!             IF ( mod(iIter,1000) == 0 ) print*, "Iteration ",iIter, "    norm ",Norm
+
+            ! check convergence
+            IF (Norm < GradEps) EXIT
+      
+            ! move geometry along gradient
+            DO iCoord = 1, NrDimension
+               IF ( Mask( iCoord ) ) THEN
+                  Coords(iCoord) = Coords(iCoord) + Gradient(iCoord)
+               END IF
+            END DO
+
+         END DO
+!          PRINT*, "Convergence in ", iIter, " steps"
+         IF ( iIter == MaxIter ) PRINT*, " NOT CONVERGED !!!!!"
+
+      END FUNCTION MinimizePotential
 
 
 !*******************************************************************************

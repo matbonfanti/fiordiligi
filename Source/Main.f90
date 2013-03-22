@@ -25,6 +25,7 @@ PROGRAM JK6
    USE ErrorTrap
    USE RandomNumberGenerator
    USE ClassicalEqMotion
+   USE PrintTools
 
    IMPLICIT NONE
 
@@ -67,14 +68,6 @@ PROGRAM JK6
    REAL, DIMENSION(:), ALLOCATABLE :: AverageDeltaZ
    COMPLEX, DIMENSION(:), ALLOCATABLE :: Analytic
 
-!> \name latt
-!> ???
-!> @{
-   REAL, DIMENSION(121) :: vzsum, zsum
-   REAL, DIMENSION(:,:), ALLOCATABLE :: vz2av, zcav
-   REAL :: vav, vsqav, zav, zsqav
-!> @}
-
    REAL, DIMENSION(501)      :: crscn
 
    INTEGER :: iCoord, iTraj, iStep, jRho, iCarbon, iOmega
@@ -82,6 +75,19 @@ PROGRAM JK6
 
    REAL :: DynamicsGamma
    LOGICAL, DIMENSION(121) :: LangevinSwitchOn
+
+   ! Print potential cuts in VTK format
+   TYPE(VTKInfo) :: PotentialCH_IdealGr, PotentialCH_OptimGr, PotentialCH_Model
+
+   ! Parameters to define the grid for potential plots
+   REAL :: ZHmin, ZHmax
+   REAL :: ZCmin, ZCmax
+   INTEGER :: NpointZH
+   INTEGER :: NpointZC
+
+   ! Parameters to define CH model potential
+   REAL :: CHFrequency, ZCFrequency, BilinearCoupl
+
 
 
    PRINT "(/,     '                    ==============================')"
@@ -156,7 +162,6 @@ PROGRAM JK6
       CALL SetFieldFromInput( InputData, "Gamma", Gamma)
       Gamma = Gamma / MyConsts_fs2AU
       CALL SetFieldFromInput( InputData, "NrEquilibrSteps", NrEquilibSteps, int(5.0*(1.0/Gamma)/dt) )
-      CALL SetFieldFromInput( InputData, "EquilibrInitAverage", EquilibrInitAverage, int(2.0*(1.0/Gamma)/dt) )
       CALL SetFieldFromInput( InputData, "EquilTStep",  EquilTStep, dt/MyConsts_fs2AU )
       EquilTStep = EquilTStep * MyConsts_fs2AU
       CALL SetFieldFromInput( InputData, "DynamicsGamma",  DynamicsGamma, 0.0 ) 
@@ -166,6 +171,23 @@ PROGRAM JK6
       CALL SetFieldFromInput( InputData, "Gamma", Gamma)
       Gamma = Gamma / MyConsts_fs2AU
       CALL SetFieldFromInput( InputData, "NrEquilibrSteps", NrEquilibSteps, int(10.0*(1.0/Gamma)/dt) )
+
+   ELSE IF (RunType == POTENTIALPRINT) THEN
+      CALL SetFieldFromInput( InputData, "ZHmin", ZHmin, 0.8 )
+      ZHmin = ZHmin / MyConsts_Bohr2Ang
+      CALL SetFieldFromInput( InputData, "ZHmax", ZHmax, 4.0 )
+      ZHmax = ZHmax / MyConsts_Bohr2Ang
+      CALL SetFieldFromInput( InputData, "ZCmin", ZCmin, -0.5 )
+      ZCmin = ZCmin / MyConsts_Bohr2Ang
+      CALL SetFieldFromInput( InputData, "ZCmax", ZCmax, 1.0 )
+      ZCmax = ZCmax / MyConsts_Bohr2Ang
+      CALL SetFieldFromInput( InputData, "NpointZH", NpointZH, 400 )
+      CALL SetFieldFromInput( InputData, "NpointZC", NpointZC, 100 )
+
+      CALL SetFieldFromInput( InputData, "CHFrequency", CHFrequency )
+      CALL SetFieldFromInput( InputData, "ZCFrequency", ZCFrequency )
+      CALL SetFieldFromInput( InputData, "BilinearCoupl", BilinearCoupl )
+
    END IF
 
    ! close input file
@@ -189,12 +211,10 @@ PROGRAM JK6
                ALLOCATE( Trajectory( 7, ntime ) )
          END IF
 
-         IF ( DynamicsGamma == 0.0 ) THEN 
-            ! Set variables for EOM integration in the microcanonical ensamble
-            CALL EvolutionSetup( MolecularDynamics, nevo+3, (/ (rmh, iCoord=1,3), (rmc, iCoord=1,nevo) /), dt )
-         ELSE
-            ! Set variables for EOM integration in the canonical ensamble
-            CALL EvolutionSetup( MolecularDynamics, nevo+3, (/ (rmh, iCoord=1,3), (rmc, iCoord=1,nevo) /), dt )
+         ! Set variables for EOM integration in the microcanonical ensamble
+         CALL EvolutionSetup( MolecularDynamics, nevo+3, (/ (rmh, iCoord=1,3), (rmc, iCoord=1,nevo) /), dt )
+         IF ( DynamicsGamma /= 0.0 ) THEN 
+            ! Set canonical dynamics at the borders of the carbon slab
             LangevinSwitchOn = .TRUE.
             LangevinSwitchOn( 1: MIN( 73, nevo )+3 ) = .FALSE.
             CALL SetupThermostat( MolecularDynamics, DynamicsGamma, temp, LangevinSwitchOn(1:nevo+3) )
@@ -212,6 +232,11 @@ PROGRAM JK6
          ! Set variables for EOM integration with Langevin thermostat
          CALL EvolutionSetup( Equilibration, nevo, (/ (rmh, iCoord=1,nevo) /), dt )
          CALL SetupThermostat( Equilibration, Gamma, temp, (/ (.TRUE., iCoord=1,nevo) /) )
+
+   ELSE IF (RunType == POTENTIALPRINT) THEN 
+
+         ! Allocation of position, velocity, acceleration arrays
+         ALLOCATE( X(nevo+3), A(nevo+3) )
 
    END IF
 
@@ -234,7 +259,7 @@ PROGRAM JK6
    WRITE(*,901) nevo, inum
    IF (RunType == SCATTERING) WRITE(*,902) irho, delrho * MyConsts_Bohr2Ang
    IF (RunType == EQUILIBRIUM) WRITE(*,903) Gamma / MyConsts_Uma2Au * MyConsts_fs2AU,  EquilTStep/MyConsts_fs2AU,   &
-                 EquilTStep*real(NrEquilibSteps)/MyConsts_fs2AU, real(EquilibrInitAverage)*EquilTStep/MyConsts_fs2AU
+                 EquilTStep*real(NrEquilibSteps)/MyConsts_fs2AU
    WRITE(*,"(/)")
 
    898 FORMAT(" * Mass of the H atom (UMA):                    ",F10.4,/, &
@@ -251,18 +276,51 @@ PROGRAM JK6
               " * Grid spacing in rho (Ang):                   ",F10.4      )
    903 FORMAT(" * Langevin friction constant (1/fs)            ",F10.4,/, &
               " * Equilibration time step (fs)                 ",F10.4,/, &
-              " * Equilibration total time (fs)                ",F10.4,/, &
-              " * Equilibr averages are computed from (fs)     " F10.4      )
+              " * Equilibration total time (fs)                ",F10.4      )
 
-   ! Here the program have a fork: scattering and equilibrium simulations
 
    !****************************************************************************
    IF (RunType == SCATTERING) THEN
    !****************************************************************************
 
-   !*************************************************************
-   !       AVERAGES VARIABLES ALLOCATION AND INITIALIZATION
-   !*************************************************************
+         CALL ScatteringSimulation()
+
+   !****************************************************************************
+   ELSE IF (RunType == EQUILIBRIUM) THEN   
+   !****************************************************************************
+
+         CALL HGraphiteEquilibrium()
+      
+   !****************************************************************************
+   ELSE IF (RunType == HARMONICMODEL) THEN   
+   !****************************************************************************
+
+         CALL BrownianHarmonicOscillator()
+
+   !****************************************************************************
+   ELSE IF (RunType == POTENTIALPRINT) THEN   
+   !****************************************************************************
+
+         CALL PotentialCuts()
+
+   END IF
+
+
+      CONTAINS
+
+!***************************************************************************************************
+!                  H-GRAPHITE SCATTERING SIMULATION
+!***************************************************************************************************
+
+   SUBROUTINE ScatteringSimulation()
+      IMPLICIT NONE
+      REAL, DIMENSION(121) :: vzsum, zsum
+      REAL, DIMENSION(:,:), ALLOCATABLE :: vz2av, zcav
+      REAL :: vav, vsqav, zav, zsqav
+
+      !*************************************************************
+      !       AVERAGES VARIABLES ALLOCATION AND INITIALIZATION
+      !*************************************************************
 
       ! Initialize average values for the INITIAL CONDITION of the lattice Z coordinates
       zav    = 0.0         ! average position
@@ -365,7 +423,7 @@ PROGRAM JK6
                   IF ( X(3) <= AdsorpLimit ) ptrap(jRho,kstep) = ptrap(jRho,kstep)+1.0
 
                   ! average lattice velocity and positions
-                  CALL lattice( kstep )
+                  CALL lattice( kstep, zsum, vzsum, zcav, vz2av  )
 
                   ! Store the trajectory for XYZ printing
                   IF ( PrintType >= FULL ) THEN
@@ -471,11 +529,16 @@ PROGRAM JK6
       505 FORMAT(A46,A63)
       605 FORMAT(f8.4,3x,f10.5)
 
+   END SUBROUTINE ScatteringSimulation
 
 
-   !****************************************************************************
-   ELSE IF (RunType == EQUILIBRIUM) THEN   
-   !****************************************************************************
+
+!***************************************************************************************************
+!                       H-GRAPHITE EQUILIBRIUM SIMULATION
+!***************************************************************************************************
+
+   SUBROUTINE HGraphiteEquilibrium()
+      IMPLICIT NONE
 
       ! ALLOCATE AND INITIALIZE DATA WITH THE AVERAGES OVER THE SET OF TRAJECTORIES
 
@@ -491,15 +554,15 @@ PROGRAM JK6
       ! Open output file to print the brownian realizations vs time
       TrajOutputUnit = LookForFreeUnit()
       OPEN( FILE="Trajectories.dat", UNIT=TrajOutputUnit )
-      WRITE(TrajOutputUnit, "(A,I6,A,/)") "# ", inum, " realizations of harmonic brownian motion (fs | Angstrom)"
+      WRITE(TrajOutputUnit, "(A,I6,A,/)") "# ", inum, " realizations of H-graphite equilibrium dynamics (fs | Angstrom)"
       ! Open output file to print the spectral density of the brownian motion
       SpectrDensUnit = LookForFreeUnit()
       OPEN( FILE="SpectralDensity.dat", UNIT=SpectrDensUnit )
-      WRITE(SpectrDensUnit, "(A,I6,A,/)") "# Spectral density of harmonic brownian motion - ", inum, " trajectories (fs | au)"
+      WRITE(SpectrDensUnit, "(A,I6,A,/)") "# Spectral density of H-graphite equilibrium dynamics - ", inum, " trajectories (fs | au)"
       ! Open output file to print the  autocorrelation function of the brownian motion
       TimeCorrelationUnit = LookForFreeUnit()
       OPEN( FILE="Autocorrelation.dat", UNIT=TimeCorrelationUnit )
-      WRITE(TimeCorrelationUnit, "(A,I6,A,/)") "# Autocorrelation func of harmonic brownian motion - ", inum, " trajectories (fs | Angstrom^2)"
+      WRITE(TimeCorrelationUnit, "(A,I6,A,/)") "# Autocorrelation func of H-graphite equilibrium dynamics - ", inum, " trajectories (fs | Angstrom^2)"
       
       ! Initialize random number seed
       CALL SetSeed( 1 )
@@ -522,13 +585,6 @@ PROGRAM JK6
          ! Set initial conditions
          CALL ThermalEquilibriumConditions( X, V, temp, rmh, rmc )
 
-!          DO iStep = 1, 1000
-!              X(3) = 1.0 + iStep * 0.005
-!              PotEnergy = VHSticking( X, A )
-!              WRITE(200,*) X(3)*MyConsts_Bohr2Ang, PotEnergy*MyConsts_Hartree2eV
-!          END DO
-!          STOP
-
          PRINT "(/,A,F6.1)"," Equilibrating the initial conditions at T = ", temp / MyConsts_K2AU
 
          IF ( PrintType == DEBUG ) THEN
@@ -539,8 +595,6 @@ PROGRAM JK6
             WRITE( NWriteUnit, * ) "# EQUILIBRATION: time, potential E, kinetic E, X_H, Y_H, Z_H, Z_C1"
          ENDIF
 
-         ! Nr of steps to average
-         NrOfStepsAver = 0
          ! Initialize temperature average and variance
          TempAverage = 0.0
          TempVariance = 0.0
@@ -578,16 +632,13 @@ PROGRAM JK6
                850 FORMAT( F12.5, 6F13.6 )
 
                ! If the step is after some time, store temperature averages
-               IF ( iStep >= EquilibrInitAverage ) THEN
-                     NrOfStepsAver = NrOfStepsAver + 1
-                     TempAverage = TempAverage + IstTemperature
-                     TempVariance = TempVariance + IstTemperature**2
-                     IF ( PrintType == EQUILIBRDBG ) THEN
-                        IF (NrOfStepsAver == 1) WRITE(567,* ) " "
-                        IF ( mod(iStep,nprint) == 0 ) WRITE(567,* )  real(iStep)*dt/MyConsts_fs2AU, TempAverage/NrOfStepsAver, &
-                                       sqrt((TempVariance/NrOfStepsAver)-(TempAverage/NrOfStepsAver)**2)
-                     ENDIF
-               END IF
+               TempAverage = TempAverage + IstTemperature
+               TempVariance = TempVariance + IstTemperature**2
+               IF ( PrintType == EQUILIBRDBG ) THEN
+                  IF (iStep == 1) WRITE(567,* ) " "
+                  IF ( mod(iStep,nprint) == 0 ) WRITE(567,* )  real(iStep)*dt/MyConsts_fs2AU, TempAverage/NrEquilibSteps, &
+                                 sqrt((TempVariance/NrEquilibSteps)-(TempAverage/NrEquilibSteps)**2)
+               ENDIF
 
          END DO
 
@@ -600,8 +651,8 @@ PROGRAM JK6
          
          IF ( PrintType >= FULL ) THEN
             ! Compute average and standard deviation
-            TempAverage = TempAverage / NrOfStepsAver 
-            TempVariance = (TempVariance/NrOfStepsAver) - TempAverage**2
+            TempAverage = TempAverage / NrEquilibSteps 
+            TempVariance = (TempVariance/NrEquilibSteps) - TempAverage**2
             
             ! output message with average values
             PRINT "(/,A,1F10.4,/,A,1F10.4,/)",  " * Average temperature (K): ", TempAverage, &
@@ -816,12 +867,17 @@ PROGRAM JK6
       CLOSE( TimeCorrelationUnit )
       CLOSE( SpectrDensUnit )
 
-      
-      
-   !****************************************************************************
-   ELSE IF (RunType == HARMONICMODEL) THEN   
-   !****************************************************************************
 
+   END SUBROUTINE HGraphiteEquilibrium
+
+
+
+!***************************************************************************************************
+!                       BROWNIAN HARMONIC OSCILLATOR SIMULATION
+!***************************************************************************************************
+
+   SUBROUTINE BrownianHarmonicOscillator()
+      IMPLICIT NONE
 
       ! ALLOCATE AND INITIALIZE DATA WITH THE AVERAGES OVER THE SET OF TRAJECTORIES
 
@@ -875,8 +931,6 @@ PROGRAM JK6
 
          PRINT "(/,A,F6.1)"," Equilibrating the initial conditions at T = ", temp / MyConsts_K2AU
 
-         ! Nr of steps to average
-         NrOfStepsAver = 0
          ! Initialize temperature average and variance
          TempAverage = 0.0
          TempVariance = 0.0
@@ -1113,19 +1167,193 @@ PROGRAM JK6
       CLOSE( SpectrDensUnit )
       CLOSE( InitialTDistrib )
 
+   END SUBROUTINE BrownianHarmonicOscillator
 
 
-   END IF
+!***************************************************************************************************
+!                       PRINT POTENTIAL CUTS
+!***************************************************************************************************
 
-
-      CONTAINS
-
-!****************************************************************************************************************
-
-
-   SUBROUTINE lattice( kstep )
+   SUBROUTINE PotentialCuts()
       IMPLICIT NONE
 
+      INTEGER :: iZH, iZC, nPoint
+      INTEGER :: HCurveOutputUnit
+
+      REAL, DIMENSION(:), ALLOCATABLE :: PotentialArray
+      REAL, DIMENSION(:), ALLOCATABLE   :: ZCArray, ZHArray
+
+      REAL :: DeltaZH, DeltaZC
+      REAL :: MinimumCH, MinimumZC, MinimumE
+
+      LOGICAL, DIMENSION(nevo+3) :: OptimizationMask
+
+      ! Allocate temporary array to store potential data and coord grids
+      ALLOCATE( PotentialArray( NpointZH * NpointZC ), ZCArray( NpointZC ), ZHArray( NpointZH ) )
+   
+      ! Define grid spacings
+      DeltaZH = (ZHmax-ZHmin)/(NpointZH-1)
+      DeltaZC = (ZCmax-ZCmin)/(NpointZC-1)
+
+      ! Define coordinate grids
+      ZCArray = (/ ( ZCmin + DeltaZC*(iZC-1), iZC=1,NpointZC) /)
+      ZHArray = (/ ( ZHmin + DeltaZH*(iZH-1), iZH=1,NpointZH) /)
+
+      ! Open output file to print the H vibrational curve with fixed carbons
+      HCurveOutputUnit = LookForFreeUnit()
+      OPEN( FILE="GraphiteHBindingCurve.dat", UNIT=HCurveOutputUnit )
+      WRITE(HCurveOutputUnit, "(A,I6,A,/)") "# H-Graphite binding at C fixed puckered geometry - ", NpointZH, " points (Ang | eV)"
+
+      !*************************************************************
+      ! PRINT H VIBRATIONAL CURVE FOR C FIXED IN PUCKERING GEOMETRY
+      !*************************************************************
+
+      ! Set collinear H, C1 puckered and other Cs in ideal geometry
+      X(:) = 0.0
+      X(4) = C1Puckering
+
+      ! Cycle over the ZH coordinate values
+      DO iZH = 1, NpointZH
+
+         ! Define the H Z coordinate
+         X(3) = C1Puckering+ZHArray(iStep)
+         ! Compute potential
+         PotEnergy = VHSticking( X, A )
+         ! Print energy to dat file
+         WRITE(HCurveOutputUnit,*) X(3)*MyConsts_Bohr2Ang, PotEnergy*MyConsts_Hartree2eV
+
+      END DO
+
+      !*************************************************************
+      ! PRINT 2D C-H V WITH OTHERS CARBONS IN IDEAL GEOMETRY
+      !*************************************************************
+
+      ! Set collinear H and other Cs in ideal geometry
+      X(:) = 0.0
+
+      nPoint = 0
+      ! Cycle over the ZC coordinate values
+      DO iZC = 1, NpointZC
+         X(4) = ZCArray(iZC)
+         ! Cycle over the ZH coordinate values
+         DO iZH = 1, NpointZH
+            X(3) = ZCArray(iZC)+ZHArray(iZH)
+            nPoint = nPoint + 1
+            ! Compute potential
+            PotentialArray(nPoint) = VHSticking( X, A )
+         END DO
+      END DO
+
+      ! Print the potential to vtk file
+      CALL VTK_NewRectilinearSnapshot ( PotentialCH_IdealGr, X=ZHArray*MyConsts_Bohr2Ang, Y=ZCArray*MyConsts_Bohr2Ang, &
+                            FileName="GraphiteHSticking-IdealGr" )
+      CALL VTK_AddScalarField (PotentialCH_IdealGr, Name="CHPotential", Field=PotentialArray*MyConsts_Hartree2eV )
+
+      !*************************************************************
+      !      FIND MINIMUM OF THE POTENTIAL
+      !*************************************************************
+ 
+      OptimizationMask = (/ (.FALSE., iCoord=1,nevo+3) /)
+      OptimizationMask(1:4) = .TRUE. 
+
+      ! Set collinear H and other Cs in ideal geometry
+      X(:) = 0.0
+      X(4) = C1Puckering
+      X(3) = C1Puckering + 2.2
+
+      ! Compute potential
+      PotEnergy = MinimizePotential( X,  OptimizationMask )
+
+      ! Store values
+      MinimumCH = X(3) - X(4)
+      MinimumZC = X(4)
+      MinimumE = PotEnergy
+
+
+      !*************************************************************
+      ! PRINT 2D C-H MODEL V from FREQUENCIES AND COUPLING
+      !*************************************************************
+
+      nPoint = 0
+      ! Cycle over the ZC coordinate values
+      DO iZC = 1, NpointZC
+         X(4) = ZCArray(iZC)
+         ! Cycle over the ZH coordinate values
+         DO iZH = 1, NpointZH
+            X(3) = ZHArray(iZH)
+            nPoint = nPoint + 1
+            ! Compute potential
+            PotentialArray(nPoint) = PotEnergy + 0.5*rmh*(CHFrequency*(X(3)-MinimumCH))**2 + &
+                  0.5*rmc*(ZCFrequency*(X(4)-MinimumZC))**2 + BilinearCoupl*(X(3)-MinimumCH)*(X(4)-MinimumZC)
+         END DO
+      END DO
+
+      ! Print the potential to vtk file
+      CALL VTK_NewRectilinearSnapshot ( PotentialCH_Model, X=ZHArray*MyConsts_Bohr2Ang, Y=ZCArray*MyConsts_Bohr2Ang, &
+                            FileName="ModelPotential" )
+      CALL VTK_AddScalarField (PotentialCH_Model, Name="CHPotential", Field=PotentialArray*MyConsts_Hartree2eV )
+
+
+      !*************************************************************
+      ! PRINT 2D C-H V WITH OTHERS CARBONS IN OPTIMIZED GEOMETRY
+      !*************************************************************
+
+! 
+!       OptimizationMask = (/ (.FALSE., iCoord=1,4), (.TRUE., iCoord=1,nevo-1) /)
+! 
+!       nPoint = 0
+!       ! Cycle over the ZC coordinate values
+!       DO iZC = 1, NpointZC
+! 
+!          ! Set collinear H and other Cs in ideal geometry
+!          X(:) = 0.0
+! 
+!          ! Cycle over the ZH coordinate values
+!          DO iZH = 1, NpointZH
+!             nPoint = nPoint + 1
+! 
+!             X(3) = ZCArray(iZC)+ZHArray(iZH)
+!             X(4) = ZCArray(iZC)
+! 
+!             ! Compute potential
+!             PotentialArray(nPoint) = MinimizePotential( X,  OptimizationMask )
+! 
+!          END DO
+!       END DO
+! 
+!       ! Print the potential to vtk file
+!       CALL VTK_NewRectilinearSnapshot ( PotentialCH_OptimGr, X=ZHArray*MyConsts_Bohr2Ang, Y=ZCArray*MyConsts_Bohr2Ang, &
+!                             FileName="GraphiteHSticking-OptimGr" )
+!       CALL VTK_AddScalarField (PotentialCH_OptimGr, Name="CHPotential", Field=PotentialArray*MyConsts_Hartree2eV )
+
+
+      ! Close output files
+      CLOSE( HCurveOutputUnit )
+
+      ! Deallocate memory
+      DEALLOCATE( PotentialArray, ZHArray, ZCArray )
+
+      ! OTHER FEATURE TO IMPLEMENT IN THIS SECTION:
+      ! * calculation of the harmonic frequencies at the minimum by diagonalization
+      !   of the hessian, in the 2D collinear model and the 4D non collinear model
+      ! * by subtraction of the harmonic frequency, computation of the non harmonic coupling 
+      !   between the normal modes
+      ! * with respect to the minimum, plot of the energies corresponding to average
+      !   thermic energy
+
+
+   END SUBROUTINE PotentialCuts
+
+
+
+
+!*********************************************************************************************************
+
+   SUBROUTINE lattice( kstep, zsum, vzsum, zcav, vz2av )
+      IMPLICIT NONE
+
+      REAL, DIMENSION(121), INTENT(INOUT) :: vzsum, zsum
+      REAL, DIMENSION(10,ntime), INTENT(INOUT) :: zcav, vz2av 
       INTEGER, INTENT(IN) :: kstep
 
       zcav(1,kstep)=zcav(1,kstep)+zsum(1)
