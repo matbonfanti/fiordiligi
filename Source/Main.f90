@@ -48,6 +48,7 @@ PROGRAM JK6
    INTEGER  :: TimeCorrelationUnit       ! unit nr for the correlation function in time
    INTEGER  :: SpectrDensUnit            ! unit nr for the spectral density
    INTEGER  :: InitialTDistrib           ! unit nr to print the initial temperatures distribution
+   INTEGER  :: Traj2OutputUnit
 
    ! Distribution of the initial istantaneous temperatures
    INTEGER, DIMENSION( 200:400 ) :: InitTempDistribution
@@ -553,8 +554,12 @@ PROGRAM JK6
 
       ! Open output file to print the brownian realizations vs time
       TrajOutputUnit = LookForFreeUnit()
-      OPEN( FILE="Trajectories.dat", UNIT=TrajOutputUnit )
+      OPEN( FILE="Trajectories_CH.dat", UNIT=TrajOutputUnit )
       WRITE(TrajOutputUnit, "(A,I6,A,/)") "# ", inum, " realizations of H-graphite equilibrium dynamics (fs | Angstrom)"
+      ! Open output file to print the second brownian realizations vs time
+      Traj2OutputUnit = LookForFreeUnit()
+      OPEN( FILE="Trajectories_Zh.dat", UNIT=Traj2OutputUnit )
+      WRITE(Traj2OutputUnit, "(A,I6,A,/)") "# ", inum, " realizations of zH equilibrium dynamics (fs | Angstrom)"
       ! Open output file to print the spectral density of the brownian motion
       SpectrDensUnit = LookForFreeUnit()
       OPEN( FILE="SpectralDensity.dat", UNIT=SpectrDensUnit )
@@ -563,7 +568,7 @@ PROGRAM JK6
       TimeCorrelationUnit = LookForFreeUnit()
       OPEN( FILE="Autocorrelation.dat", UNIT=TimeCorrelationUnit )
       WRITE(TimeCorrelationUnit, "(A,I6,A,/)") "# Autocorrelation func of H-graphite equilibrium dynamics - ", inum, " trajectories (fs | Angstrom^2)"
-      
+
       ! Initialize random number seed
       CALL SetSeed( 1 )
 
@@ -706,7 +711,9 @@ PROGRAM JK6
 
          ! Initialize array with C-H distance
          DeltaZ(:) = 0.0
-         DeltaZ(0) = X(3)  -  X(4)
+!         DeltaZ(0) = X(3) - ZCentorOfMass(X)
+         DeltaZ(0) = X(3)  - (X(5)+X(6)+X(7))/3 
+         WRITE(TrajOutputUnit,"(F14.8,2F14.8)") 0.0, (X(3)- X(4))*MyConsts_Bohr2Ang
 
          PRINT "(/,A)", " Propagating the equilibrium H-Graphene in time... "
          
@@ -722,7 +729,7 @@ PROGRAM JK6
             IstTemperature = 2.0*KinEnergy/(MyConsts_K2AU*(nevo+3))
 
             ! Store C-H distance for the autocorrelation function
-            ZHinTime = X(3)  - X(4)
+            ZHinTime = X(3) -  (X(5)+X(6)+X(7))/3.0
 
             ! Necessary averages that are always computed
             HPosAverage(3)  = HPosAverage(3)  +   ZHinTime   ! H Z Coordinate
@@ -757,7 +764,7 @@ PROGRAM JK6
                   WRITE(NWriteUnit,800) dt*real(iStep)/MyConsts_fs2AU, PotEnergy*MyConsts_Hartree2eV,  &
                         KinEnergy*MyConsts_Hartree2eV, TotEnergy*MyConsts_Hartree2eV, IstTemperature                    
                   WRITE(NWriteUnit,801)  dt*real(iStep)/MyConsts_fs2AU, X(1:5)*MyConsts_Bohr2Ang,  &
-                           X(8)*MyConsts_Bohr2Ang, X(14)*MyConsts_Bohr2Ang, X(17)*MyConsts_Bohr2Ang
+                           X(8)*MyConsts_Bohr2Ang, X(14)*MyConsts_Bohr2Ang, X(17)*MyConsts_Bohr2Ang, ZCentorOfMass(X)*MyConsts_Bohr2Ang
                   800 FORMAT("T= ",F12.5," V= ",1F15.8," K= ",1F15.8," E= ",1F15.8," Temp= ", 1F15.8)
                   801 FORMAT("T= ",F12.5," COORDS= ", 8F8.4)
                END IF
@@ -768,6 +775,9 @@ PROGRAM JK6
                      Trajectory( 1:min(7,3+nevo) , kstep ) = X( 1:min(7,3+nevo) ) 
                      NrOfTrajSteps = kstep
                END IF
+
+               WRITE(TrajOutputUnit,"(F14.8,2F14.8)")  dt*real(iStep)/MyConsts_fs2AU, (X(3)- X(4))*MyConsts_Bohr2Ang
+
 
             END IF 
 
@@ -782,12 +792,13 @@ PROGRAM JK6
 
          ! PRINT deltaZ vs TIME to output file
          DO iStep = 0, ntime
-               WRITE(TrajOutputUnit,"(F14.8,F14.8)")  dt*real(nprint*iStep)/MyConsts_fs2AU,  real(DeltaZ(iStep))*MyConsts_Bohr2Ang
+               WRITE(Traj2OutputUnit,"(F14.8,F14.8)")  dt*real(nprint*iStep)/MyConsts_fs2AU, real(DeltaZ(iStep))*MyConsts_Bohr2Ang
          END DO
+         WRITE(Traj2OutputUnit,*)  " "
          WRITE(TrajOutputUnit,*)  " "
          
          ! Fourier transform
-        CALL DiscreteInverseFourier( DeltaZ )
+         CALL DiscreteInverseFourier( DeltaZ )
 
          ! Store average of DeltaZ fourier components
          AverageDeltaZ(:) = AverageDeltaZ(:) + abs(DeltaZ(:))**2
@@ -852,7 +863,7 @@ PROGRAM JK6
       END DO
 
       DeltaZ(:) = AverageDeltaZ(:)
-     CALL DiscreteInverseFourier(DeltaZ)
+      CALL DiscreteInverseFourier(DeltaZ)
 
       ! Print the autocorrelation function
       DO iStep = (ntime/2)+1, ntime
@@ -864,6 +875,7 @@ PROGRAM JK6
 
       ! Close output files
       CLOSE( TrajOutputUnit )
+      CLOSE( Traj2OutputUnit )
       CLOSE( TimeCorrelationUnit )
       CLOSE( SpectrDensUnit )
 
@@ -1474,6 +1486,20 @@ PROGRAM JK6
       Vector(:) = Transform(:) / ( N-1 )
 
    END SUBROUTINE DiscreteInverseFourier
+
+
+   REAL FUNCTION ZCentorOfMass( X )
+      IMPLICIT NONE
+      REAL, DIMENSION(nevo+3), INTENT(IN) :: X
+      INTEGER :: iAtom
+
+      ZCentorOfMass = X(3)*rmh
+      DO iAtom = 1, nevo
+         ZCentorOfMass = ZCentorOfMass + X(3+iAtom)*rmc
+      END DO
+      ZCentorOfMass = ZCentorOfMass / ( nevo*rmc + 1.0*rmh )
+
+   END FUNCTION ZCentorOfMass
 
 !****************************************************************************************************************
 
