@@ -209,7 +209,7 @@ PROGRAM JK6
          
          ! if XYZ files of the trajectories are required, allocate memory to store the traj
          IF ( PrintType >= FULL ) THEN
-               ALLOCATE( Trajectory( 7, ntime ) )
+               ALLOCATE( Trajectory( 16, ntime ) )
          END IF
 
          ! Set variables for EOM integration in the microcanonical ensamble
@@ -428,7 +428,7 @@ PROGRAM JK6
 
                   ! Store the trajectory for XYZ printing
                   IF ( PrintType >= FULL ) THEN
-                        Trajectory( :, kstep ) = X(1:7)
+                        Trajectory( :, kstep ) = X(1:16)
                         NrOfTrajSteps = kstep
                   END IF
 
@@ -772,7 +772,7 @@ PROGRAM JK6
                ! Store the trajectory for XYZ printing
                IF ( PrintType >= FULL ) THEN
                      Trajectory( :, kstep ) = 0.0
-                     Trajectory( 1:min(7,3+nevo) , kstep ) = X( 1:min(7,3+nevo) ) 
+                     Trajectory( 1:min(16,3+nevo) , kstep ) = X( 1:min(16,3+nevo) ) 
                      NrOfTrajSteps = kstep
                END IF
 
@@ -1414,24 +1414,41 @@ PROGRAM JK6
          REAL, INTENT(IN)                   :: LatticeConst
 
          INTEGER :: NrTimeStep, UnitNr, i
+         REAL    :: A1_x, A1_y, A2_x, A2_y
 
          ! check and store array dimensions
          NrTimeStep = size( CoordinatesVsTime, 2 )
-         CALL ERROR( size( CoordinatesVsTime, 1 ) /= 7 , " WriteTrajectoryXYZ: Invalid array dimension "  )
+         CALL ERROR( size( CoordinatesVsTime, 1 ) /= min(16,3+nevo) , " WriteTrajectoryXYZ: Invalid array dimension "  )
 
          ! Open input file in a free output unit
          UnitNr =  LookForFreeUnit()
          OPEN( FILE = trim(adjustl(FileName)), UNIT=UnitNr )
    
+         A1_x = LatticeConst
+         A1_y = 0.0 
+         A2_x = LatticeConst/2.0
+         A2_y = sqrt(3.)*LatticeConst/2.0
+
          ! write snapshot to output file
          DO i = 1, NrTimeStep
-            WRITE( UnitNr, * ) " 5 "
+            WRITE( UnitNr, * ) " 14 "
             WRITE( UnitNr, * ) " Step nr ",i," of the trajectory "
             WRITE( UnitNr, "(A,3F15.6)" ) " H ", CoordinatesVsTime(1,i), CoordinatesVsTime(2,i)     , CoordinatesVsTime(3,i)
-            WRITE( UnitNr, "(A,3F15.6)" ) " C ", 0.0                   , 0.0                        , CoordinatesVsTime(4,i)
-            WRITE( UnitNr, "(A,3F15.6)" ) " C ", 0.0                   , LatticeConst/sqrt(3.)      , CoordinatesVsTime(5,i)
-            WRITE( UnitNr, "(A,3F15.6)" ) " C ", - LatticeConst/2.0    , -LatticeConst/(2*sqrt(3.)) , CoordinatesVsTime(6,i)
-            WRITE( UnitNr, "(A,3F15.6)" ) " C ", LatticeConst/2.0      , -LatticeConst/(2*sqrt(3.)) , CoordinatesVsTime(7,i)
+            WRITE( UnitNr, "(A,3F15.6)" ) " C ", 0.0                   , 0.0                        , CoordinatesVsTime(4,i) !C1
+            WRITE( UnitNr, "(A,3F15.6)" ) " C ", 0.0                   , LatticeConst/sqrt(3.)      , CoordinatesVsTime(5,i) !C2
+            WRITE( UnitNr, "(A,3F15.6)" ) " C ", - LatticeConst/2.0    , -LatticeConst/(2*sqrt(3.)) , CoordinatesVsTime(6,i) !C3
+            WRITE( UnitNr, "(A,3F15.6)" ) " C ", LatticeConst/2.0      , -LatticeConst/(2*sqrt(3.)) , CoordinatesVsTime(7,i) !C4
+            WRITE( UnitNr, "(A,3F15.6)" ) " C ", -A1_x+A2_x            , -A1_y+A2_y                 , CoordinatesVsTime(8,i) !C5
+            WRITE( UnitNr, "(A,3F15.6)" ) " C ", +A2_x                 , +A2_y                      , CoordinatesVsTime(9,i) !C6
+            WRITE( UnitNr, "(A,3F15.6)" ) " C ", -A1_x                 , -A1_y                      , CoordinatesVsTime(10,i) !C7
+            WRITE( UnitNr, "(A,3F15.6)" ) " C ", +A1_x                 , +A1_y                      , CoordinatesVsTime(11,i) !C8
+            WRITE( UnitNr, "(A,3F15.6)" ) " C ", -A2_x                 , -A2_y                      , CoordinatesVsTime(12,i) !C9
+            WRITE( UnitNr, "(A,3F15.6)" ) " C ", +A1_x-A2_x            , +A1_y-A2_y                 , CoordinatesVsTime(13,i) !C10
+            WRITE( UnitNr, "(A,3F15.6)" ) " C ", -A1_x                 , LatticeConst/sqrt(3.)-A1_y , CoordinatesVsTime(14,i) !C11
+            WRITE( UnitNr, "(A,3F15.6)" ) " C ", +A1_x                 , LatticeConst/sqrt(3.)+A1_y , CoordinatesVsTime(15,i) !C12
+            WRITE( UnitNr, "(A,3F15.6)" ) " C ", 0.0+A1_x-2*A2_x , LatticeConst/sqrt(3.)+A1_y-2*A2_y, CoordinatesVsTime(16,i) !C13
+
+
          END DO
 
          ! close input file
