@@ -61,6 +61,7 @@ REAL, PARAMETER    :: MyConsts_mel = 9.10938291e-31             !<  Electron mas
 REAL, PARAMETER    :: MyConsts_NAvo = 6.02214129E23             !<  Avogadro's number (from NIST reference)
 REAL, PARAMETER    :: MyConsts_ThermoCal = 4.184                !<  Thermochemical Calorie ( from NIST reference )
 REAL, PARAMETER    :: MyConsts_AUofTime = 2.418884326502e-2     !<  Atomic unit of time in fs ( from NIST reference )
+REAL, PARAMETER    :: MyConsts_SpeedOfLight = 299792458         !<  Speed of light in the vacuum, in m/s ( from NIST reference )
 
 !> @}
 
@@ -76,6 +77,8 @@ REAL, PARAMETER    :: MyConsts_Bohr2Ang       = 0.52917721092               !< C
 REAL, PARAMETER    :: MyConsts_Uma2Au         = MyConsts_uma / MyConsts_mel !< Conversion factor from UMA to Atomic Units
 REAL, PARAMETER    :: MyConsts_fs2AU          = 1.0 / MyConsts_AUofTime     !< Conversion factor from femtosecond to Atomic Units
 REAL, PARAMETER    :: MyConsts_K2AU           = MyConsts_kb / MyConsts_Hartree2eV   !< Conversion factor from Kelvin to Atomic Units
+REAL, PARAMETER    :: MyConsts_cmmin1tofsmin1 = 2.0*MyConsts_PI*MyConsts_SpeedOfLight*1e-13  !< Conversion from cm-1 to fs-1 (2PI for angular freq conversion)
+REAL, PARAMETER    :: MyConsts_cmmin1toAU     = MyConsts_cmmin1tofsmin1/MyConsts_fs2AU !< Conversion from cm-1 to Atomic Units (freq=energy)
 !> @}
 
 !> \name ELEMENTS MASSES

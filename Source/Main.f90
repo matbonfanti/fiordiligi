@@ -87,7 +87,7 @@ PROGRAM JK6
    INTEGER :: NpointZC
 
    ! Parameters to define CH model potential
-   REAL :: CHFrequency, ZCFrequency, BilinearCoupl
+   REAL :: ZHFrequency, ZCFrequency, BilinearCoupl
 
 
 
@@ -126,6 +126,8 @@ PROGRAM JK6
    !            time        - femtosecond
    !            distance    - Angstrom
    !            temperature - Kelvin
+   !            frequency   - cm-1
+   !
 
    ! Open and read from input file the input parameters of the calculation
    CALL OpenFile( InputData, InputFileName )
@@ -185,8 +187,10 @@ PROGRAM JK6
       CALL SetFieldFromInput( InputData, "NpointZH", NpointZH, 400 )
       CALL SetFieldFromInput( InputData, "NpointZC", NpointZC, 100 )
 
-      CALL SetFieldFromInput( InputData, "CHFrequency", CHFrequency )
+      CALL SetFieldFromInput( InputData, "ZHFrequency", ZHFrequency )
+      ZHFrequency = ZHFrequency * MyConsts_cmmin1toAU
       CALL SetFieldFromInput( InputData, "ZCFrequency", ZCFrequency )
+      ZCFrequency = ZCFrequency * MyConsts_cmmin1toAU
       CALL SetFieldFromInput( InputData, "BilinearCoupl", BilinearCoupl )
 
    END IF
@@ -1196,9 +1200,14 @@ PROGRAM JK6
       REAL, DIMENSION(:), ALLOCATABLE   :: ZCArray, ZHArray
 
       REAL :: DeltaZH, DeltaZC
-      REAL :: MinimumCH, MinimumZC, MinimumE
+      REAL :: MinimumZH,          MinimumZC,          MinimumE
+      REAL :: MinimumZH_withSlab, MinimumZC_withSlab, MinimumE_withSlab
 
       LOGICAL, DIMENSION(nevo+3) :: OptimizationMask
+
+      PRINT "(2/,A)",    "***************************************************"
+      PRINT "(A,F10.5)", "               PES ANALYSIS "
+      PRINT "(A,/)" ,    "***************************************************"
 
       ! Allocate temporary array to store potential data and coord grids
       ALLOCATE( PotentialArray( NpointZH * NpointZC ), ZCArray( NpointZC ), ZHArray( NpointZH ) )
@@ -1211,30 +1220,97 @@ PROGRAM JK6
       ZCArray = (/ ( ZCmin + DeltaZC*(iZC-1), iZC=1,NpointZC) /)
       ZHArray = (/ ( ZHmin + DeltaZH*(iZH-1), iZH=1,NpointZH) /)
 
-      ! Open output file to print the H vibrational curve with fixed carbons
-      HCurveOutputUnit = LookForFreeUnit()
-      OPEN( FILE="GraphiteHBindingCurve.dat", UNIT=HCurveOutputUnit )
-      WRITE(HCurveOutputUnit, "(A,I6,A,/)") "# H-Graphite binding at C fixed puckered geometry - ", NpointZH, " points (Ang | eV)"
+      !*************************************************************
+      ! EQUILIBRIUM POSITION OF THE H-GRAPHITE POTENTIAL
+      !*************************************************************
+
+      ! minimum of the CH 4D potential
+
+      ! set optimization mask
+      OptimizationMask = (/ (.FALSE., iCoord=1,nevo+3) /)
+      OptimizationMask(1:4) = .TRUE. 
+
+      ! Set guess geometry: collinear H and other Cs in ideal geometry
+      X(:) = 0.0
+      X(4) = C1Puckering
+      X(3) = C1Puckering + 2.2
+
+      ! Compute potential
+      PotEnergy = MinimizePotential( X,  OptimizationMask )
+
+      ! Store values
+      MinimumZH = X(3)
+      MinimumZC = X(4)
+      MinimumE = PotEnergy
+
+      ! minimum of the full potential
+
+      ! set optimization mask
+      OptimizationMask = (/ (.TRUE., iCoord=1,nevo+3) /)
+
+      ! Compute potential
+      ! As guess use the previously computed minimum
+      PotEnergy = MinimizePotential( X,  OptimizationMask )
+
+      ! Store values, with respect to the plane defined by C2,C3 and C4
+      MinimumZH_withSlab = X(3) - (X(5)+X(6)+X(7))/3.0
+      MinimumZC_withSlab = X(4) - (X(5)+X(6)+X(7))/3.0
+      MinimumE_withSlab = PotEnergy
+
+      WRITE(*,801) MinimumE*MyConsts_Hartree2eV, MinimumZH*MyConsts_Bohr2Ang, MinimumZC*MyConsts_Bohr2Ang, &
+                   MinimumZH-MinimumZC*MyConsts_Bohr2Ang, MinimumE_withSlab*MyConsts_Hartree2eV, MinimumZH_withSlab*MyConsts_Bohr2Ang, &
+                   MinimumZC_withSlab*MyConsts_Bohr2Ang, MinimumZH_withSlab-MinimumZC_withSlab*MyConsts_Bohr2Ang
+
+      WRITE(*,802) (MinimumE+5*MyConsts_K2AU)*MyConsts_Hartree2eV, (MinimumE+50*MyConsts_K2AU)*MyConsts_Hartree2eV,      &
+                   (MinimumE+100*MyConsts_K2AU)*MyConsts_Hartree2eV, (MinimumE+300*MyConsts_K2AU)*MyConsts_Hartree2eV,   &
+                   (MinimumE+500*MyConsts_K2AU)*MyConsts_Hartree2eV
+
+      801 FORMAT (/,    " * Optimization with ideal graphite surface ",/  &
+                        "   Energy at the minimum (eV)     ",1F10.4,/     &
+                        "   Z coordinate of H atom (Ang)   ",1F10.4,/     &
+                        "   Z coordinate of C1 atom (Ang)  ",1F10.4,/     &
+                        "   H-C1 distance (Ang)            ",1F10.4,2/    &
+                        " * Optimization with puckered graphite surface ",/  &
+                        "   (Z=0 defined by C2,C3 and C4 plane)",         /  &
+                        "   Energy at the minimum (eV)     ",1F10.4,/     &
+                        "   Z coordinate of H atom (Ang)   ",1F10.4,/     &
+                        "   Z coordinate of C1 atom (Ang)  ",1F10.4,/     &
+                        "   H-C1 distance (Ang)            ",1F10.4,/ ) 
+
+      802 FORMAT (/,    " * Average vibrational energy at given T (eV) ",/,  &
+                        "   at T = 5K   :   ",1F10.4,/, & 
+                        "   at T = 50K  :   ",1F10.4,/, &
+                        "   at T = 100K :   ",1F10.4,/, &
+                        "   at T = 300K :   ",1F10.4,/, & 
+                        "   at T = 500K :   ",1F10.4,/ ) 
+
 
       !*************************************************************
       ! PRINT H VIBRATIONAL CURVE FOR C FIXED IN PUCKERING GEOMETRY
       !*************************************************************
 
+      ! Open output file to print the H vibrational curve with fixed carbons
+      HCurveOutputUnit = LookForFreeUnit()
+      OPEN( FILE="GraphiteHBindingCurve.dat", UNIT=HCurveOutputUnit )
+      WRITE(HCurveOutputUnit, "(A,I6,A,/)") "# H-Graphite binding at C fixed puckered geometry - ", NpointZH, " points (Ang | eV)"
+
       ! Set collinear H, C1 puckered and other Cs in ideal geometry
       X(:) = 0.0
-      X(4) = C1Puckering
+      X(4) = MinimumZC
 
       ! Cycle over the ZH coordinate values
       DO iZH = 1, NpointZH
-
          ! Define the H Z coordinate
-         X(3) = C1Puckering+ZHArray(iStep)
+         X(3) = ZHArray(iZH)
          ! Compute potential
          PotEnergy = VHSticking( X, A )
          ! Print energy to dat file
          WRITE(HCurveOutputUnit,*) X(3)*MyConsts_Bohr2Ang, PotEnergy*MyConsts_Hartree2eV
-
       END DO
+      CLOSE( HCurveOutputUnit )
+
+      WRITE(*,"(/,A)") " * CH binding curve written to file GraphiteHBindingCurve.dat"
+
 
       !*************************************************************
       ! PRINT 2D C-H V WITH OTHERS CARBONS IN IDEAL GEOMETRY
@@ -1249,7 +1325,7 @@ PROGRAM JK6
          X(4) = ZCArray(iZC)
          ! Cycle over the ZH coordinate values
          DO iZH = 1, NpointZH
-            X(3) = ZCArray(iZC)+ZHArray(iZH)
+            X(3) = ZHArray(iZH)
             nPoint = nPoint + 1
             ! Compute potential
             PotentialArray(nPoint) = VHSticking( X, A )
@@ -1261,25 +1337,7 @@ PROGRAM JK6
                             FileName="GraphiteHSticking-IdealGr" )
       CALL VTK_AddScalarField (PotentialCH_IdealGr, Name="CHPotential", Field=PotentialArray*MyConsts_Hartree2eV )
 
-      !*************************************************************
-      !      FIND MINIMUM OF THE POTENTIAL
-      !*************************************************************
- 
-      OptimizationMask = (/ (.FALSE., iCoord=1,nevo+3) /)
-      OptimizationMask(1:4) = .TRUE. 
-
-      ! Set collinear H and other Cs in ideal geometry
-      X(:) = 0.0
-      X(4) = C1Puckering
-      X(3) = C1Puckering + 2.2
-
-      ! Compute potential
-      PotEnergy = MinimizePotential( X,  OptimizationMask )
-
-      ! Store values
-      MinimumCH = X(3) - X(4)
-      MinimumZC = X(4)
-      MinimumE = PotEnergy
+      WRITE(*,"(/,A)") " * PES as a function of ZC and ZH written in VTR format to file GraphiteHSticking-IdealGr.vtr"
 
 
       !*************************************************************
@@ -1295,8 +1353,8 @@ PROGRAM JK6
             X(3) = ZHArray(iZH)
             nPoint = nPoint + 1
             ! Compute potential
-            PotentialArray(nPoint) = PotEnergy + 0.5*rmh*(CHFrequency*(X(3)-MinimumCH))**2 + &
-                  0.5*rmc*(ZCFrequency*(X(4)-MinimumZC))**2 + BilinearCoupl*(X(3)-MinimumCH)*(X(4)-MinimumZC)
+            PotentialArray(nPoint) = MinimumE + 0.5*rmh*(ZHFrequency*(X(3)-MinimumZH))**2 + &
+                  0.5*rmc*(ZCFrequency*(X(4)-MinimumZC))**2 + BilinearCoupl*(X(3)-MinimumZH)*(X(4)-MinimumZC)
          END DO
       END DO
 
@@ -1304,6 +1362,9 @@ PROGRAM JK6
       CALL VTK_NewRectilinearSnapshot ( PotentialCH_Model, X=ZHArray*MyConsts_Bohr2Ang, Y=ZCArray*MyConsts_Bohr2Ang, &
                             FileName="ModelPotential" )
       CALL VTK_AddScalarField (PotentialCH_Model, Name="CHPotential", Field=PotentialArray*MyConsts_Hartree2eV )
+
+      WRITE(*,"(/,A,A)") " * Model PES from vibrational frequency and bilinear coupling written in VTR ", & 
+                           "format to file ModelPotential.vtr"
 
 
       !*************************************************************
@@ -1339,8 +1400,6 @@ PROGRAM JK6
 !       CALL VTK_AddScalarField (PotentialCH_OptimGr, Name="CHPotential", Field=PotentialArray*MyConsts_Hartree2eV )
 
 
-      ! Close output files
-      CLOSE( HCurveOutputUnit )
 
       ! Deallocate memory
       DEALLOCATE( PotentialArray, ZHArray, ZCArray )
