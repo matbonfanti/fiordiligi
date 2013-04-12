@@ -276,7 +276,7 @@ ${OBJDIR}/ClassicalEqMotion.o  : ${SRCDIR}/ClassicalEqMotion.f90 ${OBJDIR}/Rando
 
 # Module containing the definitions of the independent oscillator model
 ${OBJDIR}/IndependentOscillatorsModel.o  : ${SRCDIR}/IndependentOscillatorsModel.f90 ${OBJDIR}/MyConsts.o ${OBJDIR}/PotentialModule.o \
-                                           ${OBJDIR}/SplineInterpolator.o ${COMMONDEP}
+                                           ${OBJDIR}/RandomNumberGenerator.o ${OBJDIR}/SplineInterpolator.o ${COMMONDEP}
 
 # Module containing the spline interpolation subroutines
 ${OBJDIR}/SplineInterpolator.o : ${SRCDIR}/SplineInterpolator.f90 ${OBJDIR}/NRUtility.o ${COMMONDEP}
@@ -284,3 +284,5 @@ ${OBJDIR}/SplineInterpolator.o : ${SRCDIR}/SplineInterpolator.f90 ${OBJDIR}/NRUt
 # Module containing the subroutine to write data in vtk format
 ${OBJDIR}/PrintTools.o : ${SRCDIR}/PrintTools.f90 ${COMMONDEP}
 
+# Linear algebra module
+${OBJDIR}/MyLinearAlgebra.o : ${SRCDIR}/MyLinearAlgebra.f90 ${OBJDIR}/NRUtility.o ${COMMONDEP}

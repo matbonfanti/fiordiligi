@@ -21,10 +21,12 @@ MODULE CommonData
    
    !> Variable to define which kind of calculation is required 
    INTEGER :: RunType
-   INTEGER, PARAMETER :: SCATTERING     = 1, &  ! Scattering calculation with H coming from gas-phase
-                         EQUILIBRIUM    = 2, &  ! Equilibrium calculation with H already adsorbed
-                         HARMONICMODEL  = 3, &  ! Test the parameters with a 1D harmonic langevin model 
-                         POTENTIALPRINT = 10    ! Print cuts of the H-graphite potential 
+   INTEGER, PARAMETER :: SCATTERING      = 1, &  ! Scattering calculation with H coming from gas-phase
+                         EQUILIBRIUM     = 2, &  ! Equilibrium calculation with H already adsorbed
+                         HARMONICMODEL   = 3, &  ! Test the parameters with a 1D harmonic langevin model 
+                         OSCIBATH_EQUIL  = 4, &  ! Equilibrium calculation with harmonic oscillator bath
+                         CHAINBATH_EQUIL = 5, &  ! Equilibrium calculation with HO bath in chain form
+                         POTENTIALPRINT  = 10    ! Print cuts of the H-graphite potential 
 
    !> Variable to set the print level of the calculation
    INTEGER :: PrintType

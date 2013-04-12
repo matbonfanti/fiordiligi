@@ -35,11 +35,12 @@ MODULE IndependentOscillatorsModel
    USE MyConsts
    USE PotentialModule
    USE SplineInterpolator
+   USE RandomNumberGenerator
 
    IMPLICIT NONE
 
    PRIVATE
-   PUBLIC :: SetupIndepOscillatorsModel
+   PUBLIC :: SetupIndepOscillatorsModel, PotentialIndepOscillatorsModel, InitialBathConditions, DisposeIndepOscillatorsModel
 
    INTEGER, PARAMETER, PUBLIC :: STANDARD_BATH = 0        ! < normal bath, in which all the oscillators are coupled to the system
    INTEGER, PARAMETER, PUBLIC :: CHAIN_BATH    = 1        ! < chain bath, in which all the oscillators are coupled in chain
@@ -66,7 +67,7 @@ MODULE IndependentOscillatorsModel
 
 CONTAINS   
 
-! ----------------------------------------------------------------------------------------------------------------
+! ------------------------------------------------------------------------------------------------------------
 
 !*******************************************************************************
 ! SetupIndepOscillatorsModel
@@ -138,9 +139,11 @@ CONTAINS
             ! Read frequencies and couplings
             DO iBath = 1, NData
                !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-               !  FORSE LE UNITA' DI MISURA SONO DA AGGIUSTARE ????
+               !  FORSE LE UNITA' DI MISURA DELLA DENSITA SPETTRALE SONO DA AGGIUSTARE ????
                !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
                READ(InpUnit,*) RdFreq(iBath), RdSpectralDens(iBath)
+               ! Transform frequencies from cm-1 to au
+               RdFreq(iBath) = RdFreq(iBath) * MyConsts_cmmin1toAU
             END DO
 
             ! Close input file
@@ -181,7 +184,7 @@ CONTAINS
    END SUBROUTINE SetupIndepOscillatorsModel
 
 
-! ----------------------------------------------------------------------------------------------------------------
+! ------------------------------------------------------------------------------------------------------------
 
 !*******************************************************************************
 !> System potential plus bath of independent oscillators (normal or in chain form)
@@ -192,7 +195,7 @@ CONTAINS
 !> @param Forces       Output array with the derivatives of the potential (in au)
 !> @param vv           output potential in atomic units
 !*******************************************************************************     
-      REAL FUNCTION SystemAndIndepedentOscillators( Positions, Forces ) RESULT(V) 
+      REAL FUNCTION PotentialIndepOscillatorsModel( Positions, Forces ) RESULT(V) 
          IMPLICIT NONE
 
          REAL, DIMENSION(:), INTENT(IN)  :: Positions
@@ -232,8 +235,67 @@ CONTAINS
          END IF
 
 
-      END FUNCTION SystemAndIndepedentOscillators
+      END FUNCTION PotentialIndepOscillatorsModel
 
+! ------------------------------------------------------------------------------------------------------------
+
+!*******************************************************************************
+!> Initial conditions for an independent oscillators model in normal or chain form
+!> DETAILS ABOUT THE INITIAL CONDITIONS 
+!>
+!> @param Positions    Array with 3 cartesian coordinates for the H atom, 1 for 
+!>                     the nearest Cu and N for the bath
+!> @param Forces       Output array with the derivatives of the potential (in au)
+!> @param vv           output potential in atomic units
+!*******************************************************************************     
+      SUBROUTINE InitialBathConditions( Positions, Velocities, Temperature )
+         IMPLICIT NONE
+
+         REAL, DIMENSION(:), INTENT(INOUT) :: Positions
+         REAL, DIMENSION(:), INTENT(INOUT) :: Velocities 
+         REAL, INTENT(IN) :: Temperature
+
+         REAL :: SigmaQ, SigmaV
+         INTEGER :: iBath
+         
+         ! Check if the bath is setup
+         CALL ERROR( .NOT. BathIsSetup, "IndependentOscillatorsModel.InitialBathConditions: bath not setup" )
+
+         ! Check the size of the position and forces arrays
+         CALL ERROR( size(Positions) /= size(Velocities), &
+                        "IndependentOscillatorsModel.InitialBathConditions: array dimension mismatch" )
+         CALL ERROR( size(Positions) /= BathSize+4, &
+                        "IndependentOscillatorsModel.InitialBathConditions: wrong bath size" )
+
+         IF ( BathType == CHAIN_BATH ) THEN
+
+               CALL ERROR ( 1>0, " IndependentOscillatorsModel.SystemAndIndepedentOscillators: chain modo not implemented" )
+
+         ELSE IF ( BathType == STANDARD_BATH ) THEN
+
+               ! Equilibrium position of H atom
+               Positions(1) = 0.0000
+               Positions(2) = 0.0000
+               Positions(3) = 1.483 / MyConsts_Bohr2Ang
+               ! Equilibrium position of C1 atom
+               Positions(4) = C1Puckering
+               ! Zero momentum of H and C1
+               Velocities(1:4) = 0.0
+      
+               ! THE OSCILLATORS IN A CORRECT CANONICAL DISTRIBUTION FOR ZERO COUPLING
+               SigmaQ = sqrt( Temperature / OscillatorsMass )
+               DO iBath = 1, BathSize
+                  SigmaV = SigmaQ / Frequencies(iBath)
+                  Positions(4+iBath) = GaussianRandomNr( SigmaQ )
+                  Velocities(4+iBath) = GaussianRandomNr( SigmaV )
+               END DO
+         
+         END IF
+
+      END SUBROUTINE InitialBathConditions
+
+
+! ------------------------------------------------------------------------------------------------------------
 
 !*******************************************************************************
 ! DisposeIndepOscillatorsModel
@@ -258,10 +320,7 @@ CONTAINS
 
    END SUBROUTINE DisposeIndepOscillatorsModel
 
-! ----------------------------------------------------------------------------------------------------------------
-
-
-
+! ------------------------------------------------------------------------------------------------------------
 
 
 END MODULE IndependentOscillatorsModel

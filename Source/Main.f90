@@ -26,6 +26,7 @@ PROGRAM JK6
    USE RandomNumberGenerator
    USE ClassicalEqMotion
    USE PrintTools
+   USE IndependentOscillatorsModel
 
    IMPLICIT NONE
 
@@ -78,7 +79,7 @@ PROGRAM JK6
    LOGICAL, DIMENSION(121) :: LangevinSwitchOn
 
    ! Print potential cuts in VTK format
-   TYPE(VTKInfo) :: PotentialCH_IdealGr, PotentialCH_OptimGr, PotentialCH_Model
+   TYPE(VTKInfo) :: PotentialCH, PotentialCH_Model
 
    ! Parameters to define the grid for potential plots
    REAL :: ZHmin, ZHmax
@@ -88,8 +89,13 @@ PROGRAM JK6
 
    ! Parameters to define CH model potential
    REAL :: ZHFrequency, ZCFrequency, BilinearCoupl
+   INTEGER :: FreezeGraphene
 
-
+   ! Parameters for the model thermal bath
+   INTEGER :: BathNrDOF                  ! number of degrees of freedom of the bath
+   REAL :: BathCutOffFreq                ! cutoff frequency of the bath
+   CHARACTER(100) :: SpectralDensityFile         ! spectral density file name
+      
 
    PRINT "(/,     '                    ==============================')"
    PRINT "(       '                                JK6_v2            ')"
@@ -170,6 +176,21 @@ PROGRAM JK6
       CALL SetFieldFromInput( InputData, "DynamicsGamma",  DynamicsGamma, 0.0 ) 
       DynamicsGamma = DynamicsGamma / MyConsts_fs2AU
 
+   ELSE IF ( ( RunType == OSCIBATH_EQUIL ) .OR. ( RunType == CHAINBATH_EQUIL ) ) THEN
+      ! I AM NOT SURE THAT EQUILIBRATION IS STILL NEEDED!
+      CALL SetFieldFromInput( InputData, "Gamma", Gamma)
+      Gamma = Gamma / MyConsts_fs2AU
+      CALL SetFieldFromInput( InputData, "NrEquilibrSteps", NrEquilibSteps, int(5.0*(1.0/Gamma)/dt) )
+      CALL SetFieldFromInput( InputData, "EquilTStep",  EquilTStep, dt/MyConsts_fs2AU )
+      EquilTStep = EquilTStep * MyConsts_fs2AU
+      ! Read cutoff frequency of the bath
+      CALL SetFieldFromInput( InputData, "BathCutOffFreq", BathCutOffFreq )
+      BathCutOffFreq = BathCutOffFreq * MyConsts_cmmin1toAU
+      ! Read number of oscillators
+      CALL SetFieldFromInput( InputData, "BathNrDOF", BathNrDOF )
+      ! Read file with spectral density / normal modes freq and couplings
+      CALL SetFieldFromInput( InputData, "SpectralDensityFile", SpectralDensityFile )
+      
    ELSE IF (RunType == HARMONICMODEL) THEN
       CALL SetFieldFromInput( InputData, "Gamma", Gamma)
       Gamma = Gamma / MyConsts_fs2AU
@@ -192,6 +213,7 @@ PROGRAM JK6
       CALL SetFieldFromInput( InputData, "ZCFrequency", ZCFrequency )
       ZCFrequency = ZCFrequency * MyConsts_cmmin1toAU
       CALL SetFieldFromInput( InputData, "BilinearCoupl", BilinearCoupl )
+      CALL SetFieldFromInput( InputData, "FreezeGraphene", FreezeGraphene, 1 )
 
    END IF
 
@@ -206,7 +228,11 @@ PROGRAM JK6
    ! number of analysis step
    ntime=int(nstep/nprint)
 
-   IF ( (RunType == SCATTERING) .OR. (RunType == EQUILIBRIUM) ) THEN
+   IF (( RunType == OSCIBATH_EQUIL ) .OR. ( RunType == CHAINBATH_EQUIL ))  &
+            nevo =  BathNrDOF + 1 
+   
+   IF ( (RunType == SCATTERING) .OR. (RunType == EQUILIBRIUM) .OR.   &
+                               ( RunType == OSCIBATH_EQUIL ) .OR. ( RunType == CHAINBATH_EQUIL ) ) THEN
 
          ! Allocation of position, velocity, acceleration arrays
          ALLOCATE( X(nevo+3), V(nevo+3), A(nevo+3), APre(nevo+3) )
@@ -252,9 +278,21 @@ PROGRAM JK6
    ! Setup potential energy surface
    CALL SetupPotential( .FALSE. )
    
+   ! If needed setup bath frequencies and coupling for IO Model in normal form
+   IF (  RunType == OSCIBATH_EQUIL ) THEN
+      CALL SetupIndepOscillatorsModel( BathNrDOF, STANDARD_BATH, SpectralDensityFile, rmc, BathCutOffFreq )
+   END IF
+   IF (  RunType == CHAINBATH_EQUIL ) THEN
+      CALL SetupIndepOscillatorsModel( BathNrDOF, CHAIN_BATH, SpectralDensityFile, rmc, BathCutOffFreq )
+   END IF
+   
    !*************************************************************
    !       PRINT OF THE INPUT DATA TO STD OUT
    !*************************************************************
+
+               !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+   ! THIS LOG PRINTING PART SHOULD BE EXTENDEND AND ORDERED !!!!!!!!!!!!!1
+              !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
    ! write to standard output the parameters of the calculation
 
@@ -283,7 +321,6 @@ PROGRAM JK6
               " * Equilibration time step (fs)                 ",F10.4,/, &
               " * Equilibration total time (fs)                ",F10.4      )
 
-
    !****************************************************************************
    IF (RunType == SCATTERING) THEN
    !****************************************************************************
@@ -291,7 +328,7 @@ PROGRAM JK6
          CALL ScatteringSimulation()
 
    !****************************************************************************
-   ELSE IF (RunType == EQUILIBRIUM) THEN   
+   ELSE IF (RunType == EQUILIBRIUM .OR. RunType == OSCIBATH_EQUIL .OR. RunType  == CHAINBATH_EQUIL ) THEN   
    !****************************************************************************
 
          CALL HGraphiteEquilibrium()
@@ -581,6 +618,10 @@ PROGRAM JK6
       PRINT "(A,/)" ,    "***************************************************"
 
       PRINT "(A,I5,A)"," Running ", inum, " trajectories ... "
+
+      IF ( RunType == OSCIBATH_EQUIL )  PRINT "(A)"," Bath represented as indipendent oscillators in normal form. "
+      IF ( RunType == CHAINBATH_EQUIL ) PRINT "(A)"," Bath represented as indipendent oscillators in chain form. "
+      IF ( RunType == EQUILIBRIUM )  PRINT "(A)"," Bath represented with atomistic force field. "
       
       !run inum number of trajectories at the current rxn parameter
       DO iTraj = 1,inum
@@ -592,8 +633,12 @@ PROGRAM JK6
          !*************************************************************
 
          ! Set initial conditions
-         CALL ThermalEquilibriumConditions( X, V, temp, rmh, rmc )
-
+         IF ( RunType == EQUILIBRIUM ) THEN 
+               CALL ThermalEquilibriumConditions( X, V, temp, rmh, rmc )
+         ELSE IF ( RunType == OSCIBATH_EQUIL .OR. RunType == CHAINBATH_EQUIL ) THEN
+               CALL InitialBathConditions( X, V, temp )
+         END IF
+               
          PRINT "(/,A,F6.1)"," Equilibrating the initial conditions at T = ", temp / MyConsts_K2AU
 
          IF ( PrintType == DEBUG ) THEN
@@ -610,7 +655,12 @@ PROGRAM JK6
 
          ! Compute starting potential and forces
          A(:) = 0.0
-         PotEnergy = VHSticking( X, A )
+         IF ( RunType == EQUILIBRIUM ) THEN 
+               PotEnergy = VHSticking( X, A )
+         ELSE IF ( RunType == OSCIBATH_EQUIL .OR. RunType == CHAINBATH_EQUIL ) THEN
+               PotEnergy = PotentialIndepOscillatorsModel( X, A )
+         END IF
+
          A(1:3) = A(1:3) / rmh
          A(4:nevo+3) = A(4:nevo+3) / rmc
 
@@ -621,10 +671,18 @@ PROGRAM JK6
                   ! Store initial accelerations
                   APre(:) = A(:)
                   ! Propagate for one timestep with Velocity-Verlet and langevin thermostat
-                   CALL EOM_VelocityVerlet( Equilibration, X, V, A, VHSticking, PotEnergy )
+                  IF ( RunType == EQUILIBRIUM ) THEN 
+                        CALL EOM_VelocityVerlet( Equilibration, X, V, A, VHSticking, PotEnergy )
+                  ELSE IF ( RunType == OSCIBATH_EQUIL .OR. RunType == CHAINBATH_EQUIL ) THEN
+                        CALL EOM_VelocityVerlet( Equilibration, X, V, A, PotentialIndepOscillatorsModel, PotEnergy )
+                  END IF
                ELSE
                   ! Propagate for one timestep with Beeman's method and langevin thermostat
-                  CALL EOM_Beeman( Equilibration, X, V, A, APre, VHSticking, PotEnergy )
+                  IF ( RunType == EQUILIBRIUM ) THEN 
+                        CALL EOM_Beeman( Equilibration, X, V, A, APre, VHSticking, PotEnergy )
+                  ELSE IF ( RunType == OSCIBATH_EQUIL .OR. RunType == CHAINBATH_EQUIL ) THEN
+                        CALL EOM_Beeman( Equilibration, X, V, A, APre, PotentialIndepOscillatorsModel, PotEnergy )
+                  END IF
                END IF
 
                ! compute kinetic energy and total energy
@@ -725,8 +783,12 @@ PROGRAM JK6
          DO iStep = 1,nstep
 
             ! Propagate for one timestep
-            CALL EOM_VelocityVerlet( MolecularDynamics, X, V, A, VHSticking, PotEnergy )
-
+            IF ( RunType == EQUILIBRIUM ) THEN 
+               CALL EOM_VelocityVerlet( MolecularDynamics, X, V, A, VHSticking, PotEnergy )
+            ELSE IF ( RunType == OSCIBATH_EQUIL .OR. RunType == CHAINBATH_EQUIL ) THEN
+               CALL EOM_VelocityVerlet( MolecularDynamics, X, V, A, PotentialIndepOscillatorsModel, PotEnergy )
+            END IF
+         
             ! Compute kin energy and temperature
             KinEnergy = EOM_KineticEnergy( MolecularDynamics, V )
             TotEnergy = PotEnergy + KinEnergy
@@ -1193,16 +1255,19 @@ PROGRAM JK6
    SUBROUTINE PotentialCuts()
       IMPLICIT NONE
 
+      REAL, PARAMETER :: dd = 0.001
+      
       INTEGER :: iZH, iZC, nPoint
       INTEGER :: HCurveOutputUnit
 
       REAL, DIMENSION(:), ALLOCATABLE :: PotentialArray
-      REAL, DIMENSION(:), ALLOCATABLE   :: ZCArray, ZHArray
+      REAL, DIMENSION(:), ALLOCATABLE :: ZCArray, ZHArray
 
       REAL :: DeltaZH, DeltaZC
       REAL :: MinimumZH,          MinimumZC,          MinimumE
-      REAL :: MinimumZH_withSlab, MinimumZC_withSlab, MinimumE_withSlab
-
+      REAL :: ZHFreq, ZCFreq, Coupling
+      REAL :: Tmp1, Tmp2
+      
       LOGICAL, DIMENSION(nevo+3) :: OptimizationMask
 
       PRINT "(2/,A)",    "***************************************************"
@@ -1227,9 +1292,13 @@ PROGRAM JK6
       ! minimum of the CH 4D potential
 
       ! set optimization mask
-      OptimizationMask = (/ (.FALSE., iCoord=1,nevo+3) /)
-      OptimizationMask(1:4) = .TRUE. 
-
+      IF ( FreezeGraphene == 1 ) THEN
+         OptimizationMask = (/ (.FALSE., iCoord=1,nevo+3) /)
+         OptimizationMask(1:4) = .TRUE.
+      ELSE 
+         OptimizationMask = (/ (.TRUE., iCoord=1,nevo+3) /)
+      ENDIF
+         
       ! Set guess geometry: collinear H and other Cs in ideal geometry
       X(:) = 0.0
       X(4) = C1Puckering
@@ -1238,44 +1307,48 @@ PROGRAM JK6
       ! Compute potential
       PotEnergy = MinimizePotential( X,  OptimizationMask )
 
-      ! Store values
-      MinimumZH = X(3)
-      MinimumZC = X(4)
+      ! Store values, with respect to the plane defined by C2,C3 and C4
+      Tmp1 = X(3)
+      Tmp2 = X(4)
+      MinimumZH = X(3) - (X(5)+X(6)+X(7))/3.0
+      MinimumZC = X(4) - (X(5)+X(6)+X(7))/3.0
       MinimumE = PotEnergy
 
-      ! minimum of the full potential
+      ! ZH frequency at the minimum of the potential
+      X(3) = Tmp1 + dd
+      PotEnergy = VHSticking( X, A )
+      ZHFreq = - A(3) / ( 2.0 * dd )
+      X(3) = Tmp1 - dd
+      PotEnergy =  VHSticking( X, A )
+      ZHFreq = ZHFreq + A(3) / ( 2.0 * dd )
+      ZHFreq = sqrt( ZHFreq /  rmh )
 
-      ! set optimization mask
-      OptimizationMask = (/ (.TRUE., iCoord=1,nevo+3) /)
-
-      ! Compute potential
-      ! As guess use the previously computed minimum
-      PotEnergy = MinimizePotential( X,  OptimizationMask )
-
-      ! Store values, with respect to the plane defined by C2,C3 and C4
-      MinimumZH_withSlab = X(3) - (X(5)+X(6)+X(7))/3.0
-      MinimumZC_withSlab = X(4) - (X(5)+X(6)+X(7))/3.0
-      MinimumE_withSlab = PotEnergy
-
+      ! ZC frequency at the minimum of the potential
+      X(3) = Tmp1
+      X(4) = Tmp2 + dd
+      PotEnergy = VHSticking( X, A )
+      ZCFreq = - A(4) / ( 2.0 * dd )
+      X(4) = Tmp2 - dd
+      PotEnergy =  VHSticking( X, A )
+      ZCFreq = ZCFreq + A(4) / ( 2.0 * dd )
+      ZCFreq = sqrt( ZCFreq /  rmc )
+      
+     
+      
       WRITE(*,801) MinimumE*MyConsts_Hartree2eV, MinimumZH*MyConsts_Bohr2Ang, MinimumZC*MyConsts_Bohr2Ang, &
-                   MinimumZH-MinimumZC*MyConsts_Bohr2Ang, MinimumE_withSlab*MyConsts_Hartree2eV, MinimumZH_withSlab*MyConsts_Bohr2Ang, &
-                   MinimumZC_withSlab*MyConsts_Bohr2Ang, MinimumZH_withSlab-MinimumZC_withSlab*MyConsts_Bohr2Ang
-
+                   (MinimumZH-MinimumZC)*MyConsts_Bohr2Ang, ZHFreq/MyConsts_cmmin1toAU, ZCFreq/MyConsts_cmmin1toAU
       WRITE(*,802) (MinimumE+5*MyConsts_K2AU)*MyConsts_Hartree2eV, (MinimumE+50*MyConsts_K2AU)*MyConsts_Hartree2eV,      &
                    (MinimumE+100*MyConsts_K2AU)*MyConsts_Hartree2eV, (MinimumE+300*MyConsts_K2AU)*MyConsts_Hartree2eV,   &
                    (MinimumE+500*MyConsts_K2AU)*MyConsts_Hartree2eV
 
       801 FORMAT (/,    " * Optimization with ideal graphite surface ",/  &
-                        "   Energy at the minimum (eV)     ",1F10.4,/     &
-                        "   Z coordinate of H atom (Ang)   ",1F10.4,/     &
-                        "   Z coordinate of C1 atom (Ang)  ",1F10.4,/     &
-                        "   H-C1 distance (Ang)            ",1F10.4,2/    &
-                        " * Optimization with puckered graphite surface ",/  &
                         "   (Z=0 defined by C2,C3 and C4 plane)",         /  &
                         "   Energy at the minimum (eV)     ",1F10.4,/     &
                         "   Z coordinate of H atom (Ang)   ",1F10.4,/     &
                         "   Z coordinate of C1 atom (Ang)  ",1F10.4,/     &
-                        "   H-C1 distance (Ang)            ",1F10.4,/ ) 
+                        "   H-C1 distance (Ang)            ",1F10.4,/     &
+                        "   Frequency along ZH (cm-1)      ",1F10.1,/     &
+                        "   Frequency along ZC (cm-1)      ",1F10.1           ) 
 
       802 FORMAT (/,    " * Average vibrational energy at given T (eV) ",/,  &
                         "   at T = 5K   :   ",1F10.4,/, & 
@@ -1312,33 +1385,6 @@ PROGRAM JK6
       WRITE(*,"(/,A)") " * CH binding curve written to file GraphiteHBindingCurve.dat"
 
 
-      !*************************************************************
-      ! PRINT 2D C-H V WITH OTHERS CARBONS IN IDEAL GEOMETRY
-      !*************************************************************
-
-      ! Set collinear H and other Cs in ideal geometry
-      X(:) = 0.0
-
-      nPoint = 0
-      ! Cycle over the ZC coordinate values
-      DO iZC = 1, NpointZC
-         X(4) = ZCArray(iZC)
-         ! Cycle over the ZH coordinate values
-         DO iZH = 1, NpointZH
-            X(3) = ZHArray(iZH)
-            nPoint = nPoint + 1
-            ! Compute potential
-            PotentialArray(nPoint) = VHSticking( X, A )
-         END DO
-      END DO
-
-      ! Print the potential to vtk file
-      CALL VTK_NewRectilinearSnapshot ( PotentialCH_IdealGr, X=ZHArray*MyConsts_Bohr2Ang, Y=ZCArray*MyConsts_Bohr2Ang, &
-                            FileName="GraphiteHSticking-IdealGr" )
-      CALL VTK_AddScalarField (PotentialCH_IdealGr, Name="CHPotential", Field=PotentialArray*MyConsts_Hartree2eV )
-
-      WRITE(*,"(/,A)") " * PES as a function of ZC and ZH written in VTR format to file GraphiteHSticking-IdealGr.vtr"
-
 
       !*************************************************************
       ! PRINT 2D C-H MODEL V from FREQUENCIES AND COUPLING
@@ -1371,35 +1417,36 @@ PROGRAM JK6
       ! PRINT 2D C-H V WITH OTHERS CARBONS IN OPTIMIZED GEOMETRY
       !*************************************************************
 
-! 
-!       OptimizationMask = (/ (.FALSE., iCoord=1,4), (.TRUE., iCoord=1,nevo-1) /)
-! 
-!       nPoint = 0
-!       ! Cycle over the ZC coordinate values
-!       DO iZC = 1, NpointZC
-! 
-!          ! Set collinear H and other Cs in ideal geometry
-!          X(:) = 0.0
-! 
-!          ! Cycle over the ZH coordinate values
-!          DO iZH = 1, NpointZH
-!             nPoint = nPoint + 1
-! 
-!             X(3) = ZCArray(iZC)+ZHArray(iZH)
-!             X(4) = ZCArray(iZC)
-! 
-!             ! Compute potential
-!             PotentialArray(nPoint) = MinimizePotential( X,  OptimizationMask )
-! 
-!          END DO
-!       END DO
-! 
-!       ! Print the potential to vtk file
-!       CALL VTK_NewRectilinearSnapshot ( PotentialCH_OptimGr, X=ZHArray*MyConsts_Bohr2Ang, Y=ZCArray*MyConsts_Bohr2Ang, &
-!                             FileName="GraphiteHSticking-OptimGr" )
-!       CALL VTK_AddScalarField (PotentialCH_OptimGr, Name="CHPotential", Field=PotentialArray*MyConsts_Hartree2eV )
+      ! set optimization mask
+      IF ( FreezeGraphene == 1 ) THEN
+         OptimizationMask = (/ (.TRUE., iCoord=1,2), (.FALSE., iCoord=1,nevo+1) /)
+      ELSE 
+         OptimizationMask = (/ (.TRUE., iCoord=1,2), (.FALSE., iCoord=1,2), (.TRUE., iCoord=1,nevo-4) /)
+      ENDIF
 
+      nPoint = 0
+      ! Cycle over the ZC coordinate values
+      DO iZC = 1, NpointZC
+         ! Cycle over the ZH coordinate values
+         DO iZH = 1, NpointZH
+            nPoint = nPoint + 1
 
+            ! Set collinear H and other Cs in ideal geometry
+            X(:) = 0.0
+            X(4) = ZCArray(iZC)
+            X(3) = ZHArray(iZH)
+
+            ! Compute potential at optimized geometry
+            PotentialArray(nPoint) = MinimizePotential( X,  OptimizationMask )
+         END DO
+      END DO
+      
+      ! Print the potential to vtk file
+      CALL VTK_NewRectilinearSnapshot ( PotentialCH, X=ZHArray*MyConsts_Bohr2Ang,  & 
+                                Y=ZCArray*MyConsts_Bohr2Ang, FileName="GraphiteHSticking" )
+      CALL VTK_AddScalarField (PotentialCH, Name="CHPotential", Field=PotentialArray*MyConsts_Hartree2eV )
+
+      WRITE(*,"(/,A)") " * PES as a function of ZC and ZH with optimized puckered graphite written in VTR format to file GraphiteHSticking_.vtr"
 
       ! Deallocate memory
       DEALLOCATE( PotentialArray, ZHArray, ZCArray )
@@ -1515,7 +1562,7 @@ PROGRAM JK6
    
    END SUBROUTINE WriteTrajectoryXYZ
 
-!****************************************************************************************************************
+!************************************************************************************************************
 
    SUBROUTINE DiscreteFourier( Vector )
       IMPLICIT NONE
@@ -1539,7 +1586,7 @@ PROGRAM JK6
 
    END SUBROUTINE DiscreteFourier
 
-!****************************************************************************************************************
+!************************************************************************************************************
 
    SUBROUTINE DiscreteInverseFourier( Vector )
       IMPLICIT NONE
@@ -1577,14 +1624,6 @@ PROGRAM JK6
 
    END FUNCTION ZCentorOfMass
 
-!****************************************************************************************************************
-
+!************************************************************************************************************
 
 END PROGRAM JK6
-
-
-      
-
-
-
-
