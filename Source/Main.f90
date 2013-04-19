@@ -92,7 +92,6 @@ PROGRAM JK6
    INTEGER :: FreezeGraphene
 
    ! Parameters for the model thermal bath
-   INTEGER :: BathNrDOF                  ! number of degrees of freedom of the bath
    REAL :: BathCutOffFreq                ! cutoff frequency of the bath
    CHARACTER(100) :: SpectralDensityFile         ! spectral density file name
       
@@ -186,10 +185,10 @@ PROGRAM JK6
       ! Read cutoff frequency of the bath
       CALL SetFieldFromInput( InputData, "BathCutOffFreq", BathCutOffFreq )
       BathCutOffFreq = BathCutOffFreq * MyConsts_cmmin1toAU
-      ! Read number of oscillators
-      CALL SetFieldFromInput( InputData, "BathNrDOF", BathNrDOF )
       ! Read file with spectral density / normal modes freq and couplings
       CALL SetFieldFromInput( InputData, "SpectralDensityFile", SpectralDensityFile )
+      ! No langevin oscillators in the thermal bath
+      DynamicsGamma = 0.0
       
    ELSE IF (RunType == HARMONICMODEL) THEN
       CALL SetFieldFromInput( InputData, "Gamma", Gamma)
@@ -228,8 +227,10 @@ PROGRAM JK6
    ! number of analysis step
    ntime=int(nstep/nprint)
 
+   ! In case of a thermal bath, nevo is the number of bath dofs, so we have to
+   ! add 1 to include also the C1 degree of freedom  
    IF (( RunType == OSCIBATH_EQUIL ) .OR. ( RunType == CHAINBATH_EQUIL ))  &
-            nevo =  BathNrDOF + 1 
+            nevo =  nevo + 1 
    
    IF ( (RunType == SCATTERING) .OR. (RunType == EQUILIBRIUM) .OR.   &
                                ( RunType == OSCIBATH_EQUIL ) .OR. ( RunType == CHAINBATH_EQUIL ) ) THEN
@@ -245,6 +246,7 @@ PROGRAM JK6
          ! Set variables for EOM integration in the microcanonical ensamble
          CALL EvolutionSetup( MolecularDynamics, nevo+3, (/ (rmh, iCoord=1,3), (rmc, iCoord=1,nevo) /), dt )
          IF ( DynamicsGamma /= 0.0 ) THEN 
+            PRINT "(/,A,/)", " Setting langevin atoms at the border of the slab "
             ! Set canonical dynamics at the borders of the carbon slab
             LangevinSwitchOn = .TRUE.
             LangevinSwitchOn( 1: MIN( 73, nevo )+3 ) = .FALSE.
@@ -280,10 +282,10 @@ PROGRAM JK6
    
    ! If needed setup bath frequencies and coupling for IO Model in normal form
    IF (  RunType == OSCIBATH_EQUIL ) THEN
-      CALL SetupIndepOscillatorsModel( BathNrDOF, STANDARD_BATH, SpectralDensityFile, rmc, BathCutOffFreq )
+      CALL SetupIndepOscillatorsModel( nevo-1, STANDARD_BATH, SpectralDensityFile, rmc, BathCutOffFreq )
    END IF
    IF (  RunType == CHAINBATH_EQUIL ) THEN
-      CALL SetupIndepOscillatorsModel( BathNrDOF, CHAIN_BATH, SpectralDensityFile, rmc, BathCutOffFreq )
+      CALL SetupIndepOscillatorsModel( nevo-1, CHAIN_BATH, SpectralDensityFile, rmc, BathCutOffFreq )
    END IF
    
    !*************************************************************
@@ -703,8 +705,8 @@ PROGRAM JK6
                TempVariance = TempVariance + IstTemperature**2
                IF ( PrintType == EQUILIBRDBG ) THEN
                   IF (iStep == 1) WRITE(567,* ) " "
-                  IF ( mod(iStep,nprint) == 0 ) WRITE(567,* )  real(iStep)*dt/MyConsts_fs2AU, TempAverage/NrEquilibSteps, &
-                                 sqrt((TempVariance/NrEquilibSteps)-(TempAverage/NrEquilibSteps)**2)
+                  IF ( mod(iStep,nprint) == 0 ) WRITE(567,* )  real(iStep)*dt/MyConsts_fs2AU, TempAverage/iStep, &
+                                 sqrt((TempVariance/iStep)-(TempAverage/iStep)**2)
                ENDIF
 
          END DO
@@ -773,8 +775,15 @@ PROGRAM JK6
 
          ! Initialize array with C-H distance
          DeltaZ(:) = 0.0
-!         DeltaZ(0) = X(3) - ZCentorOfMass(X)
-         DeltaZ(0) = X(3)  - (X(5)+X(6)+X(7))/3 
+
+         ! Compute ZH at the beginning of the trajectory
+         IF ( RunType == EQUILIBRIUM ) THEN
+            DeltaZ(0) = X(3)  - (X(5)+X(6)+X(7))/3 
+         ELSE IF ( RunType == OSCIBATH_EQUIL .OR. RunType == CHAINBATH_EQUIL) THEN
+            DeltaZ(0) = X(3)  
+         END IF
+        
+         ! Write the CH bond distance in output file
          WRITE(TrajOutputUnit,"(F14.8,2F14.8)") 0.0, (X(3)- X(4))*MyConsts_Bohr2Ang
 
          PRINT "(/,A)", " Propagating the equilibrium H-Graphene in time... "
@@ -788,14 +797,18 @@ PROGRAM JK6
             ELSE IF ( RunType == OSCIBATH_EQUIL .OR. RunType == CHAINBATH_EQUIL ) THEN
                CALL EOM_VelocityVerlet( MolecularDynamics, X, V, A, PotentialIndepOscillatorsModel, PotEnergy )
             END IF
-         
+
             ! Compute kin energy and temperature
             KinEnergy = EOM_KineticEnergy( MolecularDynamics, V )
             TotEnergy = PotEnergy + KinEnergy
             IstTemperature = 2.0*KinEnergy/(MyConsts_K2AU*(nevo+3))
 
-            ! Store C-H distance for the autocorrelation function
-            ZHinTime = X(3) -  (X(5)+X(6)+X(7))/3.0
+            ! Store ZH for the autocorrelation function
+            IF ( RunType == EQUILIBRIUM ) THEN
+               ZHinTime = X(3)  - (X(5)+X(6)+X(7))/3
+            ELSE IF ( RunType == OSCIBATH_EQUIL .OR. RunType == CHAINBATH_EQUIL) THEN
+               ZHinTime = X(3)
+            END IF
 
             ! Necessary averages that are always computed
             HPosAverage(3)  = HPosAverage(3)  +   ZHinTime   ! H Z Coordinate
@@ -809,8 +822,13 @@ PROGRAM JK6
                   HPosAverage(iCoord)  = HPosAverage(iCoord)  + X(iCoord)
                   HPosVariance(iCoord) = HPosVariance(iCoord) + X(iCoord)**2
                END DO
-               C1Average  = C1Average  + ( X(4) - (X(5)+X(6)+X(7))/3.0 )      ! C1 Z Coordinate
-               C1Variance = C1Variance + ( X(4) - (X(5)+X(6)+X(7))/3.0 )**2
+               IF ( RunType == EQUILIBRIUM ) THEN
+                  C1Average  = C1Average  + ( X(4) - (X(5)+X(6)+X(7))/3.0 )      ! C1 Z Coordinate
+                  C1Variance = C1Variance + ( X(4) - (X(5)+X(6)+X(7))/3.0 )**2
+               ELSE IF ( RunType == OSCIBATH_EQUIL .OR. RunType == CHAINBATH_EQUIL) THEN
+                  C1Average  = C1Average  +    X(4)       ! C1 Z Coordinate
+                  C1Variance = C1Variance +  ( X(4) )**2
+               END IF
             ENDIF
 
             ! Increment global temperature average

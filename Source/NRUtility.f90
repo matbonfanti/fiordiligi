@@ -34,19 +34,19 @@
 
 MODULE NRUtility 
   IMPLICIT NONE
-  
+ 
   !Symbolic names for kind types of 4-, 2-, and 1-byte integers: 
   INTEGER, PARAMETER :: I4B = SELECTED_INT_KIND(9) 
   INTEGER, PARAMETER :: I2B = SELECTED_INT_KIND(4) 
   INTEGER, PARAMETER :: I1B = SELECTED_INT_KIND(2) 
   
   !Symbolic names for kind types of single-and double-precision reals: 
-  INTEGER, PARAMETER :: SP = KIND(1.0) 
-  INTEGER, PARAMETER :: DP = KIND(1.0D0) 
+  INTEGER, PARAMETER :: SP = SELECTED_REAL_KIND(5,20) 
+  INTEGER, PARAMETER :: DP = SELECTED_REAL_KIND(10,40)
 
   !Symbolic names for kind types of single-and double-precision complex: 
-  INTEGER, PARAMETER :: SPC = KIND((1.0,1.0)) 
-  INTEGER, PARAMETER :: DPC = KIND((1.0D0,1.0D0)) 
+  INTEGER, PARAMETER :: SPC = KIND((1.0_SP,1.0_SP)) 
+  INTEGER, PARAMETER :: DPC = KIND((1.0_DP,1.0_DP)) 
 
   !Symbolic name for kind type of default logical: 
   INTEGER, PARAMETER :: LGT = KIND(.true.) 

@@ -60,6 +60,10 @@ MODULE IndependentOscillatorsModel
    REAL :: DeltaOmega
    ! > Mass of the oscillators
    REAL :: OscillatorsMass
+   ! > Force constant of the distorsion correction
+   REAL :: DistorsionForce
+   ! > Coordinate of the slab in the minimum
+   REAL, DIMENSION(120) :: MinSlab
 
    ! > Logical variable to set status of the class
    LOGICAL :: BathIsSetup = .FALSE.
@@ -86,10 +90,12 @@ CONTAINS
       REAL, OPTIONAL, INTENT(IN) :: CutOffFreq
 
       INTEGER :: InpUnit, RdStatus
-      INTEGER :: iBath
-      INTEGER :: NData
+      INTEGER :: iBath, NData
+      LOGICAL :: FileIsPresent
       REAL, DIMENSION(:), ALLOCATABLE :: RdFreq, RdSpectralDens
       TYPE(SplineType) :: SpectralDensitySpline
+      REAL, DIMENSION(124) :: Coord
+      REAL :: Value
 
       ! If data already setup give a warning and deallocate memory
       CALL WARN( BathIsSetup, "IndependentOscillatorsModel.SetupIndepOscillatorsModel: overwriting bath data" )
@@ -104,6 +110,10 @@ CONTAINS
 
       ! Allocate memory
       ALLOCATE( Frequencies(BathSize), Couplings(BathSize) )
+
+      ! Check if spectral density file exists
+      INQUIRE( File = TRIM(ADJUSTL(FileName)), EXIST=FileIsPresent ) 
+      CALL ERROR( .NOT. FileIsPresent, "IndependentOscillatorsModel.SetupIndepOscillatorsModel: spectral density file does not exists" )
 
       IF ( BathType == CHAIN_BATH ) THEN
 
@@ -160,11 +170,16 @@ CONTAINS
             ! Spline interpolation of the input spectral density
             CALL SetupSpline( SpectralDensitySpline, RdFreq, RdSpectralDens)
 
+            ! initialize distortion constant
+            DistorsionForce = 0.0
+
             ! Compute frequencies and couplings 
             DO iBath = 1, BathSize
                Frequencies(iBath) = iBath * DeltaOmega
                Couplings(iBath) = SQRT( 2.0 * OscillatorsMass * Frequencies(iBath) * DeltaOmega *      & 
                     GetSpline( SpectralDensitySpline, Frequencies(iBath) ) / MyConsts_PI )
+               ! Compute force constant of the distorsion
+               DistorsionForce = DistorsionForce + Couplings(iBath)**2 / ( OscillatorsMass * Frequencies(iBath)**2 ) 
             ENDDO
 
             ! Deallocate memory for spectral density interpolation
@@ -175,6 +190,21 @@ CONTAINS
 
       ! Module is setup
       BathIsSetup = .TRUE.
+
+      ! Minimize slab potential
+      Coord(1:124) = 0.0
+      Coord(3) = C1Puckering + 2.0
+      Coord(4) = C1Puckering
+      Value =  MinimizePotential( Coord, (/ (.TRUE., iBath=1,124)  /) )      
+      Value = (Coord(5)+Coord(6)+Coord(7))/3.0
+
+      ! Translate to bring C3,C4,C5 in the Z=0 plane
+      DO iBath=3,124
+          Coord(iBath) = Coord(iBath) - Value
+      END DO
+      
+      ! Store the coordinate of the slab
+      MinSlab(:) = Coord(5:124)
 
 #if defined(VERBOSE_OUTPUT)
       WRITE(*,*) " Independent oscillator model potential has been setup"
@@ -202,7 +232,8 @@ CONTAINS
          REAL, DIMENSION(:), INTENT(OUT) :: Forces 
 
          INTEGER :: IBath
-         REAL    :: Coupl
+         REAL    :: Coupl, OutOfEqZc
+         REAL, DIMENSION(124) :: Dummy
 
          ! Check if the bath is setup
          CALL ERROR( .NOT. BathIsSetup, "IndependentOscillatorsModel.SystemAndIndepedentOscillators: bath is not setup" )
@@ -214,7 +245,8 @@ CONTAINS
                         "IndependentOscillatorsModel.SystemAndIndepedentOscillators: wrong bath size" )
 
          ! 4D POTENTIAL OF THE SYSTEM
-         V = CH_4Dimensional( Positions(1:4), Forces(1:4) ) 
+         V = VHSticking( (/ Positions(1:4), MinSlab(:) /), Dummy(:) ) 
+         Forces(1:4) = Dummy(1:4)
 
          IF ( BathType == CHAIN_BATH ) THEN
 
@@ -222,15 +254,17 @@ CONTAINS
 
          ELSE IF ( BathType == STANDARD_BATH ) THEN
 
+               OutOfEqZc = Positions(4) - C1Puckering
+
                ! POTENTIAL OF THE BATH OSCILLATORS PLUS COUPLING
                Coupl = 0.0
                DO iBath = 1, BathSize
                   V = V + 0.5 * OscillatorsMass * ( Frequencies(iBath) * Positions(4+iBath) )**2
-                  Forces(iBath) = - OscillatorsMass * ( Frequencies(iBath) )**2 * Positions(4+iBath) + Positions(4) * Couplings(iBath)
+                  Forces(4+iBath) = - OscillatorsMass * ( Frequencies(iBath) )**2 * Positions(4+iBath) + OutOfEqZc * Couplings(iBath)
                   Coupl = Coupl + Couplings(iBath) * Positions(4+iBath)
                END DO
-               V = V + Coupl * Positions(4)
-               Forces(4) = Forces(4) + Coupl
+               V = V - Coupl * OutOfEqZc + 0.5*DistorsionForce*OutOfEqZc**2
+               Forces(4) = Forces(4) + Coupl - DistorsionForce*OutOfEqZc
 
          END IF
 
