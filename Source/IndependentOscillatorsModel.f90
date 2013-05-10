@@ -121,6 +121,9 @@ CONTAINS
             InpUnit = LookForFreeUnit()
             OPEN( File = TRIM(ADJUSTL(FileName)), Unit = InpUnit )
 
+            ! Read force constant of the distorsion
+            READ(InpUnit,*) DistorsionForce
+
             ! Read frequencies and couplings
             DO iBath = 1, BathSize
                READ(InpUnit,*, IOSTAT=RdStatus) Frequencies(iBath), Couplings(iBath)
@@ -250,7 +253,24 @@ CONTAINS
 
          IF ( BathType == CHAIN_BATH ) THEN
 
-               CALL ERROR ( 1>0, " IndependentOscillatorsModel.SystemAndIndepedentOscillators: chain modo not implemented" )
+               OutOfEqZc = Positions(4) - C1Puckering
+
+               ! POTENTIAL OF THE BATH OSCILLATORS PLUS COUPLING
+               V = V - Couplings(1) * OutOfEqZc * Positions(5) + 0.5*DistorsionForce*OutOfEqZc**2
+               DO iBath = 1, BathSize
+                  V = V + 0.5 * OscillatorsMass * ( Frequencies(iBath) * Positions(4+iBath) )**2
+                  IF ( iBath /= BathSize ) V = V - Couplings(iBath+1) * Positions(4+iBath) * Positions(5+iBath)
+                  Forces(4+iBath) = - OscillatorsMass * (Frequencies(iBath))**2 * Positions(4+iBath)
+                  IF ( iBath == 1 ) THEN
+                     Forces(4+iBath) = Forces(4+iBath) + Couplings(iBath) * OutOfEqZc + Couplings(iBath+1) * Positions(5+iBath)
+                  ELSE IF ( iBath == BathSize ) THEN
+                     Forces(4+iBath) = Forces(4+iBath) + Couplings(iBath) * Positions(3+iBath)
+                  ELSE
+                     Forces(4+iBath) = Forces(4+iBath) + Couplings(iBath) * Positions(3+iBath) + Couplings(iBath+1) * Positions(5+iBath)
+                  ENDIF
+               END DO
+               Forces(4) = Forces(4) + Couplings(1)*Positions(5) - DistorsionForce*OutOfEqZc
+
 
          ELSE IF ( BathType == STANDARD_BATH ) THEN
 
@@ -303,7 +323,22 @@ CONTAINS
 
          IF ( BathType == CHAIN_BATH ) THEN
 
-               CALL ERROR ( 1>0, " IndependentOscillatorsModel.SystemAndIndepedentOscillators: chain modo not implemented" )
+               ! Equilibrium position of H atom
+               Positions(1) = 0.0000
+               Positions(2) = 0.0000
+               Positions(3) = 1.483 / MyConsts_Bohr2Ang
+               ! Equilibrium position of C1 atom
+               Positions(4) = C1Puckering
+               ! Zero momentum of H and C1
+               Velocities(1:4) = 0.0
+      
+               ! THE OSCILLATORS IN A CORRECT CANONICAL DISTRIBUTION FOR ZERO COUPLING
+               SigmaQ = sqrt( Temperature / OscillatorsMass )
+               DO iBath = 1, BathSize
+                  SigmaV = SigmaQ / Frequencies(iBath)
+                  Positions(4+iBath) = GaussianRandomNr( SigmaQ )
+                  Velocities(4+iBath) = GaussianRandomNr( SigmaV )
+               END DO
 
          ELSE IF ( BathType == STANDARD_BATH ) THEN
 

@@ -24,7 +24,7 @@ MODULE ClassicalEqMotion
    
       PRIVATE
       PUBLIC :: Evolution
-      PUBLIC :: EvolutionSetup, SetupThermostat, DisposeThermostat
+      PUBLIC :: EvolutionSetup, SetupThermostat, DisposeThermostat, DisposeEvolutionData
       PUBLIC :: EOM_KineticEnergy
       PUBLIC :: EOM_VelocityVerlet, EOM_Beeman
 
@@ -169,6 +169,37 @@ MODULE ClassicalEqMotion
       WRITE(*,"(/,A)") "Themostat has been disposed"
 #endif
    END SUBROUTINE DisposeThermostat
+
+
+!*******************************************************************************
+!> Dispose evolution data.
+!>
+!> @param EvolData     Evolution data type  to dispose
+!*******************************************************************************
+   SUBROUTINE DisposeEvolutionData( EvolData, Gamma, Temperature )
+      IMPLICIT NONE
+
+      TYPE( Evolution ), INTENT(INOUT)  :: EvolData
+      REAL, INTENT(IN)                  :: Gamma, Temperature
+
+      INTEGER :: iDoF
+
+      ! continue if trying to dispose data that is not setup
+      IF (.NOT. EvolData%IsSetup)  RETURN
+
+      ! dispose thermostat if setup
+      IF ( EvolData%HasThermostat == .TRUE. )  CALL DisposeThermostat( EvolData )
+
+      ! Deallocate standard deviations of the thermal noise
+      DEALLOCATE( EvolData%Mass )
+
+      ! Themostat data is now disposed
+      EvolData%HasThermostat = .FALSE.
+
+#if defined(VERBOSE_OUTPUT)
+      WRITE(*,"(/,A)") "Themostat has been disposed"
+#endif
+   END SUBROUTINE DisposeEvolutionData
 
    
    

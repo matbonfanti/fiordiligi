@@ -51,8 +51,7 @@
 !
 !***************************************************************************************
 MODULE PrintTools
-   USE ErrorTrap
-   USE MyConsts
+#include "preprocessoptions.cpp"
 
    IMPLICIT NONE
 

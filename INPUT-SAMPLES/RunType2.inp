@@ -1,0 +1,59 @@
+# INPUT FILE for JK6_v2
+#
+# the code is capable of running different kind of simulation, as
+# defined by the variable RunType. In detail:
+# RunType 1  -> scattering calculation, in which the initial conditions of H
+#               are set from input, while the C configurations are randomly sampled
+# RunType 2  -> equilibrium simulation, in which all the initial conditions are randomly sampled
+# RunType 3  -> test the parameters with a ND harmonic langevin model, equilibrium simulation
+# RunType 4  -> equilibrium simulation, with harmonic oscillator bath and given spectral density
+# RunType 10 -> Print cuts of the H-graphite potential
+#
+# different level of output is possible, and is defined by the variable PrintType
+# PrintType 1 -> minimal output
+# PrintType 2 -> full output, including trajectories XYZ files
+# PrintType 3 -> debug output, including time resolved info on each trajectory
+# PrintType 4 -> equilibration debug, computing average temperature over time
+
+# Kind of calculation 
+RunType : 2
+PrintType : 1
+
+# Evolution parameters
+# Step of the time evolution (fs)
+TimeStep : 0.01     
+# Total number of time step per trajectory
+nstep    :  1000000          
+# Nr of steps between each analysis
+nprint   :  50               
+# Gamma for thermostating the dynamics
+DynamicsGamma : 0.05
+
+# Langevin equilibration parameters
+# Friction coefficient (fs-1)
+Gamma : 0.05 
+# Time step (fs)
+EquilTStep : 0.20
+# Nr of time steps of the equilibration dynamics
+NrEquilibrSteps :   50000 
+# Nr of time steps to skip in the average temperature computation
+EquilibrInitAverage : 5000
+
+# Masses
+# mass of the target H atom (UMA)
+rmh  : 1.00782503207           
+# mass of the substrate C atoms (UMA)
+rmc  : 12.0107
+
+# Temperature of the simulation
+# Temperature of the system / substrate (K)
+temp : 100.00                   
+
+# Sampling parameters
+# number of trajectories per impact parameter
+inum   : 1000   
+
+# Number of evolving carbon atoms (max 121)
+nevo : 121
+
+

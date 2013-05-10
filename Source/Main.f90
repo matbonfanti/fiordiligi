@@ -15,6 +15,10 @@
 !>                 sampling (in Langevin HO test)
 !>  \todo          Fix normalization of DFT and inverse DFT 
 !>  \todo          Introduce more C atoms in the slab when printing the traj
+!>  \todo          PERFORMANCES OF FT !!!! \n
+!>                 at least, since it's a matrix vector product with fixed
+!>                 matrix, on-the-fly computation of exp coeff can be avoided
+!>  \todo          deallocate arrays allocated in the main program!  \n
 !>
 !***************************************************************************************
 PROGRAM JK6
@@ -278,7 +282,7 @@ PROGRAM JK6
    !*************************************************************
 
    ! Setup potential energy surface
-   CALL SetupPotential( .FALSE. )
+   CALL SetupPotential( .TRUE. )
    
    ! If needed setup bath frequencies and coupling for IO Model in normal form
    IF (  RunType == OSCIBATH_EQUIL ) THEN
@@ -348,6 +352,11 @@ PROGRAM JK6
          CALL PotentialCuts()
 
    END IF
+
+
+   ! Dispose memory for evolution data
+   CALL DisposeEvolutionData( MolecularDynamics )
+   CALL DisposeEvolutionData( Equilibration )
 
 
       CONTAINS
