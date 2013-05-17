@@ -13,10 +13,10 @@ LOGFILE = yes
 LOGNAME = jk6_v2.log
 
 # Compiler ( gfortran, ifort )
-FC = ifort
+FC = ifort      
 
 # Debugging options ( yes or no )
-DEBUG = no  
+DEBUG = no   
 
 # Optimization level
 OPTLEVEL = 3
@@ -87,7 +87,7 @@ ifeq (${FC},ifort)
    O3FLAGS  = -O3
 
    # Debug flags
-   DEBUGFLG  =  -g -traceback   -fpe-all=0    -debug all -check all 
+   DEBUGFLG  =  -g -traceback -fpe-all=0 -debug all -check all 
 
    # MKL flags
    ifeq (${INTELVERS},11)

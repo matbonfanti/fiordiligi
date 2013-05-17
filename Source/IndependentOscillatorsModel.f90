@@ -25,8 +25,9 @@
 !
 !***************************************************************************************
 !
-!>  \todo     * Implement the bath in chain mode
+!>  \todo    
 !>            * Fix the units of input data for bath setup
+!>            * put velocity in X and Y for the H atom
 !
 !***************************************************************************************
 
@@ -51,9 +52,9 @@ MODULE IndependentOscillatorsModel
    ! > Number of oscillators of the bath
    INTEGER :: BathSize
    ! > Harmonic frequencies of the bath (stored in AU)
-   REAL, DIMENSION(:), ALLOCATABLE :: Frequencies
+   REAL, DIMENSION(:), POINTER :: Frequencies
    ! > Coupling of the bath oscillators (stored in AU)
-   REAL, DIMENSION(:), ALLOCATABLE :: Couplings
+   REAL, DIMENSION(:), POINTER :: Couplings
    ! > Cutoff frequency of the normal bath (stored in AU)
    REAL :: CutOff
    ! > Frequency spacing of the normal bath (stored in AU)
@@ -63,7 +64,7 @@ MODULE IndependentOscillatorsModel
    ! > Force constant of the distorsion correction
    REAL :: DistorsionForce
    ! > Coordinate of the slab in the minimum
-   REAL, DIMENSION(120) :: MinSlab
+   REAL, DIMENSION(120), SAVE :: MinSlab
 
    ! > Logical variable to set status of the class
    LOGICAL :: BathIsSetup = .FALSE.
@@ -113,7 +114,8 @@ CONTAINS
 
       ! Check if spectral density file exists
       INQUIRE( File = TRIM(ADJUSTL(FileName)), EXIST=FileIsPresent ) 
-      CALL ERROR( .NOT. FileIsPresent, "IndependentOscillatorsModel.SetupIndepOscillatorsModel: spectral density file does not exists" )
+      CALL ERROR( .NOT. FileIsPresent,            &
+                "IndependentOscillatorsModel.SetupIndepOscillatorsModel: spectral density file does not exists" )
 
       IF ( BathType == CHAIN_BATH ) THEN
 
@@ -134,6 +136,13 @@ CONTAINS
                END IF
             END DO
 
+! !             PRINT*, 0.5*DistorsionForce + 0.5*Frequencies(1)**2 - Couplings(1)
+!             PRINT*, DistorsionForce*Frequencies(1)**2-Couplings(1)**2
+!             DO iBath = 1, BathSize-1
+! !                PRINT*, 0.5*Frequencies(iBath)**2 + 0.5*Frequencies(iBath+1)**2 - Couplings(iBath+1)
+!                PRINT*, Frequencies(iBath)**2*Frequencies(iBath+1)**2-Couplings(iBath+1)**2
+!             END DO
+
             ! Close input file
             CLOSE( InpUnit )
 
@@ -151,9 +160,6 @@ CONTAINS
 
             ! Read frequencies and couplings
             DO iBath = 1, NData
-               !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-               !  FORSE LE UNITA' DI MISURA DELLA DENSITA SPETTRALE SONO DA AGGIUSTARE ????
-               !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
                READ(InpUnit,*) RdFreq(iBath), RdSpectralDens(iBath)
                ! Transform frequencies from cm-1 to au
                RdFreq(iBath) = RdFreq(iBath) * MyConsts_cmmin1toAU
@@ -191,9 +197,6 @@ CONTAINS
 
       ENDIF
 
-      ! Module is setup
-      BathIsSetup = .TRUE.
-
       ! Minimize slab potential
       Coord(1:124) = 0.0
       Coord(3) = C1Puckering + 2.0
@@ -209,9 +212,13 @@ CONTAINS
       ! Store the coordinate of the slab
       MinSlab(:) = Coord(5:124)
 
+      ! Module is setup
+      BathIsSetup = .TRUE.
+
 #if defined(VERBOSE_OUTPUT)
       WRITE(*,*) " Independent oscillator model potential has been setup"
       WRITE(*,*) " ... (details) ... "
+      WRITE(*,*) " Distorsion frequency coefficient (atomic units): ", DistorsionForce
 #endif
 
    END SUBROUTINE SetupIndepOscillatorsModel
@@ -231,12 +238,15 @@ CONTAINS
       REAL FUNCTION PotentialIndepOscillatorsModel( Positions, Forces ) RESULT(V) 
          IMPLICIT NONE
 
-         REAL, DIMENSION(:), INTENT(IN)  :: Positions
-         REAL, DIMENSION(:), INTENT(OUT) :: Forces 
+         REAL, DIMENSION(:), TARGET, INTENT(IN)  :: Positions
+         REAL, DIMENSION(:), TARGET, INTENT(OUT) :: Forces 
 
          INTEGER :: IBath
          REAL    :: Coupl, OutOfEqZc
          REAL, DIMENSION(124) :: Dummy
+         REAL, DIMENSION(:), POINTER :: RH, Qbath, Dn
+         REAL, POINTER :: D0
+!          REAL, DIMENSION(BathSize) :: Qbath
 
          ! Check if the bath is setup
          CALL ERROR( .NOT. BathIsSetup, "IndependentOscillatorsModel.SystemAndIndepedentOscillators: bath is not setup" )
@@ -247,29 +257,37 @@ CONTAINS
          CALL ERROR( size(Positions) /= BathSize+4, &
                         "IndependentOscillatorsModel.SystemAndIndepedentOscillators: wrong bath size" )
 
+         V = 0.0
+         Forces(:) = 0.0
+
          ! 4D POTENTIAL OF THE SYSTEM
          V = VHSticking( (/ Positions(1:4), MinSlab(:) /), Dummy(:) ) 
          Forces(1:4) = Dummy(1:4)
 
          IF ( BathType == CHAIN_BATH ) THEN
 
+               RH    => Positions(1:3)
+               Qbath => Positions(5:BathSize+4) !*SQRT(OscillatorsMass)
                OutOfEqZc = Positions(4) - C1Puckering
 
+               D0 => Couplings(1)
+               Dn => Couplings(2:BathSize)
+
                ! POTENTIAL OF THE BATH OSCILLATORS PLUS COUPLING
-               V = V - Couplings(1) * OutOfEqZc * Positions(5) + 0.5*DistorsionForce*OutOfEqZc**2
-               DO iBath = 1, BathSize
-                  V = V + 0.5 * OscillatorsMass * ( Frequencies(iBath) * Positions(4+iBath) )**2
-                  IF ( iBath /= BathSize ) V = V - Couplings(iBath+1) * Positions(4+iBath) * Positions(5+iBath)
-                  Forces(4+iBath) = - OscillatorsMass * (Frequencies(iBath))**2 * Positions(4+iBath)
-                  IF ( iBath == 1 ) THEN
-                     Forces(4+iBath) = Forces(4+iBath) + Couplings(iBath) * OutOfEqZc + Couplings(iBath+1) * Positions(5+iBath)
-                  ELSE IF ( iBath == BathSize ) THEN
-                     Forces(4+iBath) = Forces(4+iBath) + Couplings(iBath) * Positions(3+iBath)
-                  ELSE
-                     Forces(4+iBath) = Forces(4+iBath) + Couplings(iBath) * Positions(3+iBath) + Couplings(iBath+1) * Positions(5+iBath)
-                  ENDIF
+
+               V = V - D0 * OutOfEqZc * Qbath(1) + 0.5 * DistorsionForce * OutOfEqZc**2
+               DO iBath = 1, BathSize - 1
+                  V = V + 0.5 * ( Frequencies(iBath) * Qbath(iBath) )**2 - Dn(iBath) * Qbath(iBath) * Qbath(iBath+1)
                END DO
-               Forces(4) = Forces(4) + Couplings(1)*Positions(5) - DistorsionForce*OutOfEqZc
+               V = V + 0.5 * ( Frequencies(BathSize) * Qbath(BathSize) )**2
+
+               Forces(4) = Forces(4) + Couplings(1)*Qbath(1) - DistorsionForce * OutOfEqZc
+               Forces(5) = - Frequencies(1)**2 * Qbath(1) + Couplings(1)*OutOfEqZc + Couplings(2)*Qbath(2)
+               DO iBath = 2, BathSize-1
+                  Forces(4+iBath) = - Frequencies(iBath)**2 * Qbath(iBath) + &
+                                    Couplings(iBath)*Qbath(iBath-1) + Couplings(iBath+1)*Qbath(iBath+1)
+               END DO
+               Forces(4+BathSize) = - Frequencies(BathSize)**2 * Qbath(BathSize)  + Couplings(BathSize) * Qbath(BathSize-1)
 
 
          ELSE IF ( BathType == STANDARD_BATH ) THEN
@@ -280,7 +298,8 @@ CONTAINS
                Coupl = 0.0
                DO iBath = 1, BathSize
                   V = V + 0.5 * OscillatorsMass * ( Frequencies(iBath) * Positions(4+iBath) )**2
-                  Forces(4+iBath) = - OscillatorsMass * ( Frequencies(iBath) )**2 * Positions(4+iBath) + OutOfEqZc * Couplings(iBath)
+                  Forces(4+iBath) = - OscillatorsMass * ( Frequencies(iBath) )**2 * Positions(4+iBath)  &
+                                   + OutOfEqZc * Couplings(iBath)
                   Coupl = Coupl + Couplings(iBath) * Positions(4+iBath)
                END DO
                V = V - Coupl * OutOfEqZc + 0.5*DistorsionForce*OutOfEqZc**2
@@ -309,7 +328,7 @@ CONTAINS
          REAL, DIMENSION(:), INTENT(INOUT) :: Velocities 
          REAL, INTENT(IN) :: Temperature
 
-         REAL :: SigmaQ, SigmaV
+         REAL :: SigmaQ, SigmaV, SigmaVH
          INTEGER :: iBath
          
          ! Check if the bath is setup
@@ -330,10 +349,13 @@ CONTAINS
                ! Equilibrium position of C1 atom
                Positions(4) = C1Puckering
                ! Zero momentum of H and C1
-               Velocities(1:4) = 0.0
+               SigmaVH = sqrt( Temperature / MyConsts_mH )
+               Velocities(1) = GaussianRandomNr( SigmaVH )
+               Velocities(2) = GaussianRandomNr( SigmaVH )
+               Velocities(3:4) = 0.0
       
                ! THE OSCILLATORS IN A CORRECT CANONICAL DISTRIBUTION FOR ZERO COUPLING
-               SigmaQ = sqrt( Temperature / OscillatorsMass )
+               SigmaQ = sqrt( Temperature )
                DO iBath = 1, BathSize
                   SigmaV = SigmaQ / Frequencies(iBath)
                   Positions(4+iBath) = GaussianRandomNr( SigmaQ )

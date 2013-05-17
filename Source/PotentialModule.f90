@@ -330,8 +330,8 @@ MODULE PotentialModule
       REAL FUNCTION VHarmonic( Positions, Forces )
          IMPLICIT NONE
 
-         REAL, DIMENSION(:), INTENT(IN)  :: Positions
-         REAL, DIMENSION(:), INTENT(OUT) :: Forces 
+         REAL, DIMENSION(:), TARGET, INTENT(IN)  :: Positions
+         REAL, DIMENSION(:), TARGET, INTENT(OUT) :: Forces 
 
          ! Number of non frozen degrees of freedom
          INTEGER :: NrNonFrozen, i       
@@ -379,8 +379,8 @@ MODULE PotentialModule
       REAL FUNCTION VHSticking( Positions, Forces ) RESULT(vv) 
          IMPLICIT NONE
 
-         REAL, DIMENSION(:), INTENT(IN)  :: Positions
-         REAL, DIMENSION(:), INTENT(OUT) :: Forces 
+         REAL, DIMENSION(:), TARGET, INTENT(IN)  :: Positions
+         REAL, DIMENSION(:), TARGET, INTENT(OUT) :: Forces 
 
          ! temporary variables to store positions in Ang units
          REAL :: xh, yh, zh    

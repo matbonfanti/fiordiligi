@@ -62,10 +62,10 @@ MODULE CommonData
    
    ! POSITION, VELOCITY, ACCELERATION 
 
-   REAL, DIMENSION(:), SAVE, ALLOCATABLE :: X    ! Position at given timestep
-   REAL, DIMENSION(:), SAVE, ALLOCATABLE :: V    ! Velocity at given timestep
-   REAL, DIMENSION(:), SAVE, ALLOCATABLE :: A    ! Acceleration at ginve timestep
-   REAL, DIMENSION(:), SAVE, ALLOCATABLE :: APre ! Acceleration from the previous time step
+   REAL, DIMENSION(:), SAVE, ALLOCATABLE, TARGET :: X    ! Position at given timestep
+   REAL, DIMENSION(:), SAVE, ALLOCATABLE, TARGET :: V    ! Velocity at given timestep
+   REAL, DIMENSION(:), SAVE, ALLOCATABLE, TARGET :: A    ! Acceleration at ginve timestep
+   REAL, DIMENSION(:), SAVE, ALLOCATABLE, TARGET :: APre ! Acceleration from the previous time step
 
    ! ISTANTANEOUS PROPERTIES
 

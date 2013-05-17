@@ -94,7 +94,7 @@ CONTAINS
       INTEGER(K4B), INTENT(IN) :: Seed
       REAL :: Temp
 
-      CALL RANDOM_SEED( put= (/ Seed /) )
+      CALL RANDOM_SEED( put= (/ Seed, Seed, Seed, Seed, Seed, Seed, Seed, Seed /) )
 
    END SUBROUTINE SetSeed
 

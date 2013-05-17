@@ -98,7 +98,11 @@ PROGRAM JK6
    ! Parameters for the model thermal bath
    REAL :: BathCutOffFreq                ! cutoff frequency of the bath
    CHARACTER(100) :: SpectralDensityFile         ! spectral density file name
-      
+   
+   REAL, DIMENSION(:), ALLOCATABLE :: MassVector
+
+   REAL, ALLOCATABLE :: XTEMP(:)
+   INTEGER :: i
 
    PRINT "(/,     '                    ==============================')"
    PRINT "(       '                                JK6_v2            ')"
@@ -186,8 +190,9 @@ PROGRAM JK6
       CALL SetFieldFromInput( InputData, "NrEquilibrSteps", NrEquilibSteps, int(5.0*(1.0/Gamma)/dt) )
       CALL SetFieldFromInput( InputData, "EquilTStep",  EquilTStep, dt/MyConsts_fs2AU )
       EquilTStep = EquilTStep * MyConsts_fs2AU
-      ! Read cutoff frequency of the bath
-      CALL SetFieldFromInput( InputData, "BathCutOffFreq", BathCutOffFreq )
+      ! Read cutoff frequency of the bath, only if normal oscillators bath
+      BathCutOffFreq = 0.0
+      IF ( RunType == OSCIBATH_EQUIL ) CALL SetFieldFromInput( InputData, "BathCutOffFreq", BathCutOffFreq )
       BathCutOffFreq = BathCutOffFreq * MyConsts_cmmin1toAU
       ! Read file with spectral density / normal modes freq and couplings
       CALL SetFieldFromInput( InputData, "SpectralDensityFile", SpectralDensityFile )
@@ -239,17 +244,27 @@ PROGRAM JK6
    IF ( (RunType == SCATTERING) .OR. (RunType == EQUILIBRIUM) .OR.   &
                                ( RunType == OSCIBATH_EQUIL ) .OR. ( RunType == CHAINBATH_EQUIL ) ) THEN
 
+
          ! Allocation of position, velocity, acceleration arrays
          ALLOCATE( X(nevo+3), V(nevo+3), A(nevo+3), APre(nevo+3) )
          
          ! if XYZ files of the trajectories are required, allocate memory to store the traj
-         IF ( PrintType >= FULL ) THEN
+         IF ( PrintType >= FULL  .AND. ( RunType == SCATTERING .OR. RunType == EQUILIBRIUM ) ) THEN
                ALLOCATE( Trajectory( 16, ntime ) )
          END IF
 
+         ! Allocate and define masses
+         ALLOCATE( MassVector( nevo + 3 ) )
+         IF ( RunType == CHAINBATH_EQUIL ) THEN
+               MassVector = (/ (rmh, iCoord=1,3), rmc, (1.0, iCoord=1,nevo-1) /)
+         ELSE
+               MassVector = (/ (rmh, iCoord=1,3), (rmc, iCoord=1,nevo) /)
+         ENDIF
+
          ! Set variables for EOM integration in the microcanonical ensamble
-         CALL EvolutionSetup( MolecularDynamics, nevo+3, (/ (rmh, iCoord=1,3), (rmc, iCoord=1,nevo) /), dt )
-         IF ( DynamicsGamma /= 0.0 ) THEN 
+         CALL EvolutionSetup( MolecularDynamics, nevo+3, MassVector, dt )
+
+         IF ( DynamicsGamma /= 0.0 .AND. RunType /= OSCIBATH_EQUIL .AND.  RunType /= CHAINBATH_EQUIL  ) THEN 
             PRINT "(/,A,/)", " Setting langevin atoms at the border of the slab "
             ! Set canonical dynamics at the borders of the carbon slab
             LangevinSwitchOn = .TRUE.
@@ -258,7 +273,7 @@ PROGRAM JK6
          END IF
 
          ! Set variables for EOM integration with Langevin thermostat
-         CALL EvolutionSetup( Equilibration, nevo+3, (/ (rmh, iCoord=1,3), (rmc, iCoord=1,nevo) /), EquilTStep )
+         CALL EvolutionSetup( Equilibration, nevo+3, MassVector, EquilTStep )
          CALL SetupThermostat( Equilibration, Gamma, temp, (/ (.FALSE., iCoord=1,4), (.TRUE., iCoord=1,nevo-1) /) )
 
    ELSE IF (RunType == HARMONICMODEL) THEN 
@@ -282,14 +297,14 @@ PROGRAM JK6
    !*************************************************************
 
    ! Setup potential energy surface
-   CALL SetupPotential( .TRUE. )
+   CALL SetupPotential( .FALSE. )
    
    ! If needed setup bath frequencies and coupling for IO Model in normal form
    IF (  RunType == OSCIBATH_EQUIL ) THEN
       CALL SetupIndepOscillatorsModel( nevo-1, STANDARD_BATH, SpectralDensityFile, rmc, BathCutOffFreq )
    END IF
    IF (  RunType == CHAINBATH_EQUIL ) THEN
-      CALL SetupIndepOscillatorsModel( nevo-1, CHAIN_BATH, SpectralDensityFile, rmc, BathCutOffFreq )
+      CALL SetupIndepOscillatorsModel( nevo-1, CHAIN_BATH, SpectralDensityFile, rmc )
    END IF
    
    !*************************************************************
@@ -297,7 +312,7 @@ PROGRAM JK6
    !*************************************************************
 
                !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-   ! THIS LOG PRINTING PART SHOULD BE EXTENDEND AND ORDERED !!!!!!!!!!!!!1
+   ! THIS LOG PRINTING PART SHOULD BE EXTENDED AND ORDERED !!!!!!!!!!!!!1
               !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
    ! write to standard output the parameters of the calculation
@@ -615,11 +630,11 @@ PROGRAM JK6
       ! Open output file to print the spectral density of the brownian motion
       SpectrDensUnit = LookForFreeUnit()
       OPEN( FILE="SpectralDensity.dat", UNIT=SpectrDensUnit )
-      WRITE(SpectrDensUnit, "(A,I6,A,/)") "# Spectral density of H-graphite equilibrium dynamics - ", inum, " trajectories (fs | au)"
+      WRITE(SpectrDensUnit, "(A,I6,A,/)") "# Spectral density of H-graphite equil dynamics - ", inum, " trajectories (fs | au)"
       ! Open output file to print the  autocorrelation function of the brownian motion
       TimeCorrelationUnit = LookForFreeUnit()
       OPEN( FILE="Autocorrelation.dat", UNIT=TimeCorrelationUnit )
-      WRITE(TimeCorrelationUnit, "(A,I6,A,/)") "# Autocorrelation func of H-graphite equilibrium dynamics - ", inum, " trajectories (fs | Angstrom^2)"
+      WRITE(TimeCorrelationUnit, "(A,I6,A,/)") "# Autocorrelation of H-graphite equil dyn - ", inum, " trajectories (fs | Ang^2)"
 
       ! Initialize random number seed
       CALL SetSeed( 1 )
@@ -652,6 +667,7 @@ PROGRAM JK6
                
          PRINT "(/,A,F6.1)"," Equilibrating the initial conditions at T = ", temp / MyConsts_K2AU
 
+
          IF ( PrintType == DEBUG ) THEN
             ! Open file to store equilibration
             WRITE(OutFileName,"(A,I4.4,A)") "Traj_",iTraj,".dat"
@@ -673,7 +689,12 @@ PROGRAM JK6
          END IF
 
          A(1:3) = A(1:3) / rmh
-         A(4:nevo+3) = A(4:nevo+3) / rmc
+         IF (  RunType == CHAINBATH_EQUIL ) THEN
+             A(4) = A(4) / rmc   
+! !              A(5:nevo+3) = A(5:nevo+3) / rmc   
+         ELSE
+             A(4:nevo+3) = A(4:nevo+3) / rmc   
+         ENDIF
 
          ! Do an equilibration run
          DO iStep = 1, NrEquilibSteps
@@ -704,7 +725,8 @@ PROGRAM JK6
                ! every nprint steps, compute trapping and write debug output
                IF ( mod(iStep,nprint) == 0 ) THEN
                   IF ( PrintType == DEBUG ) THEN
-                        WRITE(NWriteUnit,850) real(iStep)*dt/MyConsts_fs2AU, PotEnergy*MyConsts_Hartree2eV, KinEnergy*MyConsts_Hartree2eV,  X(1:4)
+                        WRITE(NWriteUnit,850) real(iStep)*EquilTStep/MyConsts_fs2AU, PotEnergy*MyConsts_Hartree2eV, &
+                                              KinEnergy*MyConsts_Hartree2eV,  X(1:4)
                   END IF
                END IF
                850 FORMAT( F12.5, 6F13.6 )
@@ -714,7 +736,7 @@ PROGRAM JK6
                TempVariance = TempVariance + IstTemperature**2
                IF ( PrintType == EQUILIBRDBG ) THEN
                   IF (iStep == 1) WRITE(567,* ) " "
-                  IF ( mod(iStep,nprint) == 0 ) WRITE(567,* )  real(iStep)*dt/MyConsts_fs2AU, TempAverage/iStep, &
+                  IF ( mod(iStep,nprint) == 0 ) WRITE(567,* )  real(iStep)*EquilTStep/MyConsts_fs2AU, TempAverage/iStep, &
                                  sqrt((TempVariance/iStep)-(TempAverage/iStep)**2)
                ENDIF
 
@@ -726,7 +748,22 @@ PROGRAM JK6
          ENDIF
 
          PRINT "(A)", " Equilibration completed! "
-         
+        
+         ALLOCATE( XTEMP( size(X) ) )
+         DO i = 1, size(X)
+            PotEnergy = PotentialIndepOscillatorsModel( X, A )
+            TotEnergy = -A(i)
+!             print*, " analytical ", -A(i)
+            PotEnergy = 0.0
+            XTEMP = X + (/ (0.0, iStep=1,i-1 ), 0.00001, (0.0, iStep=i+1,size(X) ) /)
+            PotEnergy = PotEnergy + PotentialIndepOscillatorsModel( XTEMP, A ) / ( 2 * 0.00001 )
+            XTEMP = X - (/ (0.0, iStep=1,i-1 ), 0.00001, (0.0, iStep=i+1,size(X) ) /)
+            PotEnergy = PotEnergy - PotentialIndepOscillatorsModel( XTEMP, A ) / ( 2 * 0.00001 )
+!             print*, "numerical ", PotEnergy
+            PRINT*, " deriv error ", TotEnergy - PotEnergy
+         END DO
+         STOP
+
          IF ( PrintType >= FULL ) THEN
             ! Compute average and standard deviation
             TempAverage = TempAverage / NrEquilibSteps 
@@ -807,6 +844,10 @@ PROGRAM JK6
                CALL EOM_VelocityVerlet( MolecularDynamics, X, V, A, PotentialIndepOscillatorsModel, PotEnergy )
             END IF
 
+!             DO i = 1, size(X)
+!                IF ( MOD(iStep,1000) == 0 ) WRITE(1000+i,"(2F20.6)") real(iStep)*dt, X(i)
+!             END DO
+
             ! Compute kin energy and temperature
             KinEnergy = EOM_KineticEnergy( MolecularDynamics, V )
             TotEnergy = PotEnergy + KinEnergy
@@ -856,14 +897,14 @@ PROGRAM JK6
                IF ( PrintType == DEBUG ) THEN
                   WRITE(NWriteUnit,800) dt*real(iStep)/MyConsts_fs2AU, PotEnergy*MyConsts_Hartree2eV,  &
                         KinEnergy*MyConsts_Hartree2eV, TotEnergy*MyConsts_Hartree2eV, IstTemperature                    
-                  WRITE(NWriteUnit,801)  dt*real(iStep)/MyConsts_fs2AU, X(1:5)*MyConsts_Bohr2Ang,  &
-                           X(8)*MyConsts_Bohr2Ang, X(14)*MyConsts_Bohr2Ang, X(17)*MyConsts_Bohr2Ang, ZCentorOfMass(X)*MyConsts_Bohr2Ang
+                  WRITE(NWriteUnit,801)  dt*real(iStep)/MyConsts_fs2AU, X(1:5)*MyConsts_Bohr2Ang, X(8)*MyConsts_Bohr2Ang, &
+                                             X(14)*MyConsts_Bohr2Ang, X(17)*MyConsts_Bohr2Ang
                   800 FORMAT("T= ",F12.5," V= ",1F15.8," K= ",1F15.8," E= ",1F15.8," Temp= ", 1F15.8)
                   801 FORMAT("T= ",F12.5," COORDS= ", 8F8.4)
                END IF
 
                ! Store the trajectory for XYZ printing
-               IF ( PrintType >= FULL ) THEN
+               IF ( PrintType >= FULL  .AND. RunType == EQUILIBRIUM ) THEN
                      Trajectory( :, kstep ) = 0.0
                      Trajectory( 1:min(16,3+nevo) , kstep ) = X( 1:min(16,3+nevo) ) 
                      NrOfTrajSteps = kstep
@@ -900,10 +941,12 @@ PROGRAM JK6
 
          IF ( PrintType >= FULL ) THEN
 
-            ! write the xyz file of the trajectory, if requested
-            WRITE(OutFileName,"(A,I4.4,A,I4.4,A)") "Traj_",iTraj,".xyz"
-            CALL WriteTrajectoryXYZ( Trajectory(:,1:NrOfTrajSteps)*MyConsts_Bohr2Ang, OutFileName, &
-                                            GraphiteLatticeConstant()*MyConsts_Bohr2Ang )
+            IF  ( RunType == EQUILIBRIUM ) THEN
+               ! write the xyz file of the trajectory, if requested
+               WRITE(OutFileName,"(A,I4.4,A,I4.4,A)") "Traj_",iTraj,".xyz"
+               CALL WriteTrajectoryXYZ( Trajectory(:,1:NrOfTrajSteps)*MyConsts_Bohr2Ang, OutFileName, &
+                                             GraphiteLatticeConstant()*MyConsts_Bohr2Ang )
+            ENDIF
 
             ! Divide averages for number of time steps and compute variances
             TempAverage  = TempAverage  / nstep
@@ -916,8 +959,8 @@ PROGRAM JK6
             C1Variance = C1Variance / nstep - C1Average**2        
                                             
             ! And print the average values of that trajectory 
-            WRITE(*,700)  TempAverage, sqrt(TempVariance), HPosAverage(:)* MyConsts_Bohr2Ang, sqrt(HPosVariance(:))* MyConsts_Bohr2Ang, &
-                          C1Average* MyConsts_Bohr2Ang, sqrt(C1Variance)* MyConsts_Bohr2Ang
+            WRITE(*,700)  TempAverage, sqrt(TempVariance), HPosAverage(:)* MyConsts_Bohr2Ang, &
+                       sqrt(HPosVariance(:))* MyConsts_Bohr2Ang, C1Average* MyConsts_Bohr2Ang, sqrt(C1Variance)* MyConsts_Bohr2Ang
             700 FORMAT (/, " * Average temperature (K)        ",1F10.4,/    &
                            "   Standard deviation (K)         ",1F10.4,/    &
                            " * Average H coordinates (Ang)    ",3F10.4,/    &
@@ -1001,7 +1044,7 @@ PROGRAM JK6
       ! Open output file to print the distribution of initial temperatures after equilibration
       InitialTDistrib = LookForFreeUnit()
       OPEN( FILE="InitialTemp.dat", UNIT=InitialTDistrib )
-      WRITE(InitialTDistrib, "(A,I6,A,/)") "# Distribution of initial temperatures after equilibration - ", inum, " trajectories (K)"
+      WRITE(InitialTDistrib, "(A,I6,A,/)") "# Distribution of initial temp after equilibration - ", inum, " trajectories (K)"
       ! Open output file to print the brownian realizations vs time
       TrajOutputUnit = LookForFreeUnit()
       OPEN( FILE="Trajectories.dat", UNIT=TrajOutputUnit )
@@ -1013,7 +1056,7 @@ PROGRAM JK6
       ! Open output file to print the  autocorrelation function of the brownian motion
       TimeCorrelationUnit = LookForFreeUnit()
       OPEN( FILE="Autocorrelation.dat", UNIT=TimeCorrelationUnit )
-      WRITE(TimeCorrelationUnit, "(A,I6,A,/)") "# Autocorrelation func of harmonic brownian motion - ", inum, " trajectories (fs | Angstrom^2)"
+      WRITE(TimeCorrelationUnit, "(A,I6,A,/)") "# Autocorrelation func of harmonic brownian motion - ", inum, " trajs (fs | Ang^2)"
 
 
       PRINT "(2/,A)",    "***************************************************"
@@ -1236,8 +1279,9 @@ PROGRAM JK6
 
       ! Print spectral density of the stocastic process X(t)
       DO iOmega = 0, ntime
-            WRITE(SpectrDensUnit,"(1F12.6,3F24.18)")  iOmega*dOmega*MyConsts_fs2AU,  AverageDeltaZ(iOmega)/dOmega, real( Analytic(iOmega) )/dOmega, &
-                         NoiseVariance/(2*rmh**2*MyConsts_PI) / ( (OsciFreq**2 - (iOmega*dOmega)**2)**2 + (Gamma*iOmega*dOmega)**2  )
+            WRITE(SpectrDensUnit,"(1F12.6,3F24.18)")  iOmega*dOmega*MyConsts_fs2AU,  AverageDeltaZ(iOmega)/dOmega,  &
+                    real( Analytic(iOmega) )/dOmega, NoiseVariance/(2*rmh**2*MyConsts_PI) / &
+                            ( (OsciFreq**2 - (iOmega*dOmega)**2)**2 + (Gamma*iOmega*dOmega)**2  )
       END DO
 
       ! fourier transform the spectral density to obtain the autocorrelation function
@@ -1473,7 +1517,7 @@ PROGRAM JK6
                                 Y=ZCArray*MyConsts_Bohr2Ang, FileName="GraphiteHSticking" )
       CALL VTK_AddScalarField (PotentialCH, Name="CHPotential", Field=PotentialArray*MyConsts_Hartree2eV )
 
-      WRITE(*,"(/,A)") " * PES as a function of ZC and ZH with optimized puckered graphite written in VTR format to file GraphiteHSticking_.vtr"
+      WRITE(*,"(/,A)") " * PES as a func of ZC and ZH with optim puckered graphite written as VTR to file GraphiteHSticking_.vtr"
 
       ! Deallocate memory
       DEALLOCATE( PotentialArray, ZHArray, ZCArray )

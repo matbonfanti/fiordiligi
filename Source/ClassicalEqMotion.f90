@@ -83,7 +83,7 @@ MODULE ClassicalEqMotion
       EvolutionData%HasThermostat = .FALSE.
       
 #if defined(VERBOSE_OUTPUT)
-      WRITE(*,"(/,A,I3,A,1F8.3)") "Evolution data type is setup: Nr DoF is ",NDoF," and TimeStep ", TimeStep
+      WRITE(*,"(/,A,I5,A,1F8.3)") "Evolution data type is setup: Nr DoF is ",NDoF," and TimeStep ", TimeStep
 #endif
       
    END SUBROUTINE EvolutionSetup
@@ -144,11 +144,10 @@ MODULE ClassicalEqMotion
 !>
 !> @param EvolData     Evolution data type with the thermostat to dispose
 !*******************************************************************************
-   SUBROUTINE DisposeThermostat( EvolData, Gamma, Temperature )
+   SUBROUTINE DisposeThermostat( EvolData )
       IMPLICIT NONE
 
       TYPE( Evolution ), INTENT(INOUT)  :: EvolData
-      REAL, INTENT(IN)                  :: Gamma, Temperature
 
       INTEGER :: iDoF
       
@@ -176,11 +175,10 @@ MODULE ClassicalEqMotion
 !>
 !> @param EvolData     Evolution data type  to dispose
 !*******************************************************************************
-   SUBROUTINE DisposeEvolutionData( EvolData, Gamma, Temperature )
+   SUBROUTINE DisposeEvolutionData( EvolData )
       IMPLICIT NONE
 
       TYPE( Evolution ), INTENT(INOUT)  :: EvolData
-      REAL, INTENT(IN)                  :: Gamma, Temperature
 
       INTEGER :: iDoF
 
@@ -188,7 +186,7 @@ MODULE ClassicalEqMotion
       IF (.NOT. EvolData%IsSetup)  RETURN
 
       ! dispose thermostat if setup
-      IF ( EvolData%HasThermostat == .TRUE. )  CALL DisposeThermostat( EvolData )
+      IF ( EvolData%HasThermostat )  CALL DisposeThermostat( EvolData )
 
       ! Deallocate standard deviations of the thermal noise
       DEALLOCATE( EvolData%Mass )
@@ -242,13 +240,13 @@ MODULE ClassicalEqMotion
 
       INTERFACE
          REAL FUNCTION GetPotential( X, Force )
-            REAL, DIMENSION(:), INTENT(IN)  :: X
-            REAL, DIMENSION(:), INTENT(OUT) :: Force
+            REAL, DIMENSION(:), TARGET, INTENT(IN)  :: X
+            REAL, DIMENSION(:), TARGET, INTENT(OUT) :: Force
          END FUNCTION GetPotential
       END INTERFACE
       
       INTEGER :: iDoF
- 
+
       ! (1) FULL TIME STEP FOR THE POSITIONS
       Pos(:) = Pos(:) + Vel(:)*EvolData%dt + 0.5*Acc(:)*(EvolData%dt**2)
  
@@ -331,15 +329,15 @@ MODULE ClassicalEqMotion
 
       INTERFACE
          REAL FUNCTION GetPotential( X, Force )
-            REAL, DIMENSION(:), INTENT(IN)  :: X
-            REAL, DIMENSION(:), INTENT(OUT) :: Force
+            REAL, DIMENSION(:), TARGET, INTENT(IN)  :: X
+            REAL, DIMENSION(:), TARGET, INTENT(OUT) :: Force
          END FUNCTION GetPotential
       END INTERFACE
       
       INTEGER :: iDoF
       ! Temporary array for predicted velocity and new accelerations
       REAL, DIMENSION( EvolData%NDoF ) :: NewPos, NewVel, NewAcc
-
+ 
       ! (1) PREDICTED POSITIONS
       NewPos(:) = Pos(:) + Vel(:)*EvolData%dt + (4.*Acc(:)-PreAcc(:))*(EvolData%dt**2)/6.0
 
@@ -369,8 +367,8 @@ MODULE ClassicalEqMotion
          ELSE IF ( .NOT. GaussianNoise ) THEN    ! add uniform noise
             DO iDoF = 1, EvolData%NDoF
                IF ( EvolData%ThermoSwitch(iDoF) ) THEN
-                  NewAcc(iDoF) = ( NewAcc(iDoF) + UniformRandomNr(-sqrt(3.)*EvolData%ThermalNoise(iDoF),sqrt(3.)*EvolData%ThermalNoise(iDoF)) ) &
-                                        / EvolData%Mass(iDoF) - EvolData%Gamma*NewVel(iDoF)
+                  NewAcc(iDoF) = ( NewAcc(iDoF) + UniformRandomNr(-sqrt(3.)*EvolData%ThermalNoise(iDoF),   &
+                             sqrt(3.)*EvolData%ThermalNoise(iDoF)) ) / EvolData%Mass(iDoF) - EvolData%Gamma*NewVel(iDoF)
                ELSE IF ( .NOT. EvolData%ThermoSwitch(iDoF) ) THEN
                   NewAcc(iDoF) = NewAcc(iDoF)  / EvolData%Mass(iDoF)
                END IF
