@@ -207,16 +207,23 @@ MODULE ClassicalEqMotion
 !> @param EvolData     Evolution data type
 !> @param Velocity     Array containing the velocity at given time step
 !*******************************************************************************
-   REAL FUNCTION EOM_KineticEnergy( EvolData, Vel ) RESULT( KinEnergy )
+   REAL FUNCTION EOM_KineticEnergy( EvolData, Vel, NMax ) RESULT( KinEnergy )
       IMPLICIT NONE
       TYPE( Evolution ), INTENT(INOUT)                 :: EvolData
       REAL, DIMENSION( EvolData%NDoF ), INTENT(INOUT)  :: Vel
+      INTEGER, INTENT(IN), OPTIONAL                    :: NMax
       INTEGER :: iDoF
       
       KinEnergy = 0.0
-      DO iDoF = 1, EvolData%NDoF
-         KinEnergy = KinEnergy + 0.5 * EvolData%Mass(iDoF) * Vel(iDoF)**2
-      END DO
+      IF (PRESENT( NMax )) THEN
+         DO iDoF = 1, NMax
+            KinEnergy = KinEnergy + 0.5 * EvolData%Mass(iDoF) * Vel(iDoF)**2
+         END DO
+      ELSE
+         DO iDoF = 1, EvolData%NDoF
+            KinEnergy = KinEnergy + 0.5 * EvolData%Mass(iDoF) * Vel(iDoF)**2
+         END DO
+      ENDIF
 
    END FUNCTION EOM_KineticEnergy
 

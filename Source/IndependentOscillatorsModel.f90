@@ -96,7 +96,7 @@ CONTAINS
       REAL, DIMENSION(:), ALLOCATABLE :: RdFreq, RdSpectralDens
       TYPE(SplineType) :: SpectralDensitySpline
       REAL, DIMENSION(124) :: Coord
-      REAL :: Value
+      REAL :: Value, D0
 
       ! If data already setup give a warning and deallocate memory
       CALL WARN( BathIsSetup, "IndependentOscillatorsModel.SetupIndepOscillatorsModel: overwriting bath data" )
@@ -129,19 +129,23 @@ CONTAINS
             ! Read frequencies and couplings
             DO iBath = 1, BathSize
                READ(InpUnit,*, IOSTAT=RdStatus) Frequencies(iBath), Couplings(iBath)
-               ! if data is missing, a markovian continuation of the chain is assumed 
+               ! if data is missing, a rubin continuation of the chain is assumed 
                IF ( RdStatus /= 0 ) THEN
-                  Frequencies(iBath) = Frequencies(iBath-1)
-                  Couplings(iBath) = Couplings(iBath-1)
+                  IF ( PRESENT( CutOffFreq )) THEN
+                     Frequencies(iBath) = CutOffFreq / SQRT(2.)
+                  ELSE 
+                     Frequencies(iBath) = Frequencies(iBath-1)
+                  ENDIF
+                  Couplings(iBath) = 0.5 * Frequencies(iBath)**2
                END IF
             END DO
 
-! !             PRINT*, 0.5*DistorsionForce + 0.5*Frequencies(1)**2 - Couplings(1)
-!             PRINT*, DistorsionForce*Frequencies(1)**2-Couplings(1)**2
-!             DO iBath = 1, BathSize-1
-! !                PRINT*, 0.5*Frequencies(iBath)**2 + 0.5*Frequencies(iBath+1)**2 - Couplings(iBath+1)
-!                PRINT*, Frequencies(iBath)**2*Frequencies(iBath+1)**2-Couplings(iBath+1)**2
-!             END DO
+            ! Scale with the masses
+            Couplings(1) = Couplings(1) * sqrt( OscillatorsMass )
+            DO iBath = 2, BathSize
+               Couplings(iBath) = Couplings(iBath) * OscillatorsMass
+            END DO
+            D0 = Couplings(1)
 
             ! Close input file
             CLOSE( InpUnit )
@@ -183,13 +187,16 @@ CONTAINS
             DistorsionForce = 0.0
 
             ! Compute frequencies and couplings 
+            D0 = 0.0
             DO iBath = 1, BathSize
                Frequencies(iBath) = iBath * DeltaOmega
                Couplings(iBath) = SQRT( 2.0 * OscillatorsMass * Frequencies(iBath) * DeltaOmega *      & 
                     GetSpline( SpectralDensitySpline, Frequencies(iBath) ) / MyConsts_PI )
                ! Compute force constant of the distorsion
                DistorsionForce = DistorsionForce + Couplings(iBath)**2 / ( OscillatorsMass * Frequencies(iBath)**2 ) 
+               D0 = D0 + Couplings(iBath)**2
             ENDDO
+            D0 = sqrt(D0)
 
             ! Deallocate memory for spectral density interpolation
             CALL DisposeSpline ( SpectralDensitySpline )
@@ -205,12 +212,28 @@ CONTAINS
       Value = (Coord(5)+Coord(6)+Coord(7))/3.0
 
       ! Translate to bring C3,C4,C5 in the Z=0 plane
-      DO iBath=3,124
+      DO iBath= 3,124
           Coord(iBath) = Coord(iBath) - Value
       END DO
       
       ! Store the coordinate of the slab
       MinSlab(:) = Coord(5:124)
+
+!       PRINT*, " "
+!       DO iBath = 1,8
+!          WRITE(*,500) iBath+1, MinSlab(iBath)
+!       END DO
+!       DO iBath = 9,98
+!          WRITE(*,501) iBath+1, MinSlab(iBath)
+!       END DO
+!       DO iBath = 99,120
+!          WRITE(*,502) iBath+1, MinSlab(iBath)
+!       END DO
+!       500 FORMAT( " z(",I1,")=",F13.10, " * MyConsts_Bohr2Ang " ) 
+!       501 FORMAT( " z(",I2,")=",F13.10, " * MyConsts_Bohr2Ang " ) 
+!       502 FORMAT( " z(",I3,")=",F13.10, " * MyConsts_Bohr2Ang " ) 
+!       PRINT*, " "
+!       STOP
 
       ! Module is setup
       BathIsSetup = .TRUE.
@@ -219,6 +242,7 @@ CONTAINS
       WRITE(*,*) " Independent oscillator model potential has been setup"
       WRITE(*,*) " ... (details) ... "
       WRITE(*,*) " Distorsion frequency coefficient (atomic units): ", DistorsionForce
+      WRITE(*,*) " D0 (atomic units): ", D0
 #endif
 
    END SUBROUTINE SetupIndepOscillatorsModel
@@ -267,8 +291,8 @@ CONTAINS
          IF ( BathType == CHAIN_BATH ) THEN
 
                RH    => Positions(1:3)
-               Qbath => Positions(5:BathSize+4) !*SQRT(OscillatorsMass)
                OutOfEqZc = Positions(4) - C1Puckering
+               Qbath => Positions(5:BathSize+4)
 
                D0 => Couplings(1)
                Dn => Couplings(2:BathSize)
@@ -277,18 +301,19 @@ CONTAINS
 
                V = V - D0 * OutOfEqZc * Qbath(1) + 0.5 * DistorsionForce * OutOfEqZc**2
                DO iBath = 1, BathSize - 1
-                  V = V + 0.5 * ( Frequencies(iBath) * Qbath(iBath) )**2 - Dn(iBath) * Qbath(iBath) * Qbath(iBath+1)
+                  V = V + 0.5 * OscillatorsMass * ( Frequencies(iBath) * Qbath(iBath) )**2 - &
+                          Dn(iBath) * Qbath(iBath) * Qbath(iBath+1)
                END DO
-               V = V + 0.5 * ( Frequencies(BathSize) * Qbath(BathSize) )**2
+               V = V + 0.5 * OscillatorsMass *( Frequencies(BathSize) * Qbath(BathSize) )**2
 
                Forces(4) = Forces(4) + Couplings(1)*Qbath(1) - DistorsionForce * OutOfEqZc
-               Forces(5) = - Frequencies(1)**2 * Qbath(1) + Couplings(1)*OutOfEqZc + Couplings(2)*Qbath(2)
+               Forces(5) = - OscillatorsMass*Frequencies(1)**2 * Qbath(1) + Couplings(1)*OutOfEqZc + Couplings(2)*Qbath(2)
                DO iBath = 2, BathSize-1
-                  Forces(4+iBath) = - Frequencies(iBath)**2 * Qbath(iBath) + &
+                  Forces(4+iBath) = - OscillatorsMass*Frequencies(iBath)**2 * Qbath(iBath) + &
                                     Couplings(iBath)*Qbath(iBath-1) + Couplings(iBath+1)*Qbath(iBath+1)
                END DO
-               Forces(4+BathSize) = - Frequencies(BathSize)**2 * Qbath(BathSize)  + Couplings(BathSize) * Qbath(BathSize-1)
-
+               Forces(4+BathSize) = - OscillatorsMass*Frequencies(BathSize)**2 * Qbath(BathSize)  + &
+                                      Couplings(BathSize) * Qbath(BathSize-1)
 
          ELSE IF ( BathType == STANDARD_BATH ) THEN
 
@@ -355,12 +380,14 @@ CONTAINS
                Velocities(3:4) = 0.0
       
                ! THE OSCILLATORS IN A CORRECT CANONICAL DISTRIBUTION FOR ZERO COUPLING
-               SigmaQ = sqrt( Temperature )
-               DO iBath = 1, BathSize
+               SigmaQ = sqrt( Temperature / OscillatorsMass )
+               DO iBath = 1, BathSize-1
                   SigmaV = SigmaQ / Frequencies(iBath)
                   Positions(4+iBath) = GaussianRandomNr( SigmaQ )
                   Velocities(4+iBath) = GaussianRandomNr( SigmaV )
                END DO
+               Positions(4+iBath) = GaussianRandomNr( SigmaQ )
+               Velocities(4+iBath) = GaussianRandomNr( SigmaV )
 
          ELSE IF ( BathType == STANDARD_BATH ) THEN
 

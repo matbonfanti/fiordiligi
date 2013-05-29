@@ -191,8 +191,9 @@ PROGRAM JK6
       CALL SetFieldFromInput( InputData, "EquilTStep",  EquilTStep, dt/MyConsts_fs2AU )
       EquilTStep = EquilTStep * MyConsts_fs2AU
       ! Read cutoff frequency of the bath, only if normal oscillators bath
+      ! if BathCutOffFreq is not present, it is set to zero
       BathCutOffFreq = 0.0
-      IF ( RunType == OSCIBATH_EQUIL ) CALL SetFieldFromInput( InputData, "BathCutOffFreq", BathCutOffFreq )
+      CALL SetFieldFromInput( InputData, "BathCutOffFreq", BathCutOffFreq, BathCutOffFreq )
       BathCutOffFreq = BathCutOffFreq * MyConsts_cmmin1toAU
       ! Read file with spectral density / normal modes freq and couplings
       CALL SetFieldFromInput( InputData, "SpectralDensityFile", SpectralDensityFile )
@@ -236,7 +237,7 @@ PROGRAM JK6
    ! number of analysis step
    ntime=int(nstep/nprint)
 
-   ! In case of a thermal bath, nevo is the number of bath dofs, so we have to
+   ! In case of a thermal bath, nevo is set from input as the number of bath dofs, so we have to
    ! add 1 to include also the C1 degree of freedom  
    IF (( RunType == OSCIBATH_EQUIL ) .OR. ( RunType == CHAINBATH_EQUIL ))  &
             nevo =  nevo + 1 
@@ -256,7 +257,8 @@ PROGRAM JK6
          ! Allocate and define masses
          ALLOCATE( MassVector( nevo + 3 ) )
          IF ( RunType == CHAINBATH_EQUIL ) THEN
-               MassVector = (/ (rmh, iCoord=1,3), rmc, (1.0, iCoord=1,nevo-1) /)
+               MassVector = (/ (rmh, iCoord=1,3), (rmc, iCoord=1,nevo) /)
+!                MassVector = (/ (rmh, iCoord=1,3), rmc, (1.0, iCoord=1,nevo-1) /)
          ELSE
                MassVector = (/ (rmh, iCoord=1,3), (rmc, iCoord=1,nevo) /)
          ENDIF
@@ -301,10 +303,18 @@ PROGRAM JK6
    
    ! If needed setup bath frequencies and coupling for IO Model in normal form
    IF (  RunType == OSCIBATH_EQUIL ) THEN
-      CALL SetupIndepOscillatorsModel( nevo-1, STANDARD_BATH, SpectralDensityFile, rmc, BathCutOffFreq )
+      IF ( BathCutOffFreq > 0.0 ) THEN
+         CALL SetupIndepOscillatorsModel( nevo-1, STANDARD_BATH, SpectralDensityFile, rmc, BathCutOffFreq )
+      ELSE
+         CALL SetupIndepOscillatorsModel( nevo-1, STANDARD_BATH, SpectralDensityFile, rmc  )
+      END IF
    END IF
    IF (  RunType == CHAINBATH_EQUIL ) THEN
-      CALL SetupIndepOscillatorsModel( nevo-1, CHAIN_BATH, SpectralDensityFile, rmc )
+      IF ( BathCutOffFreq > 0.0 ) THEN
+         CALL SetupIndepOscillatorsModel( nevo-1, CHAIN_BATH, SpectralDensityFile, rmc, BathCutOffFreq )
+      ELSE
+         CALL SetupIndepOscillatorsModel( nevo-1, CHAIN_BATH, SpectralDensityFile, rmc )
+      END IF
    END IF
    
    !*************************************************************
@@ -667,7 +677,6 @@ PROGRAM JK6
                
          PRINT "(/,A,F6.1)"," Equilibrating the initial conditions at T = ", temp / MyConsts_K2AU
 
-
          IF ( PrintType == DEBUG ) THEN
             ! Open file to store equilibration
             WRITE(OutFileName,"(A,I4.4,A)") "Traj_",iTraj,".dat"
@@ -691,7 +700,7 @@ PROGRAM JK6
          A(1:3) = A(1:3) / rmh
          IF (  RunType == CHAINBATH_EQUIL ) THEN
              A(4) = A(4) / rmc   
-! !              A(5:nevo+3) = A(5:nevo+3) / rmc   
+             A(5:nevo+3) = A(5:nevo+3) / rmc   
          ELSE
              A(4:nevo+3) = A(4:nevo+3) / rmc   
          ENDIF
@@ -748,21 +757,6 @@ PROGRAM JK6
          ENDIF
 
          PRINT "(A)", " Equilibration completed! "
-        
-         ALLOCATE( XTEMP( size(X) ) )
-         DO i = 1, size(X)
-            PotEnergy = PotentialIndepOscillatorsModel( X, A )
-            TotEnergy = -A(i)
-!             print*, " analytical ", -A(i)
-            PotEnergy = 0.0
-            XTEMP = X + (/ (0.0, iStep=1,i-1 ), 0.00001, (0.0, iStep=i+1,size(X) ) /)
-            PotEnergy = PotEnergy + PotentialIndepOscillatorsModel( XTEMP, A ) / ( 2 * 0.00001 )
-            XTEMP = X - (/ (0.0, iStep=1,i-1 ), 0.00001, (0.0, iStep=i+1,size(X) ) /)
-            PotEnergy = PotEnergy - PotentialIndepOscillatorsModel( XTEMP, A ) / ( 2 * 0.00001 )
-!             print*, "numerical ", PotEnergy
-            PRINT*, " deriv error ", TotEnergy - PotEnergy
-         END DO
-         STOP
 
          IF ( PrintType >= FULL ) THEN
             ! Compute average and standard deviation
@@ -844,10 +838,6 @@ PROGRAM JK6
                CALL EOM_VelocityVerlet( MolecularDynamics, X, V, A, PotentialIndepOscillatorsModel, PotEnergy )
             END IF
 
-!             DO i = 1, size(X)
-!                IF ( MOD(iStep,1000) == 0 ) WRITE(1000+i,"(2F20.6)") real(iStep)*dt, X(i)
-!             END DO
-
             ! Compute kin energy and temperature
             KinEnergy = EOM_KineticEnergy( MolecularDynamics, V )
             TotEnergy = PotEnergy + KinEnergy
@@ -911,7 +901,6 @@ PROGRAM JK6
                END IF
 
                WRITE(TrajOutputUnit,"(F14.8,2F14.8)")  dt*real(iStep)/MyConsts_fs2AU, (X(3)- X(4))*MyConsts_Bohr2Ang
-
 
             END IF 
 
