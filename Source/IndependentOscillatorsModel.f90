@@ -133,10 +133,11 @@ CONTAINS
                IF ( RdStatus /= 0 ) THEN
                   IF ( PRESENT( CutOffFreq )) THEN
                      Frequencies(iBath) = CutOffFreq / SQRT(2.)
+                     Couplings(iBath) = 0.4999 * Frequencies(iBath)**2
                   ELSE 
                      Frequencies(iBath) = Frequencies(iBath-1)
+                     Couplings(iBath) = Couplings(iBath-1)
                   ENDIF
-                  Couplings(iBath) = 0.5 * Frequencies(iBath)**2
                END IF
             END DO
 

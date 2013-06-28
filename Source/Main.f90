@@ -1,5 +1,5 @@
 !***************************************************************************************
-!*                              PROGRAM JK6
+!*                              PROGRAM JK6_v2
 !***************************************************************************************
 !>  \mainpage      Program JK6 - version 2
 !>
@@ -21,7 +21,7 @@
 !>  \todo          deallocate arrays allocated in the main program!  \n
 !>
 !***************************************************************************************
-PROGRAM JK6
+PROGRAM JK6_v2
    USE CommonData
    USE InputField
    USE PotentialModule
@@ -52,6 +52,7 @@ PROGRAM JK6
    INTEGER  :: TrajOutputUnit            ! unit nr for the trajectory output
    INTEGER  :: TimeCorrelationUnit       ! unit nr for the correlation function in time
    INTEGER  :: SpectrDensUnit            ! unit nr for the spectral density
+   INTEGER  :: PowerSpectrumUnit         ! unit nr for the power spectrum
    INTEGER  :: InitialTDistrib           ! unit nr to print the initial temperatures distribution
    INTEGER  :: Traj2OutputUnit
 
@@ -73,6 +74,11 @@ PROGRAM JK6
    COMPLEX, DIMENSION(:), ALLOCATABLE :: DeltaZ
    REAL, DIMENSION(:), ALLOCATABLE :: AverageDeltaZ
    COMPLEX, DIMENSION(:), ALLOCATABLE :: Analytic
+   ! Store in time the power spectrum
+   COMPLEX, DIMENSION(:), ALLOCATABLE :: PowerSpec
+   REAL, DIMENSION(:), ALLOCATABLE :: XatT0
+   REAL :: AveragePS
+   
 
    REAL, DIMENSION(501)      :: crscn
 
@@ -125,7 +131,7 @@ PROGRAM JK6
    ENDIF
    IF (Help) THEN ! Call help
       PRINT*, ' Launch this program as:'
-      PRINT*, ' % JK6 "InputFileName" '
+      PRINT*, ' % JK6_v2 "InputFileName" '
       STOP
    ENDIF
 
@@ -184,14 +190,12 @@ PROGRAM JK6
       DynamicsGamma = DynamicsGamma / MyConsts_fs2AU
 
    ELSE IF ( ( RunType == OSCIBATH_EQUIL ) .OR. ( RunType == CHAINBATH_EQUIL ) ) THEN
-      ! I AM NOT SURE THAT EQUILIBRATION IS STILL NEEDED!
       CALL SetFieldFromInput( InputData, "Gamma", Gamma)
       Gamma = Gamma / MyConsts_fs2AU
       CALL SetFieldFromInput( InputData, "NrEquilibrSteps", NrEquilibSteps, int(5.0*(1.0/Gamma)/dt) )
       CALL SetFieldFromInput( InputData, "EquilTStep",  EquilTStep, dt/MyConsts_fs2AU )
       EquilTStep = EquilTStep * MyConsts_fs2AU
-      ! Read cutoff frequency of the bath, only if normal oscillators bath
-      ! if BathCutOffFreq is not present, it is set to zero
+      ! Read cutoff frequency of the bath, if BathCutOffFreq is not present, it is set to zero
       BathCutOffFreq = 0.0
       CALL SetFieldFromInput( InputData, "BathCutOffFreq", BathCutOffFreq, BathCutOffFreq )
       BathCutOffFreq = BathCutOffFreq * MyConsts_cmmin1toAU
@@ -325,7 +329,35 @@ PROGRAM JK6
    ! THIS LOG PRINTING PART SHOULD BE EXTENDED AND ORDERED !!!!!!!!!!!!!1
               !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
+   ! Write info about the kind of calculation
+   SELECT CASE( RunType )
+      CASE( SCATTERING )
+         WRITE(*,"(/,A)") " * Atom-surface sticking simulation "
+      CASE( EQUILIBRIUM, OSCIBATH_EQUIL, CHAINBATH_EQUIL )
+         WRITE(*,"(/,A)") " * Atom-surface equilibrium simulation "
+      CASE( HARMONICMODEL ) 
+         WRITE(*,"(/,A)") " * Test harmonic brownian dynamics "
+      CASE( POTENTIALPRINT )
+         WRITE(*,"(/,A)") " * Analysis of the potential energy surfaces "
+   END SELECT
+
+   ! Write info about the kind of output
+   SELECT CASE( PrintType )
+      CASE( MINIMAL )
+         WRITE(*,"(A)") " * Minimal output will be written "
+      CASE( CORRFUNCT )
+         WRITE(*,"(A)") " * Position cross-correlation power spectrum will be computed "
+      CASE( FULL )
+         WRITE(*,"(A)") " * Detailed information on each trajectory will be computed "
+      CASE( DEBUG )
+         WRITE(*,"(A)") " * Debug level of output for each trajectory "
+      CASE( EQUILIBRDBG )
+         WRITE(*,"(A)") " * Debug level of output for equilibration "
+   END SELECT
+   
    ! write to standard output the parameters of the calculation
+
+   ! COMMON OUTPUT DATA FOR H-STICKING SIMULATIONS
 
    WRITE(*,898) rmh / MyConsts_Uma2Au, rmc / MyConsts_Uma2Au, temp / MyConsts_K2AU
    WRITE(*,899) dt / MyConsts_fs2AU, nstep, ntime
@@ -340,13 +372,13 @@ PROGRAM JK6
               " * Mass of the C atoms (UMA):                   ",F10.4,/, &
               " * Temperature of the system (Kelvin):          ",F10.4      )
    899 FORMAT(" * Time step of the evolution (fs):             ",F10.4,/, &
-              " * Total nr of time step per trajectory:        ",I8   ,/, &
-              " * Nr of analysis steps:                        ",I5         )
+              " * Total nr of time step per trajectory:        ",I10  ,/, &
+              " * Nr of analysis steps:                        ",I10        )
    900 FORMAT(" * Initial kinetic energy of the H atom (eV):   ",F10.4,/, &
               " * Initial Z position of the H atom (Ang):      ",F10.4      )
-   901 FORMAT(" * Nr of evolving C atoms:                      ",I6,/, &
-              " * Nr of trajectories (per rho value):          ",I4         )
-   902 FORMAT(" * Nr of rho values to sample:                  ",I6,/, &
+   901 FORMAT(" * Nr of evolving C atoms:                      ",I10  ,/, &
+              " * Nr of trajectories (per rho value):          ",I10        )
+   902 FORMAT(" * Nr of rho values to sample:                  ",I10  ,/, &
               " * Grid spacing in rho (Ang):                   ",F10.4      )
    903 FORMAT(" * Langevin friction constant (1/fs)            ",F10.4,/, &
               " * Equilibration time step (fs)                 ",F10.4,/, &
@@ -622,9 +654,15 @@ PROGRAM JK6
 
       ! allocate arrays for deltaZ, its average and and its fourier transform
       ALLOCATE( DeltaZ(0:ntime), AverageDeltaZ(0:ntime) )
-      AverageDeltaZ(:) = cmplx(0.0, 0.0)
+      AverageDeltaZ(:) = 0.0
       ! frequency spacing of the fourier transform
       dOmega =  2.*MyConsts_PI/( real(nstep) * dt )
+
+      ! allocate arrays for the power spectrum computation
+      IF ( PrintType == CORRFUNCT ) THEN
+         ALLOCATE( PowerSpec(0:ntime), XatT0(size(X)) )
+         PowerSpec(:) = cmplx( 0.0, 0.0 )
+      ENDIF
 
       ! Initialize global temperature average
       GlobalTemperature = 0.0
@@ -645,6 +683,12 @@ PROGRAM JK6
       TimeCorrelationUnit = LookForFreeUnit()
       OPEN( FILE="Autocorrelation.dat", UNIT=TimeCorrelationUnit )
       WRITE(TimeCorrelationUnit, "(A,I6,A,/)") "# Autocorrelation of H-graphite equil dyn - ", inum, " trajectories (fs | Ang^2)"
+
+      IF ( PrintType == CORRFUNCT ) THEN
+         PowerSpectrumUnit = LookForFreeUnit()
+         OPEN( FILE="PowerSpectrum.dat", UNIT=PowerSpectrumUnit )
+         WRITE(PowerSpectrumUnit, "(A,I6,A,/)") "# Power spectrum of the equil trajs - ", inum, " trajectories (fs | au)"
+      ENDIF
 
       ! Initialize random number seed
       CALL SetSeed( 1 )
@@ -813,7 +857,7 @@ PROGRAM JK6
          ! initialize counter for printing steps
          kstep=0
 
-         ! Initialize array with C-H distance
+         ! Initialize arrays to store the trajectories averages
          DeltaZ(:) = 0.0
 
          ! Compute ZH at the beginning of the trajectory
@@ -822,7 +866,11 @@ PROGRAM JK6
          ELSE IF ( RunType == OSCIBATH_EQUIL .OR. RunType == CHAINBATH_EQUIL) THEN
             DeltaZ(0) = X(3)  
          END IF
-        
+         IF ( PrintType == CORRFUNCT ) THEN
+            XatT0(:) = X(:) 
+            PowerSpec(0) = PowerSpec(0) + CrossCorrelation( XatT0(1:4), XatT0(1:4) )
+         ENDIF
+
          ! Write the CH bond distance in output file
          WRITE(TrajOutputUnit,"(F14.8,2F14.8)") 0.0, (X(3)- X(4))*MyConsts_Bohr2Ang
 
@@ -901,6 +949,9 @@ PROGRAM JK6
                END IF
 
                WRITE(TrajOutputUnit,"(F14.8,2F14.8)")  dt*real(iStep)/MyConsts_fs2AU, (X(3)- X(4))*MyConsts_Bohr2Ang
+
+               ! store the autocorrelation function for power spectrum computation
+               IF ( PrintType == CORRFUNCT )  PowerSpec(kstep) = PowerSpec(kstep) + CrossCorrelation( XatT0(1:4), X(1:4) )
 
             END IF 
 
@@ -997,6 +1048,21 @@ PROGRAM JK6
       DO iStep = 0, ntime/2
          WRITE(TimeCorrelationUnit,*)  dt*real(nprint*iStep)/MyConsts_fs2AU,  real(DeltaZ(iStep))*MyConsts_Bohr2Ang**2
       END DO
+
+      ! normalize autocorrelation function, compute fourier transfrom and print
+      IF ( PrintType == CORRFUNCT ) THEN
+            PowerSpec(:) = PowerSpec(:) /  real(inum )
+            AveragePS = 0.0
+            DO iStep = 0, ntime
+               AveragePS = AveragePS + PowerSpec(iStep)
+            END DO
+            PowerSpec(:) = PowerSpec(:) - AveragePS
+            CALL DiscreteInverseFourier( PowerSpec )
+            DO iOmega = 0, ntime
+               WRITE( PowerSpectrumUnit,* )  iOmega*dOmega*MyConsts_fs2AU,  real( PowerSpec(iOmega) ), aimag( PowerSpec(iOmega) )
+            END DO
+            CLOSE( PowerSpectrumUnit )
+      ENDIF
 
       ! Close output files
       CLOSE( TrajOutputUnit )
@@ -1402,7 +1468,7 @@ PROGRAM JK6
                    (MinimumE+500*MyConsts_K2AU)*MyConsts_Hartree2eV
 
       801 FORMAT (/,    " * Optimization with ideal graphite surface ",/  &
-                        "   (Z=0 defined by C2,C3 and C4 plane)",         /  &
+                        "   (Z=0 defined by C2,C3 and C4 plane)",/,/      &
                         "   Energy at the minimum (eV)     ",1F10.4,/     &
                         "   Z coordinate of H atom (Ang)   ",1F10.4,/     &
                         "   Z coordinate of C1 atom (Ang)  ",1F10.4,/     &
@@ -1686,4 +1752,16 @@ PROGRAM JK6
 
 !************************************************************************************************************
 
-END PROGRAM JK6
+   REAL FUNCTION CrossCorrelation( X1, X2 )
+      IMPLICIT NONE
+      REAL, DIMENSION(:), INTENT(IN) :: X1, X2
+      INTEGER :: iAtom
+
+      CrossCorrelation = 0.0
+      DO iAtom = 1, size(X)
+         CrossCorrelation = CrossCorrelation + X1(iAtom)*X2(iAtom)
+      END DO
+
+   END FUNCTION CrossCorrelation
+
+END PROGRAM JK6_v2

@@ -30,9 +30,10 @@ MODULE CommonData
 
    !> Variable to set the print level of the calculation
    INTEGER :: PrintType
-   INTEGER, PARAMETER :: EQUILIBRDBG = 4, &   ! fully detailed information about the equilibration
-                         DEBUG       = 3, &   ! fully detailed information about the trajs
-                         FULL        = 2, &   ! files to plot the make animations, averages for each traj
+   INTEGER, PARAMETER :: EQUILIBRDBG = 5, &   ! fully detailed information about the equilibration
+                         DEBUG       = 4, &   ! fully detailed information about the trajs
+                         FULL        = 3, &   ! files to plot the make animations, averages for each traj
+                         CORRFUNCT   = 2, &   ! compute the full correlation function vs time 
                          MINIMAL     = 1      ! minimal level of output, only final averages
 
    ! THE FOLLOWING INPUT DATA ARE RELEVANT FOR ALL THE KIND OF CALCULATIONS
