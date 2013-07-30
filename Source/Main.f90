@@ -34,6 +34,8 @@ PROGRAM JK6_v2
 
    IMPLICIT NONE
 
+   LOGICAL, PARAMETER :: Collinear = .TRUE.
+
    ! Variable to handle the command line
    INTEGER :: NArgs
    LOGICAL :: Help = .FALSE.
@@ -42,9 +44,6 @@ PROGRAM JK6_v2
    CHARACTER(120) :: InputFileName
    ! Derived type to handle input data
    TYPE(InputFile) :: InputData
-
-   ! Data type with evolution information
-   TYPE(Evolution) :: Equilibration, MolecularDynamics
 
    ! Output variables
    CHARACTER(100) :: OutFileName         ! output file name
@@ -79,36 +78,18 @@ PROGRAM JK6_v2
    REAL, DIMENSION(:), ALLOCATABLE :: XatT0
    REAL :: AveragePS
    
-
    REAL, DIMENSION(501)      :: crscn
 
    INTEGER :: iCoord, iTraj, iStep, jRho, iCarbon, iOmega
    INTEGER :: kk, kstep
 
-   REAL :: DynamicsGamma
-   LOGICAL, DIMENSION(121) :: LangevinSwitchOn
 
    ! Print potential cuts in VTK format
-   TYPE(VTKInfo) :: PotentialCH, PotentialCH_Model
-
-   ! Parameters to define the grid for potential plots
-   REAL :: ZHmin, ZHmax
-   REAL :: ZCmin, ZCmax
-   INTEGER :: NpointZH
-   INTEGER :: NpointZC
-
-   ! Parameters to define CH model potential
-   REAL :: ZHFrequency, ZCFrequency, BilinearCoupl
-   INTEGER :: FreezeGraphene
-
-   ! Parameters for the model thermal bath
-   REAL :: BathCutOffFreq                ! cutoff frequency of the bath
-   CHARACTER(100) :: SpectralDensityFile         ! spectral density file name
-   
-   REAL, DIMENSION(:), ALLOCATABLE :: MassVector
+   TYPE(VTKInfo) :: PotentialCH
 
    REAL, ALLOCATABLE :: XTEMP(:)
    INTEGER :: i
+
 
    PRINT "(/,     '                    ==============================')"
    PRINT "(       '                                JK6_v2            ')"
@@ -209,6 +190,37 @@ PROGRAM JK6_v2
       Gamma = Gamma / MyConsts_fs2AU
       CALL SetFieldFromInput( InputData, "NrEquilibrSteps", NrEquilibSteps, int(10.0*(1.0/Gamma)/dt) )
 
+   ELSE IF (RunType == RELAXATION ) THEN
+      ! Initial energy of the system (input in eV and transform to AU)
+      CALL SetFieldFromInput( InputData, "InitEnergy", InitEnergy)
+      InitEnergy = InitEnergy / MyConsts_Hartree2eV
+      ! Nr of initial snapshots
+      CALL SetFieldFromInput( InputData, "NrOfInitSnapshots", NrOfInitSnapshots )
+      ! Time between each snapshots (input in fs and transform to AU)
+      CALL SetFieldFromInput( InputData, "TimeBetweenSnaps", TimeBetweenSnaps)
+      TimeBetweenSnaps = TimeBetweenSnaps * MyConsts_fs2AU
+      ! Langevin relaxation at the border of the slab
+      CALL SetFieldFromInput( InputData, "DynamicsGamma",  DynamicsGamma, 0.0 ) 
+      DynamicsGamma = DynamicsGamma / MyConsts_fs2AU
+
+   ELSE IF ( ( RunType == OSCIBATH_RELAX ) .OR. ( RunType == CHAINBATH_RELAX ) ) THEN
+      ! Initial energy of the system (input in eV and transform to AU)
+      CALL SetFieldFromInput( InputData, "InitEnergy", InitEnergy)
+      InitEnergy = InitEnergy / MyConsts_Hartree2eV
+      ! Nr of initial snapshots
+      CALL SetFieldFromInput( InputData, "NrOfInitSnapshots", NrOfInitSnapshots )
+      ! Time between each snapshots (input in fs and transform to AU)
+      CALL SetFieldFromInput( InputData, "TimeBetweenSnaps", TimeBetweenSnaps)
+      TimeBetweenSnaps = TimeBetweenSnaps * MyConsts_fs2AU
+      ! Read cutoff frequency of the bath, if BathCutOffFreq is not present, it is set to zero
+      BathCutOffFreq = 0.0
+      CALL SetFieldFromInput( InputData, "BathCutOffFreq", BathCutOffFreq, BathCutOffFreq )
+      BathCutOffFreq = BathCutOffFreq * MyConsts_cmmin1toAU
+      ! Read file with spectral density / normal modes freq and couplings
+      CALL SetFieldFromInput( InputData, "SpectralDensityFile", SpectralDensityFile )
+      ! No langevin oscillators in the thermal bath
+      DynamicsGamma = 0.0
+
    ELSE IF (RunType == POTENTIALPRINT) THEN
       CALL SetFieldFromInput( InputData, "ZHmin", ZHmin, 0.8 )
       ZHmin = ZHmin / MyConsts_Bohr2Ang
@@ -220,12 +232,6 @@ PROGRAM JK6_v2
       ZCmax = ZCmax / MyConsts_Bohr2Ang
       CALL SetFieldFromInput( InputData, "NpointZH", NpointZH, 400 )
       CALL SetFieldFromInput( InputData, "NpointZC", NpointZC, 100 )
-
-      CALL SetFieldFromInput( InputData, "ZHFrequency", ZHFrequency )
-      ZHFrequency = ZHFrequency * MyConsts_cmmin1toAU
-      CALL SetFieldFromInput( InputData, "ZCFrequency", ZCFrequency )
-      ZCFrequency = ZCFrequency * MyConsts_cmmin1toAU
-      CALL SetFieldFromInput( InputData, "BilinearCoupl", BilinearCoupl )
       CALL SetFieldFromInput( InputData, "FreezeGraphene", FreezeGraphene, 1 )
 
    END IF
@@ -243,12 +249,12 @@ PROGRAM JK6_v2
 
    ! In case of a thermal bath, nevo is set from input as the number of bath dofs, so we have to
    ! add 1 to include also the C1 degree of freedom  
-   IF (( RunType == OSCIBATH_EQUIL ) .OR. ( RunType == CHAINBATH_EQUIL ))  &
+   IF (( RunType == OSCIBATH_EQUIL ) .OR. ( RunType == CHAINBATH_EQUIL )  .OR.  & 
+          ( RunType == OSCIBATH_RELAX ) .OR. ( RunType == CHAINBATH_RELAX )  )  &
             nevo =  nevo + 1 
    
    IF ( (RunType == SCATTERING) .OR. (RunType == EQUILIBRIUM) .OR.   &
                                ( RunType == OSCIBATH_EQUIL ) .OR. ( RunType == CHAINBATH_EQUIL ) ) THEN
-
 
          ! Allocation of position, velocity, acceleration arrays
          ALLOCATE( X(nevo+3), V(nevo+3), A(nevo+3), APre(nevo+3) )
@@ -260,12 +266,7 @@ PROGRAM JK6_v2
 
          ! Allocate and define masses
          ALLOCATE( MassVector( nevo + 3 ) )
-         IF ( RunType == CHAINBATH_EQUIL ) THEN
-               MassVector = (/ (rmh, iCoord=1,3), (rmc, iCoord=1,nevo) /)
-!                MassVector = (/ (rmh, iCoord=1,3), rmc, (1.0, iCoord=1,nevo-1) /)
-         ELSE
-               MassVector = (/ (rmh, iCoord=1,3), (rmc, iCoord=1,nevo) /)
-         ENDIF
+         MassVector = (/ (rmh, iCoord=1,3), (rmc, iCoord=1,nevo) /)
 
          ! Set variables for EOM integration in the microcanonical ensamble
          CALL EvolutionSetup( MolecularDynamics, nevo+3, MassVector, dt )
@@ -291,6 +292,30 @@ PROGRAM JK6_v2
          CALL EvolutionSetup( Equilibration, nevo, (/ (rmh, iCoord=1,nevo) /), dt )
          CALL SetupThermostat( Equilibration, Gamma, temp, (/ (.TRUE., iCoord=1,nevo) /) )
 
+   ELSE IF ( (RunType == RELAXATION)  .OR.   &
+                               ( RunType == OSCIBATH_RELAX ) .OR. ( RunType == CHAINBATH_RELAX ) ) THEN 
+
+         ! Allocation of position, velocity, acceleration arrays
+         ALLOCATE( X(nevo+3), V(nevo+3), A(nevo+3), APre(nevo+3) )
+
+         ! Allocate and define masses
+         ALLOCATE( MassVector( nevo + 3 ) )
+         MassVector = (/ (rmh, iCoord=1,3), (rmc, iCoord=1,nevo) /)
+
+         ! Set variables for EOM integration in the microcanonical ensamble (system + bath)
+         CALL EvolutionSetup( MolecularDynamics, nevo+3, MassVector, dt )
+
+         ! Set variables for EOM integration of the system only in the microcanonical ensamble 
+         CALL EvolutionSetup( InitialConditions, 4, MassVector(1:4), dt )
+
+         IF ( DynamicsGamma /= 0.0  ) THEN 
+            PRINT "(/,A,/)", " Setting langevin atoms at the border of the slab "
+            ! Set canonical dynamics at the borders of the carbon slab
+            LangevinSwitchOn = .TRUE.
+            LangevinSwitchOn( 1: MIN( 73, nevo )+3 ) = .FALSE.
+            CALL SetupThermostat( MolecularDynamics, DynamicsGamma, temp, LangevinSwitchOn(1:nevo+3) )
+         END IF
+
    ELSE IF (RunType == POTENTIALPRINT) THEN 
 
          ! Allocation of position, velocity, acceleration arrays
@@ -303,17 +328,17 @@ PROGRAM JK6_v2
    !*************************************************************
 
    ! Setup potential energy surface
-   CALL SetupPotential( .FALSE. )
+   CALL SetupPotential( Collinear )
    
    ! If needed setup bath frequencies and coupling for IO Model in normal form
-   IF (  RunType == OSCIBATH_EQUIL ) THEN
+   IF (  RunType == OSCIBATH_EQUIL .OR. RunType == OSCIBATH_RELAX ) THEN
       IF ( BathCutOffFreq > 0.0 ) THEN
          CALL SetupIndepOscillatorsModel( nevo-1, STANDARD_BATH, SpectralDensityFile, rmc, BathCutOffFreq )
       ELSE
          CALL SetupIndepOscillatorsModel( nevo-1, STANDARD_BATH, SpectralDensityFile, rmc  )
       END IF
    END IF
-   IF (  RunType == CHAINBATH_EQUIL ) THEN
+   IF (  RunType == CHAINBATH_EQUIL .OR. RunType == CHAINBATH_RELAX ) THEN
       IF ( BathCutOffFreq > 0.0 ) THEN
          CALL SetupIndepOscillatorsModel( nevo-1, CHAIN_BATH, SpectralDensityFile, rmc, BathCutOffFreq )
       ELSE
@@ -335,8 +360,10 @@ PROGRAM JK6_v2
          WRITE(*,"(/,A)") " * Atom-surface sticking simulation "
       CASE( EQUILIBRIUM, OSCIBATH_EQUIL, CHAINBATH_EQUIL )
          WRITE(*,"(/,A)") " * Atom-surface equilibrium simulation "
-      CASE( HARMONICMODEL ) 
+      CASE( HARMONICMODEL, OSCIBATH_RELAX, CHAINBATH_RELAX ) 
          WRITE(*,"(/,A)") " * Test harmonic brownian dynamics "
+      CASE( RELAXATION )
+         WRITE(*,"(/,A)") " * Atom-surface vibrational relaxation simulation "
       CASE( POTENTIALPRINT )
          WRITE(*,"(/,A)") " * Analysis of the potential energy surfaces "
    END SELECT
@@ -401,6 +428,12 @@ PROGRAM JK6_v2
    !****************************************************************************
 
          CALL BrownianHarmonicOscillator()
+      
+   !****************************************************************************
+   ELSE IF (RunType == RELAXATION .OR. RunType == OSCIBATH_RELAX .OR. RunType  == CHAINBATH_RELAX ) THEN   
+   !****************************************************************************
+
+         CALL HGraphiteVibrationalRelax()
 
    !****************************************************************************
    ELSE IF (RunType == POTENTIALPRINT) THEN   
@@ -414,7 +447,7 @@ PROGRAM JK6_v2
    ! Dispose memory for evolution data
    CALL DisposeEvolutionData( MolecularDynamics )
    CALL DisposeEvolutionData( Equilibration )
-
+   CALL DisposeEvolutionData( InitialConditions )
 
       CONTAINS
 
@@ -1511,34 +1544,6 @@ PROGRAM JK6_v2
       WRITE(*,"(/,A)") " * CH binding curve written to file GraphiteHBindingCurve.dat"
 
 
-
-      !*************************************************************
-      ! PRINT 2D C-H MODEL V from FREQUENCIES AND COUPLING
-      !*************************************************************
-
-      nPoint = 0
-      ! Cycle over the ZC coordinate values
-      DO iZC = 1, NpointZC
-         X(4) = ZCArray(iZC)
-         ! Cycle over the ZH coordinate values
-         DO iZH = 1, NpointZH
-            X(3) = ZHArray(iZH)
-            nPoint = nPoint + 1
-            ! Compute potential
-            PotentialArray(nPoint) = MinimumE + 0.5*rmh*(ZHFrequency*(X(3)-MinimumZH))**2 + &
-                  0.5*rmc*(ZCFrequency*(X(4)-MinimumZC))**2 + BilinearCoupl*(X(3)-MinimumZH)*(X(4)-MinimumZC)
-         END DO
-      END DO
-
-      ! Print the potential to vtk file
-      CALL VTK_NewRectilinearSnapshot ( PotentialCH_Model, X=ZHArray*MyConsts_Bohr2Ang, Y=ZCArray*MyConsts_Bohr2Ang, &
-                            FileName="ModelPotential" )
-      CALL VTK_AddScalarField (PotentialCH_Model, Name="CHPotential", Field=PotentialArray*MyConsts_Hartree2eV )
-
-      WRITE(*,"(/,A,A)") " * Model PES from vibrational frequency and bilinear coupling written in VTR ", & 
-                           "format to file ModelPotential.vtr"
-
-
       !*************************************************************
       ! PRINT 2D C-H V WITH OTHERS CARBONS IN OPTIMIZED GEOMETRY
       !*************************************************************
@@ -1587,6 +1592,311 @@ PROGRAM JK6_v2
 
 
    END SUBROUTINE PotentialCuts
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+!***************************************************************************************************
+!                       H-GRAPHITE VIBRATIONAL RELAXATION
+!***************************************************************************************************
+
+   SUBROUTINE HGraphiteVibrationalRelax()
+      IMPLICIT NONE
+      REAL, DIMENSION(:), ALLOCATABLE      :: AverageZC, AverageZH, AverageCollectiveBath
+      REAL, DIMENSION(:), ALLOCATABLE      :: AverageEBath, AverageECoup, AverageESys
+      INTEGER                              :: AvEnergyOutputUnit, AvCoordOutputUnit
+      REAL, DIMENSION(NrOfInitSnapshots,8) :: CHInitConditions
+      INTEGER                              :: NTimeStepEachSnap
+      REAL, DIMENSION(4)                   :: Dummy, XShifted
+
+      REAL :: VSys, KSys, Ecoup, VBath, KBath, CollectiveQ
+
+      ! ALLOCATE AND INITIALIZE DATA WITH THE AVERAGES OVER THE SET OF TRAJECTORIES
+
+      ALLOCATE( AverageESys(0:ntime), AverageEBath(0:ntime), AverageECoup(0:ntime) )
+      ALLOCATE( AverageCollectiveBath(0:ntime), AverageZC(0:ntime), AverageZH(0:ntime) )
+
+      ! Initialize the variables for the trajectory averages
+      AverageESys(0:ntime)           = 0.0
+      AverageEBath(0:ntime)          = 0.0
+      AverageECoup(0:ntime)          = 0.0
+      AverageZC(0:ntime)             = 0.0
+      AverageZH(0:ntime)             = 0.0
+      AverageCollectiveBath(0:ntime) = 0.0
+
+      ! Open output file to print the brownian realizations vs time
+      AvEnergyOutputUnit = LookForFreeUnit()
+      OPEN( FILE="AverageEnergy.dat", UNIT=AvEnergyOutputUnit )
+      WRITE(AvEnergyOutputUnit, "(A,I6,A,/)") "# average energy vs time (fs | eV)"
+      AvCoordOutputUnit = LookForFreeUnit()
+      OPEN( FILE="AverageCoords.dat", UNIT=AvCoordOutputUnit )
+      WRITE(AvCoordOutputUnit, "(A,I6,A,/)") "# average coordinate vs time (fs | Ang)"
+
+      ! Initialize random number seed
+      CALL SetSeed( 1 )
+
+      PRINT "(2/,A)",    "***************************************************"
+      PRINT "(A,F10.5)", "               VIBRATIONAL RELAXATION"
+      PRINT "(A,/)" ,    "***************************************************"
+
+      PRINT "(A,I5,A)"," Running ", inum, " trajectories ... "
+
+      IF ( RunType == OSCIBATH_RELAX )  PRINT "(A)"," Bath represented as indipendent oscillators in normal form. "
+      IF ( RunType == CHAINBATH_RELAX ) PRINT "(A)"," Bath represented as indipendent oscillators in chain form. "
+      IF ( RunType == RELAXATION )  PRINT "(A)"," Bath represented with atomistic force field. "
+
+      ! Define the set of initial conditions for CH:
+      ! atoms in the equilibrium geometry
+      X(1:2) = 0.0
+      X(3) = HZEquilibrium
+      X(4) = C1Puckering  
+      ! energy shared between the 3 dof of the H atom
+      IF ( .NOT. Collinear ) THEN
+         V(1:2) = SQRT( 2.0 * (InitEnergy-MinimumEnergy) / 3.0 / rmh  )
+         V(3) = -SQRT( 2.0 * (InitEnergy-MinimumEnergy) / 3.0 / rmh  )
+      ELSE IF ( Collinear ) THEN
+         V(1:2) = 0.0
+         V(3) = -SQRT( 2.0 * (InitEnergy-MinimumEnergy) / rmh  )
+      END IF
+      V(4) = 0.0
+
+      ! Define when to store the dynamics snapshot
+      NTimeStepEachSnap = INT( TimeBetweenSnaps / dt )
+
+      ! Compute starting potential and forces
+      A(:) = 0.0
+      PotEnergy = VHFourDimensional( X(1:4), A(1:4) )
+      A(1:3) = A(1:3) / rmh
+      A(4) = A(4) / rmc   
+
+      ! Cycle over the nr of snapshot to store
+      DO iTraj = 1, NrOfInitSnapshots
+
+         ! Propagate the 4D traj in the microcanonical ensamble
+         DO iStep = 1, NTimeStepEachSnap
+            ! Propagate for one timestep with Velocity-Verlet
+            CALL EOM_VelocityVerlet( InitialConditions, X(1:4), V(1:4), A(1:4), VHFourDimensional, PotEnergy )
+            ! compute kinetic energy and total energy
+            KinEnergy = EOM_KineticEnergy(InitialConditions, V(1:4) )
+            TotEnergy = PotEnergy + KinEnergy
+         END DO
+
+         ! Store snapshot
+         CHInitConditions( iTraj, 1:4 ) = X(1:4)
+         CHInitConditions( iTraj, 5:8 ) = V(1:4)
+         WRITE( 689, "(8F15.5)" ) X(1:4), V(1:4)
+      END DO
+
+      !run inum number of trajectories
+      DO iTraj = 1,inum
+      
+         PRINT "(/,A,I6,A)"," **** Trajectory Nr. ", iTraj," ****" 
+
+         !*************************************************************
+         ! INITIALIZATION OF THE COORDINATES AND MOMENTA OF THE SYSTEM
+         !*************************************************************
+
+         ! Set initial conditions
+         IF ( RunType == RELAXATION ) THEN 
+               CALL ZeroKelvinSlabConditions( X, V, CHInitConditions ) 
+         ELSE IF ( RunType == OSCIBATH_RELAX .OR. RunType == CHAINBATH_RELAX ) THEN
+               CALL ZeroKelvinBathConditions( X, V, CHInitConditions )
+         END IF
+
+         !*************************************************************
+         ! INFORMATION ON INITIAL CONDITIONS, INITIALIZATION, OTHER...
+         !*************************************************************
+
+         ! Compute kinetic energy of system and bath and istantaneous temperature
+         KinEnergy = EOM_KineticEnergy( MolecularDynamics, V )
+         IstTemperature = 2.0*KinEnergy/(MyConsts_K2AU*(nevo+3))
+
+         ! for atomistic model of the bath, move the C2-C3-C4 plane in the origin
+         XShifted(:) =  X(1:4)
+         IF ( RunType == RELAXATION ) THEN 
+            XShifted(3:4) = XShifted(3:4)  - (X(5)+X(6)+X(7))/3.0
+         ENDIF
+
+         ! Energy of the system
+         KSys = EOM_KineticEnergy( InitialConditions, V(1:4) )
+         VSys = VHFourDimensional( XShifted(1:4), Dummy )
+
+         ! Coupling energy and energy of the bath
+         IF ( RunType == RELAXATION ) THEN 
+            CALL WARN( 1>0,  " NOT IMPLEMENTED YET ! " )
+         ELSE IF ( RunType == OSCIBATH_RELAX .OR. RunType == CHAINBATH_RELAX ) THEN
+            Ecoup = CouplingEnergy( X, CollectiveQ )
+            VBath = PotEnergyOfTheBath( X )
+            KBath = KinEnergy - KSys
+         END IF
+
+         ! Store starting values of the averages
+         AverageESys(0)           = AverageESys(0)  + KSys + VSys
+         AverageEBath(0)          = AverageEBath(0) + KBath + VBath
+         AverageECoup(0)          = AverageECoup(0) + Ecoup
+         AverageZC(0)             = AverageZC(0)    + XShifted(4)
+         AverageZH(0)             = AverageZH(0)    + XShifted(3)
+         AverageCollectiveBath(0) = AverageCollectiveBath(0) + CollectiveQ
+
+         ! PRINT INITIAL CONDITIONS of THE TRAJECTORY
+         IF ( PrintType >= FULL ) THEN
+            WRITE(*,600)  (KSys+VSys)*MyConsts_Hartree2eV, KinEnergy*MyConsts_Hartree2eV, IstTemperature
+            600 FORMAT (/, " Initial condition of the MD trajectory ",/   &
+                           " * Energy of the system (eV)    ",1F10.4,/    &
+                           " * Full Kinetic Energy (eV)     ",1F10.4,/    &
+                           " * Istantaneous temperature (K) ",1F10.4,/ ) 
+         END IF
+
+         IF ( PrintType == DEBUG ) THEN
+            ! Open file to store trajectory information
+            WRITE(OutFileName,"(A,I4.4,A)") "Traj_",iTraj,".dat"
+            NWriteUnit = LookForFreeUnit()
+            OPEN( Unit=NWriteUnit, File=OutFileName, Position="APPEND" )
+            WRITE( NWriteUnit, "(/,A)" ) "# TRAJECTORY "
+         ENDIF
+
+         !*************************************************************
+         !         TIME EVOLUTION OF THE TRAJECTORY
+         !*************************************************************
+ 
+         ! initialize counter for printing steps
+         kstep=0
+
+         PRINT "(/,A)", " Propagating the H-Graphene system in time... "
+         
+         ! cycle over nstep velocity verlet iterations
+         DO iStep = 1,nstep
+
+            ! Propagate for one timestep
+            IF ( RunType == RELAXATION ) THEN 
+               CALL EOM_VelocityVerlet( MolecularDynamics, X, V, A, VHSticking, PotEnergy )
+            ELSE IF ( RunType == OSCIBATH_RELAX .OR. RunType == CHAINBATH_RELAX ) THEN
+               CALL EOM_VelocityVerlet( MolecularDynamics, X, V, A, PotentialIndepOscillatorsModel, PotEnergy )
+            END IF
+
+            ! output to write every nprint steps 
+            IF ( mod(iStep,nprint) == 0 ) THEN
+
+               ! increment counter for printing steps
+               kstep=kstep+1
+
+               ! Total kinetic energy, total energy
+               KinEnergy = EOM_KineticEnergy( MolecularDynamics, V )
+               TotEnergy = PotEnergy + KinEnergy
+
+               ! for atomistic model of the bath, move the C2-C3-C4 plane in the origin
+               XShifted(:) =  X(1:4)
+               IF ( RunType == RELAXATION ) THEN 
+                  XShifted(3:4) = XShifted(3:4)  - (X(5)+X(6)+X(7))/3.0
+               ENDIF
+
+               ! Energy of the system
+               KSys = EOM_KineticEnergy( InitialConditions, V(1:4) )
+               VSys = VHFourDimensional( XShifted(1:4), Dummy )
+
+               ! Coupling energy and energy of the bath
+               IF ( RunType == RELAXATION ) THEN 
+                  CALL WARN( 1>0,  " NOT IMPLEMENTED YET ! " )
+               ELSE IF ( RunType == OSCIBATH_RELAX .OR. RunType == CHAINBATH_RELAX ) THEN
+                  Ecoup = CouplingEnergy( X, CollectiveQ )
+                  VBath = PotEnergyOfTheBath( X )
+                  KBath = KinEnergy - KSys
+               END IF
+               
+               ! Update averages over time
+               AverageESys(kstep)           = AverageESys(kstep)  + KSys + VSys
+               AverageEBath(kstep)          = AverageEBath(kstep) + KBath + VBath
+               AverageECoup(kstep)          = AverageECoup(kstep) + Ecoup
+               AverageZC(kstep)             = AverageZC(kstep)    + XShifted(4)
+               AverageZH(kstep)             = AverageZH(kstep)    + XShifted(3)
+               AverageCollectiveBath(kstep) = AverageCollectiveBath(kstep) + CollectiveQ
+
+               ! If massive level of output, print traj information to std out
+               IF ( PrintType == DEBUG ) THEN
+                  WRITE(NWriteUnit,800) dt*real(iStep)/MyConsts_fs2AU, PotEnergy*MyConsts_Hartree2eV,  &
+                        KinEnergy*MyConsts_Hartree2eV, TotEnergy*MyConsts_Hartree2eV, IstTemperature                    
+                  WRITE(NWriteUnit,801)  dt*real(iStep)/MyConsts_fs2AU, X(1:5)*MyConsts_Bohr2Ang, X(8)*MyConsts_Bohr2Ang, &
+                                             X(14)*MyConsts_Bohr2Ang, X(17)*MyConsts_Bohr2Ang
+                  800 FORMAT("T= ",F12.5," V= ",1F15.8," K= ",1F15.8," E= ",1F15.8," Temp= ", 1F15.8)
+                  801 FORMAT("T= ",F12.5," COORDS= ", 8F8.4)
+               END IF
+
+            END IF 
+
+         END DO
+
+         PRINT "(A)", " Time propagation completed! "
+
+         IF ( PrintType == DEBUG ) THEN
+               ! Close file to store equilibration
+               CLOSE( Unit=NWriteUnit )
+         ENDIF
+
+      END DO
+      
+      PRINT "(A)"," Done! "
+
+      !*************************************************************
+      !         OUTPUT OF THE RELEVANT AVERAGES 
+      !*************************************************************
+
+      ! Normalize averages 
+      AverageESys(:)   = AverageESys(:)  / real(inum)
+      AverageEBath(:)  = AverageEBath(:) / real(inum)
+      AverageECoup(:)  = AverageECoup(:) / real(inum)
+      AverageZC(:)     = AverageZC(:)    / real(inum) 
+      AverageZH(:)     = AverageZH(:)    / real(inum)
+      AverageCollectiveBath(:) = AverageCollectiveBath(:) / real(inum)
+
+      ! PRINT average energy of the system, of the coupling, of the bath
+      DO iStep = 0, ntime
+         WRITE(AvEnergyOutputUnit,"(F14.8,3F14.8)") dt*real(nprint*iStep)/MyConsts_fs2AU, AverageESys(iStep)*MyConsts_Hartree2eV, &
+                 AverageECoup(iStep)*MyConsts_Hartree2eV,  AverageEBath(iStep)*MyConsts_Hartree2eV
+      END DO
+
+      ! PRINT average coordinates
+      DO iStep = 0, ntime
+         WRITE(AvCoordOutputUnit,"(F14.8,3F14.8)")  dt*real(nprint*iStep)/MyConsts_fs2AU, AverageZH(iStep)*MyConsts_Bohr2Ang, &
+                    AverageZC(iStep)*MyConsts_Bohr2Ang, AverageCollectiveBath(iStep)*MyConsts_Bohr2Ang
+      END DO
+
+      ! Close output files
+      CLOSE( AvEnergyOutputUnit )
+      CLOSE( AvCoordOutputUnit )
+
+
+   END SUBROUTINE HGraphiteVibrationalRelax
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

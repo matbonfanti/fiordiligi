@@ -41,7 +41,9 @@ MODULE IndependentOscillatorsModel
    IMPLICIT NONE
 
    PRIVATE
-   PUBLIC :: SetupIndepOscillatorsModel, PotentialIndepOscillatorsModel, InitialBathConditions, DisposeIndepOscillatorsModel
+   PUBLIC :: SetupIndepOscillatorsModel, PotentialIndepOscillatorsModel, DisposeIndepOscillatorsModel
+   PUBLIC :: ZeroKelvinBathConditions, InitialBathConditions
+   PUBLIC :: CouplingEnergy, PotEnergyOfTheBath
 
    INTEGER, PARAMETER, PUBLIC :: STANDARD_BATH = 0        ! < normal bath, in which all the oscillators are coupled to the system
    INTEGER, PARAMETER, PUBLIC :: CHAIN_BATH    = 1        ! < chain bath, in which all the oscillators are coupled in chain
@@ -63,12 +65,14 @@ MODULE IndependentOscillatorsModel
    REAL :: OscillatorsMass
    ! > Force constant of the distorsion correction
    REAL :: DistorsionForce
-   ! > Coordinate of the slab in the minimum
-   REAL, DIMENSION(120), SAVE :: MinSlab
 
    ! > Logical variable to set status of the class
    LOGICAL :: BathIsSetup = .FALSE.
 
+   !> Max nr of iterations for potential optimization
+   INTEGER, PARAMETER :: MaxIter = 10000
+   !> Threshold for conjugate gradient convergence
+   REAL, PARAMETER :: GradEps = 1.0E-4
 
 CONTAINS   
 
@@ -205,36 +209,9 @@ CONTAINS
 
       ENDIF
 
-      ! Minimize slab potential
-      Coord(1:124) = 0.0
-      Coord(3) = C1Puckering + 2.0
-      Coord(4) = C1Puckering
-      Value =  MinimizePotential( Coord, (/ (.TRUE., iBath=1,124)  /) )      
-      Value = (Coord(5)+Coord(6)+Coord(7))/3.0
-
-      ! Translate to bring C3,C4,C5 in the Z=0 plane
-      DO iBath= 3,124
-          Coord(iBath) = Coord(iBath) - Value
+      DO iBath = 1, BathSize
+         WRITE(888,*) Frequencies(iBath), Couplings(iBath) 
       END DO
-      
-      ! Store the coordinate of the slab
-      MinSlab(:) = Coord(5:124)
-
-!       PRINT*, " "
-!       DO iBath = 1,8
-!          WRITE(*,500) iBath+1, MinSlab(iBath)
-!       END DO
-!       DO iBath = 9,98
-!          WRITE(*,501) iBath+1, MinSlab(iBath)
-!       END DO
-!       DO iBath = 99,120
-!          WRITE(*,502) iBath+1, MinSlab(iBath)
-!       END DO
-!       500 FORMAT( " z(",I1,")=",F13.10, " * MyConsts_Bohr2Ang " ) 
-!       501 FORMAT( " z(",I2,")=",F13.10, " * MyConsts_Bohr2Ang " ) 
-!       502 FORMAT( " z(",I3,")=",F13.10, " * MyConsts_Bohr2Ang " ) 
-!       PRINT*, " "
-!       STOP
 
       ! Module is setup
       BathIsSetup = .TRUE.
@@ -268,7 +245,6 @@ CONTAINS
 
          INTEGER :: IBath
          REAL    :: Coupl, OutOfEqZc
-         REAL, DIMENSION(124) :: Dummy
          REAL, DIMENSION(:), POINTER :: RH, Qbath, Dn
          REAL, POINTER :: D0
 !          REAL, DIMENSION(BathSize) :: Qbath
@@ -286,8 +262,7 @@ CONTAINS
          Forces(:) = 0.0
 
          ! 4D POTENTIAL OF THE SYSTEM
-         V = VHSticking( (/ Positions(1:4), MinSlab(:) /), Dummy(:) ) 
-         Forces(1:4) = Dummy(1:4)
+         V = VHFourDimensional( Positions(1:4), Forces(1:4) ) 
 
          IF ( BathType == CHAIN_BATH ) THEN
 
@@ -382,13 +357,11 @@ CONTAINS
       
                ! THE OSCILLATORS IN A CORRECT CANONICAL DISTRIBUTION FOR ZERO COUPLING
                SigmaQ = sqrt( Temperature / OscillatorsMass )
-               DO iBath = 1, BathSize-1
+               DO iBath = 1, BathSize
                   SigmaV = SigmaQ / Frequencies(iBath)
                   Positions(4+iBath) = GaussianRandomNr( SigmaQ )
                   Velocities(4+iBath) = GaussianRandomNr( SigmaV )
                END DO
-               Positions(4+iBath) = GaussianRandomNr( SigmaQ )
-               Velocities(4+iBath) = GaussianRandomNr( SigmaV )
 
          ELSE IF ( BathType == STANDARD_BATH ) THEN
 
@@ -413,6 +386,173 @@ CONTAINS
 
       END SUBROUTINE InitialBathConditions
 
+
+      ! Setup initial conditions for the system plus bath for a simulation of vibrational relaxation
+      ! The bath is fixed in the equilibrium position with no momentum ( classical 0K )
+      ! The initial position and momenta of C and H are randomly chosen among a set of 
+      ! conditions which are given as input
+      ! data are initialized in ATOMIC UNITS
+      SUBROUTINE ZeroKelvinBathConditions( Positions, Velocities, CHInitialConditions )
+         IMPLICIT NONE
+         REAL, DIMENSION(:), INTENT(OUT) :: Positions, Velocities
+         REAL, DIMENSION(:,:), INTENT(IN) :: CHInitialConditions
+         INTEGER :: NRandom, iCoord, NInit
+         REAL :: Value
+
+         ! Check if the bath is setup
+         CALL ERROR( .NOT. BathIsSetup, "IndependentOscillatorsModel.ZeroKelvinBathConditions: bath not setup" )
+
+         ! Check the size of the position and forces arrays
+         CALL ERROR( size(Positions) /= size(Velocities), &
+                        "IndependentOscillatorsModel.ZeroKelvinBathConditions: array dimension mismatch" )
+         CALL ERROR( size(Positions) /= BathSize+4, &
+                        "IndependentOscillatorsModel.ZeroKelvinBathConditions: wrong bath size" )
+
+         ! Check the nr of starting conditions given ( there should be 8 coordinates: 4 positions and 4 momenta )
+         NRandom = size( CHInitialConditions, 1 )
+         CALL ERROR( size( CHInitialConditions, 2 ) /= 8, &
+                                          "IndependentOscillatorsModel.ZeroKelvinBathConditions: wrong number of coords " )
+      
+         ! Set the velocities to zero
+         Velocities(:) = 0.0
+
+         ! Set the coordinates of the bath
+         IF ( BathType == CHAIN_BATH ) THEN
+               Positions(1:2) = 0.0
+               Positions(3) = HZEquilibrium
+               Positions(4) = C1Puckering
+               Positions(5:BathSize+4) = 0.0
+               Value = MinimizeBathCoords( Positions, (/ (.FALSE., iCoord=1,4) ,(.TRUE., iCoord=5,BathSize+4)  /)  )
+         ELSE IF ( BathType == STANDARD_BATH ) THEN
+               DO iCoord = 1, BathSize
+                  Positions(4+iCoord) = 0.0
+                  Velocities(4+iCoord) = 0.0
+               END DO
+         END IF
+
+         ! Choose a random initial set of coordinates
+         NInit = CEILING( UniformRandomNr(0.0, real(NRandom))  )
+
+         ! Accordingly set position and velocity
+         Positions(1:4) = CHInitialConditions( NInit, 1:4 )
+         Velocities(1:4) = CHInitialConditions( NInit, 5:8 )
+
+      END SUBROUTINE ZeroKelvinBathConditions
+
+
+   REAL FUNCTION MinimizeBathCoords( Coords, Mask ) RESULT( Pot )
+      IMPLICIT NONE
+      REAL, INTENT(INOUT), DIMENSION(:)            :: Coords
+      LOGICAL, INTENT(IN), DIMENSION(size(Coords)) :: Mask
+
+      INTEGER :: NrDimension, NrOptimization
+      INTEGER :: iIter, iCoord
+      REAL, DIMENSION(size(Coords)) :: Gradient
+      REAL :: Norm
+
+      ! Set dimension number
+      NrDimension = size(Coords)
+      ! Set optimization coordinates nr
+      NrOptimization = count( Mask )
+      ! Check if the nr of dimension is compatible with the slab maximum size
+      CALL ERROR( NrDimension /= BathSize + 4, "IndependentOscillatorsModel.MinimizeBathCoords: wrong number of DoFs" )
+
+      ! Cycle over steepest descent iterations
+      DO iIter = 1, MaxIter
+
+         ! compute negative of the gradient
+         Pot = PotentialIndepOscillatorsModel( Coords, Gradient )
+
+         ! compute norm of the gradient
+         Norm = 0.0
+         DO iCoord = 1, NrDimension
+            IF ( Mask( iCoord ) ) THEN
+               Norm = Norm + Gradient(iCoord)**2
+            END IF
+         END DO
+         Norm = SQRT( Norm / NrOptimization )
+
+         ! check convergence
+         IF (Norm < GradEps) EXIT
+   
+         ! move geometry along gradient
+         DO iCoord = 1, NrDimension
+            IF ( Mask( iCoord ) ) THEN
+               Coords(iCoord) = Coords(iCoord) + Gradient(iCoord)
+            END IF
+         END DO
+
+      END DO
+
+      IF ( iIter == MaxIter ) PRINT*, " NOT CONVERGED !!!!!"
+
+   END FUNCTION MinimizeBathCoords
+
+! ------------------------------------------------------------------------------------------------------------
+
+   REAL FUNCTION PotEnergyOfTheBath( Coords ) RESULT( V )
+      IMPLICIT NONE
+      REAL, INTENT(IN), DIMENSION(:)            :: Coords
+      INTEGER :: iBath
+
+      ! Check if the bath is setup
+      CALL ERROR( .NOT. BathIsSetup, "IndependentOscillatorsModel.PotEnergyOfTheBath: bath is not setup" )
+      ! Check the size of the position array
+      CALL ERROR( size(Coords) /= BathSize+4, "IndependentOscillatorsModel.PotEnergyOfTheBath: wrong bath size" )
+
+      V = 0.0
+
+      ! COMPUTE POTENTIAL OF THE BATH OSCILLATORS
+      IF ( BathType == CHAIN_BATH ) THEN
+
+               DO iBath = 1, BathSize - 1
+                  V = V + 0.5 * OscillatorsMass * ( Frequencies(iBath) * Coords(4+iBath) )**2 - &
+                          Couplings(iBath+1) * Coords(4+iBath) * Coords(5+iBath)
+               END DO
+               V = V + 0.5 * OscillatorsMass *( Frequencies(BathSize) * Coords(4+BathSize) )**2
+
+         ELSE IF ( BathType == STANDARD_BATH ) THEN
+
+            ! POTENTIAL OF THE BATH OSCILLATORS
+            DO iBath = 1, BathSize
+               V = V + 0.5 * OscillatorsMass * ( Frequencies(iBath) * Coords(4+iBath) )**2
+            END DO
+
+         END IF
+
+   END FUNCTION PotEnergyOfTheBath
+
+
+   REAL FUNCTION CouplingEnergy( Coords, CouplingCoordinate ) RESULT( V )
+      IMPLICIT NONE
+      REAL, INTENT(IN), DIMENSION(:)  :: Coords
+      REAL, INTENT(OUT), OPTIONAL     :: CouplingCoordinate
+      INTEGER :: iBath
+      REAL    :: Coupl
+
+      ! Check if the bath is setup
+      CALL ERROR( .NOT. BathIsSetup, "IndependentOscillatorsModel.CouplingEnergy: bath is not setup" )
+      ! Check the size of the position array
+      CALL ERROR( size(Coords) /= BathSize+4, "IndependentOscillatorsModel.CouplingEnergy: wrong bath size" )
+
+      ! SYSTEM - BATH COUPLING
+      IF ( BathType == CHAIN_BATH ) THEN
+
+         V = - Couplings(1) * ( Coords(4) - C1Puckering ) * Coords(5)
+         IF( PRESENT( CouplingCoordinate ) ) CouplingCoordinate = Couplings(1)*Coords(5)
+
+      ELSE IF ( BathType == STANDARD_BATH ) THEN
+
+         Coupl = 0.0
+         DO iBath = 1, BathSize
+            Coupl = Coupl + Couplings(iBath) * Coords(4+iBath)
+         END DO
+         V = - Coupl * ( Coords(4) - C1Puckering ) 
+         IF( PRESENT( CouplingCoordinate ) ) CouplingCoordinate = Coupl
+
+      END IF
+
+   END FUNCTION CouplingEnergy
 
 ! ------------------------------------------------------------------------------------------------------------
 

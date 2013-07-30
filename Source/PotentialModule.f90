@@ -4,8 +4,8 @@ MODULE PotentialModule
    USE RandomNumberGenerator
 
    PRIVATE
-   PUBLIC :: SetupPotential, VHSticking, VHarmonic, MinimizePotential
-   PUBLIC :: ThermalEquilibriumConditions, ScatteringConditions, HarmonicConditions
+   PUBLIC :: SetupPotential, VHSticking, VHarmonic, VHFourDimensional, MinimizePotential
+   PUBLIC :: ThermalEquilibriumConditions, ScatteringConditions, HarmonicConditions, ZeroKelvinSlabConditions
    PUBLIC :: CarbonForceConstant, GraphiteLatticeConstant
 
    !> Setup variable for the potential
@@ -15,7 +15,11 @@ MODULE PotentialModule
    LOGICAL :: CollinearPES = .FALSE.
 
    !> C1 Puckering displacement of the H-graphite potential (in bohr)
-   REAL, PARAMETER, PUBLIC :: C1Puckering =  0.3673 / MyConsts_Bohr2Ang
+   REAL, PUBLIC :: C1Puckering =  0.3673 / MyConsts_Bohr2Ang
+   !> H Z equilibrium coordinate (in bohr)
+   REAL, PUBLIC :: HZEquilibrium = 1.4811 / MyConsts_Bohr2Ang
+   !> Energy of the minimum
+   REAL, PUBLIC :: MinimumEnergy = 0.0000
 
    !> Max nr of iterations for potential optimization
    INTEGER, PARAMETER :: MaxIter = 10000
@@ -49,6 +53,8 @@ MODULE PotentialModule
    REAL :: rkc                               !< force constant for single carbon displacement, setup at runtime
 !> @}
 
+   ! > Coordinate of the slab in the minimum
+   REAL, DIMENSION(120), SAVE :: MinSlab
 
    CONTAINS
 
@@ -58,7 +64,10 @@ MODULE PotentialModule
 
       SUBROUTINE SetupPotential( Collinear )
          IMPLICIT NONE
-         LOGICAL, OPTIONAL :: Collinear
+         LOGICAL, OPTIONAL    :: Collinear
+         REAL, DIMENSION(124) :: Positions
+         INTEGER :: iCoord
+         REAL    :: Value
 
          ! exit if module is setup
          IF ( PotentialModuleIsSetup ) RETURN
@@ -75,13 +84,92 @@ MODULE PotentialModule
 
          PotentialModuleIsSetup = .TRUE.
 
+         ! Define the reference 4D potential for the graphite in minimum E
+
+         ! Set guess starting coordinate for the minimization of the slab potential
+         Positions(1:124) = 0.0
+         Positions(3) = C1Puckering + 2.0   ! reasonable guess for H Z coordinate
+         Positions(4) = C1Puckering
+
+         ! Minimize potential
+         MinimumEnergy =  MinimizePotential( Positions, (/ (.TRUE., iCoord=1,124)  /) )      
+
+         ! Translate to bring C3,C4,C5 in the Z=0 plane
+         Value = (Positions(5)+Positions(6)+Positions(7))/3.0
+         DO iCoord= 3,124
+            Positions(iCoord) = Positions(iCoord) - Value
+         END DO
+
+         ! Store the coordinate of the slab
+         MinSlab(:) = Positions(5:124)
+
+         ! Store the carbon puckering and the H Z at equilibrium
+         C1Puckering = Positions(4)
+         HZEquilibrium = Positions(3)
+
+!       PRINT*, " "
+!       DO iBath = 1,8
+!          WRITE(*,500) iBath+1, MinSlab(iBath)
+!       END DO
+!       DO iBath = 9,98
+!          WRITE(*,501) iBath+1, MinSlab(iBath)
+!       END DO
+!       DO iBath = 99,120
+!          WRITE(*,502) iBath+1, MinSlab(iBath)
+!       END DO
+!       500 FORMAT( " z(",I1,")=",F13.10, " * MyConsts_Bohr2Ang " ) 
+!       501 FORMAT( " z(",I2,")=",F13.10, " * MyConsts_Bohr2Ang " ) 
+!       502 FORMAT( " z(",I3,")=",F13.10, " * MyConsts_Bohr2Ang " ) 
+!       PRINT*, " "
+!       STOP
+
 #if defined(VERBOSE_OUTPUT)
             WRITE(*,*) " Potential has been setup"
+            WRITE(*,*) " "
 #endif
       END SUBROUTINE
 
 
 ! ************************************************************************************
+
+      ! Setup initial conditions for the H atom + C slab for 
+      ! a simulation of vibrational relaxation
+      ! The slab is fixed in the equilibrium position with no momentum ( classical 0K )
+      ! The initial position and momenta of C and H are randomly chosen among a set of 
+      ! conditions which are given as input
+      ! data are initialized in ATOMIC UNITS
+      SUBROUTINE ZeroKelvinSlabConditions( Positions, Velocities, CHInitialConditions )
+         IMPLICIT NONE
+         REAL, DIMENSION(:), INTENT(OUT) :: Positions, Velocities
+         REAL, DIMENSION(:,:), INTENT(IN) :: CHInitialConditions
+         INTEGER :: NDoF, iBath, NRandom, NInit
+         REAL :: Value
+
+         ! Check the number of non frozen degree of freedom
+         NDoF = size( Positions )
+         CALL ERROR( size(Velocities) /= NDoF, "PotentialModule.ZeroKelvinSlabConditions: array dimension mismatch" )
+
+         ! Check if the nr of dimension is compatible with the slab maximum size
+         CALL ERROR( (NDoF > 124) .OR. (NDoF < 4), "PotentialModule.ZeroKelvinSlabConditions: wrong number of DoFs" )
+
+         ! Check the nr of starting conditions given ( there should be 8 coordinates: 4 positions and 4 momenta )
+         NRandom = size( CHInitialConditions, 1 )
+         CALL ERROR( size( CHInitialConditions, 2 ) /= 8, "PotentialModule.ZeroKelvinSlabConditions: wrong number of coords " )
+      
+         ! Set the velocities to zero
+         Velocities(:) = 0.0
+
+         ! Set the slab in the equilibrium geometry
+         Positions(5:NDoF) = MinSlab(1:NDoF-4)
+
+         ! Choose a random initial set of coordinates
+         NInit = CEILING( UniformRandomNr(0.0, real(NRandom))  )
+
+         ! Accordingly set position and velocity
+         Positions(1:4) = CHInitialConditions( NInit, 1:4 )
+         Velocities(1:4) = CHInitialConditions( NInit, 5:8 )
+
+      END SUBROUTINE ZeroKelvinSlabConditions
 
 
       ! Setup initial conditions for the H atom + C slab
@@ -365,6 +453,29 @@ MODULE PotentialModule
 
 ! ******************************************************************************************      
 
+!*******************************************************************************
+!> 4D adiabatic H-Graphene potential 
+!>
+!> @param Positions    Array with 3 cartesian coordinates for the H atom and 
+!>                     1 Z coordinates for the first carbon atoms (in au)
+!> @param Forces       Output array with the derivatives of the potential (in au)
+!> @param vv           output potential in atomic units
+!*******************************************************************************   
+      REAL FUNCTION VHFourDimensional( Positions, Forces ) RESULT(V) 
+         IMPLICIT NONE
+
+         REAL, DIMENSION(:), TARGET, INTENT(IN)  :: Positions
+         REAL, DIMENSION(:), TARGET, INTENT(OUT) :: Forces 
+         REAL, DIMENSION(124) :: Dummy
+
+         ! use the full potential with the carbon atoms in the equilibrium geometry
+         V = VHSticking( (/ Positions, MinSlab(:) /), Dummy(:) ) 
+         Forces(1:4) = Dummy(1:4)
+         IF ( CollinearPES ) THEN 
+            Forces(1:2) = 0.0
+         END IF
+
+      END FUNCTION VHFourDimensional
 
 !*******************************************************************************
 !> H-Graphene potential by Jackson and coworkers.
