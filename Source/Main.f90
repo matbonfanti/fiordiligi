@@ -1656,6 +1656,8 @@ PROGRAM JK6_v2
       IF ( RunType == OSCIBATH_RELAX )  PRINT "(A)"," Bath represented as indipendent oscillators in normal form. "
       IF ( RunType == CHAINBATH_RELAX ) PRINT "(A)"," Bath represented as indipendent oscillators in chain form. "
       IF ( RunType == RELAXATION )  PRINT "(A)"," Bath represented with atomistic force field. "
+      IF  ( RunType == OSCIBATH_RELAX .OR. RunType == CHAINBATH_RELAX ) &
+               PRINT "(A,F15.6)"," Distorsion force constant: ", GetDistorsionForce() 
 
       ! Define the set of initial conditions for CH:
       ! atoms in the equilibrium geometry

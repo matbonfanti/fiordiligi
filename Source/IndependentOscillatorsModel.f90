@@ -43,7 +43,7 @@ MODULE IndependentOscillatorsModel
    PRIVATE
    PUBLIC :: SetupIndepOscillatorsModel, PotentialIndepOscillatorsModel, DisposeIndepOscillatorsModel
    PUBLIC :: ZeroKelvinBathConditions, InitialBathConditions
-   PUBLIC :: CouplingEnergy, PotEnergyOfTheBath
+   PUBLIC :: CouplingEnergy, PotEnergyOfTheBath, GetDistorsionForce
 
    INTEGER, PARAMETER, PUBLIC :: STANDARD_BATH = 0        ! < normal bath, in which all the oscillators are coupled to the system
    INTEGER, PARAMETER, PUBLIC :: CHAIN_BATH    = 1        ! < chain bath, in which all the oscillators are coupled in chain
@@ -553,6 +553,13 @@ CONTAINS
       END IF
 
    END FUNCTION CouplingEnergy
+
+
+   REAL FUNCTION GetDistorsionForce() RESULT( Dist)
+      IMPLICIT NONE
+      Dist = DistorsionForce
+   END FUNCTION GetDistorsionForce
+
 
 ! ------------------------------------------------------------------------------------------------------------
 
