@@ -286,3 +286,7 @@ ${OBJDIR}/PrintTools.o : ${SRCDIR}/PrintTools.f90 ${COMMONDEP}
 
 # Linear algebra module
 ${OBJDIR}/MyLinearAlgebra.o : ${SRCDIR}/MyLinearAlgebra.f90 ${OBJDIR}/NRUtility.o ${COMMONDEP}
+
+# Derivatives with finite difference methods
+${OBJDIR}/DifferenceDerivatives.o : ${SRCDIR}/DifferenceDerivatives.f90 ${COMMONDEP}
+

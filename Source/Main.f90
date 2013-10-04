@@ -31,6 +31,8 @@ PROGRAM JK6_v2
    USE ClassicalEqMotion
    USE PrintTools
    USE IndependentOscillatorsModel
+   USE DifferenceDerivatives
+   USE MyLinearAlgebra
 
    IMPLICIT NONE
 
@@ -203,7 +205,7 @@ PROGRAM JK6_v2
       CALL SetFieldFromInput( InputData, "DynamicsGamma",  DynamicsGamma, 0.0 ) 
       DynamicsGamma = DynamicsGamma / MyConsts_fs2AU
 
-   ELSE IF ( ( RunType == OSCIBATH_RELAX ) .OR. ( RunType == CHAINBATH_RELAX ) ) THEN
+   ELSE IF ( RunType == OSCIBATH_RELAX ) THEN
       ! Initial energy of the system (input in eV and transform to AU)
       CALL SetFieldFromInput( InputData, "InitEnergy", InitEnergy)
       InitEnergy = InitEnergy / MyConsts_Hartree2eV
@@ -221,6 +223,25 @@ PROGRAM JK6_v2
       ! No langevin oscillators in the thermal bath
       DynamicsGamma = 0.0
 
+   ELSE IF ( RunType == CHAINBATH_RELAX ) THEN
+      ! Initial energy of the system (input in eV and transform to AU)
+      CALL SetFieldFromInput( InputData, "InitEnergy", InitEnergy)
+      InitEnergy = InitEnergy / MyConsts_Hartree2eV
+      ! Nr of initial snapshots
+      CALL SetFieldFromInput( InputData, "NrOfInitSnapshots", NrOfInitSnapshots )
+      ! Time between each snapshots (input in fs and transform to AU)
+      CALL SetFieldFromInput( InputData, "TimeBetweenSnaps", TimeBetweenSnaps)
+      TimeBetweenSnaps = TimeBetweenSnaps * MyConsts_fs2AU
+      ! Read cutoff frequency of the bath, if BathCutOffFreq is not present, it is set to zero
+      BathCutOffFreq = 0.0
+      CALL SetFieldFromInput( InputData, "BathCutOffFreq", BathCutOffFreq, BathCutOffFreq )
+      BathCutOffFreq = BathCutOffFreq * MyConsts_cmmin1toAU
+      ! Read file with spectral density / normal modes freq and couplings
+      CALL SetFieldFromInput( InputData, "SpectralDensityFile", SpectralDensityFile )
+      ! Langevin relaxation at the end of the chain
+      CALL SetFieldFromInput( InputData, "DynamicsGamma",  DynamicsGamma, 0.0 ) 
+      DynamicsGamma = DynamicsGamma / MyConsts_fs2AU
+
    ELSE IF (RunType == POTENTIALPRINT) THEN
       CALL SetFieldFromInput( InputData, "ZHmin", ZHmin, 0.8 )
       ZHmin = ZHmin / MyConsts_Bohr2Ang
@@ -233,6 +254,15 @@ PROGRAM JK6_v2
       CALL SetFieldFromInput( InputData, "NpointZH", NpointZH, 400 )
       CALL SetFieldFromInput( InputData, "NpointZC", NpointZC, 100 )
       CALL SetFieldFromInput( InputData, "FreezeGraphene", FreezeGraphene, 1 )
+
+   ELSE IF (RunType == CHAINEIGEN) THEN 
+
+      ! Read cutoff frequency of the bath, if BathCutOffFreq is not present, it is set to zero
+      BathCutOffFreq = 0.0
+      CALL SetFieldFromInput( InputData, "BathCutOffFreq", BathCutOffFreq, BathCutOffFreq )
+      BathCutOffFreq = BathCutOffFreq * MyConsts_cmmin1toAU
+      ! Read file with spectral density / normal modes freq and couplings
+      CALL SetFieldFromInput( InputData, "SpectralDensityFile", SpectralDensityFile )
 
    END IF
 
@@ -300,7 +330,11 @@ PROGRAM JK6_v2
 
          ! Allocate and define masses
          ALLOCATE( MassVector( nevo + 3 ) )
-         MassVector = (/ (rmh, iCoord=1,3), (rmc, iCoord=1,nevo) /)
+         IF  ( RunType == CHAINBATH_RELAX )  THEN
+            MassVector = (/ (rmh, iCoord=1,3), rmc, (1.0*MyConsts_Uma2Au, iCoord=1,nevo-1) /)
+         ELSE
+            MassVector = (/ (rmh, iCoord=1,3), (rmc, iCoord=1,nevo) /)
+         END IF 
 
          ! Set variables for EOM integration in the microcanonical ensamble (system + bath)
          CALL EvolutionSetup( MolecularDynamics, nevo+3, MassVector, dt )
@@ -308,18 +342,34 @@ PROGRAM JK6_v2
          ! Set variables for EOM integration of the system only in the microcanonical ensamble 
          CALL EvolutionSetup( InitialConditions, 4, MassVector(1:4), dt )
 
-         IF ( DynamicsGamma /= 0.0  ) THEN 
+         IF ( ( RunType == RELAXATION ) .AND. ( DynamicsGamma /= 0.0 )) THEN 
             PRINT "(/,A,/)", " Setting langevin atoms at the border of the slab "
             ! Set canonical dynamics at the borders of the carbon slab
             LangevinSwitchOn = .TRUE.
             LangevinSwitchOn( 1: MIN( 73, nevo )+3 ) = .FALSE.
             CALL SetupThermostat( MolecularDynamics, DynamicsGamma, temp, LangevinSwitchOn(1:nevo+3) )
          END IF
+         IF ( ( RunType == CHAINBATH_RELAX ) .AND. ( DynamicsGamma /= 0.0 )) THEN 
+            PRINT "(/,A,/)", " Setting langevin atoms at the end of the chain "
+            ! Set canonical dynamics at the end of the oscillator chain
+            LangevinSwitchOn = .FALSE.
+            LangevinSwitchOn( size(X) ) = .TRUE.
+            CALL SetupThermostat( MolecularDynamics, DynamicsGamma, temp, LangevinSwitchOn(1:nevo+3) )
+         END IF
 
    ELSE IF (RunType == POTENTIALPRINT) THEN 
 
-         ! Allocation of position, velocity, acceleration arrays
+         ! Allocation of position and acceleration arrays
          ALLOCATE( X(nevo+3), A(nevo+3) )
+
+   ELSE IF (RunType == CHAINEIGEN) THEN 
+
+         ! Allocation of position and acceleration arrays
+         ALLOCATE( X(nevo+3), A(nevo+3) )
+
+         ! Allocate and define masses
+         ALLOCATE( MassVector( nevo + 3 ) )
+         MassVector = (/ (rmh, iCoord=1,3), rmc, (1.0*MyConsts_Uma2Au, iCoord=1,nevo-1) /)
 
    END IF
 
@@ -333,16 +383,16 @@ PROGRAM JK6_v2
    ! If needed setup bath frequencies and coupling for IO Model in normal form
    IF (  RunType == OSCIBATH_EQUIL .OR. RunType == OSCIBATH_RELAX ) THEN
       IF ( BathCutOffFreq > 0.0 ) THEN
-         CALL SetupIndepOscillatorsModel( nevo-1, STANDARD_BATH, SpectralDensityFile, rmc, BathCutOffFreq )
+         CALL SetupIndepOscillatorsModel( nevo-1, STANDARD_BATH, SpectralDensityFile, MassVector(5), BathCutOffFreq )
       ELSE
-         CALL SetupIndepOscillatorsModel( nevo-1, STANDARD_BATH, SpectralDensityFile, rmc  )
+         CALL SetupIndepOscillatorsModel( nevo-1, STANDARD_BATH, SpectralDensityFile, MassVector(5)  )
       END IF
    END IF
-   IF (  RunType == CHAINBATH_EQUIL .OR. RunType == CHAINBATH_RELAX ) THEN
+   IF (  RunType == CHAINBATH_EQUIL .OR. RunType == CHAINBATH_RELAX .OR. RunType == CHAINEIGEN) THEN
       IF ( BathCutOffFreq > 0.0 ) THEN
-         CALL SetupIndepOscillatorsModel( nevo-1, CHAIN_BATH, SpectralDensityFile, rmc, BathCutOffFreq )
+         CALL SetupIndepOscillatorsModel( nevo-1, CHAIN_BATH, SpectralDensityFile, MassVector(5), BathCutOffFreq )
       ELSE
-         CALL SetupIndepOscillatorsModel( nevo-1, CHAIN_BATH, SpectralDensityFile, rmc )
+         CALL SetupIndepOscillatorsModel( nevo-1, CHAIN_BATH, SpectralDensityFile, MassVector(5) )
       END IF
    END IF
    
@@ -366,6 +416,8 @@ PROGRAM JK6_v2
          WRITE(*,"(/,A)") " * Atom-surface vibrational relaxation simulation "
       CASE( POTENTIALPRINT )
          WRITE(*,"(/,A)") " * Analysis of the potential energy surfaces "
+      CASE( CHAINEIGEN )
+         WRITE(*,"(/,A)") " * Analysis of the eigenfrequencies of the chain potential "
    END SELECT
 
    ! Write info about the kind of output
@@ -440,6 +492,12 @@ PROGRAM JK6_v2
    !****************************************************************************
 
          CALL PotentialCuts()
+
+   !****************************************************************************
+   ELSE IF ( RunType == CHAINEIGEN ) THEN   
+   !****************************************************************************
+
+         CALL ChainEigenfrequencies()
 
    END IF
 
@@ -682,6 +740,8 @@ PROGRAM JK6_v2
 
    SUBROUTINE HGraphiteEquilibrium()
       IMPLICIT NONE
+      REAL, DIMENSION(:), ALLOCATABLE      :: AverCoordOverTime
+      REAL, DIMENSION(:,:), ALLOCATABLE    :: AverageCoord
 
       ! ALLOCATE AND INITIALIZE DATA WITH THE AVERAGES OVER THE SET OF TRAJECTORIES
 
@@ -690,15 +750,19 @@ PROGRAM JK6_v2
       AverageDeltaZ(:) = 0.0
       ! frequency spacing of the fourier transform
       dOmega =  2.*MyConsts_PI/( real(nstep) * dt )
+      ! average coordinates over time
+      ALLOCATE( AverageCoord(size(X),0:ntime) )
 
       ! allocate arrays for the power spectrum computation
       IF ( PrintType == CORRFUNCT ) THEN
          ALLOCATE( PowerSpec(0:ntime), XatT0(size(X)) )
+         ALLOCATE( AverCoordOverTime(size(X)) )
          PowerSpec(:) = cmplx( 0.0, 0.0 )
       ENDIF
 
-      ! Initialize global temperature average
+      ! Initialize the variables for the trajectory averages
       GlobalTemperature = 0.0
+      AverageCoord(1:size(X),0:ntime) = 0.0
 
       ! Open output file to print the brownian realizations vs time
       TrajOutputUnit = LookForFreeUnit()
@@ -874,6 +938,7 @@ PROGRAM JK6_v2
             C1Average = 0.0        ! C1 position
             C1Variance = 0.0
          ENDIF
+         AverageCoord(1:size(X),0) = AverageCoord(1:size(X),0) + X(:)
 
          IF ( PrintType == DEBUG ) THEN
             ! Open file to store trajectory information
@@ -901,7 +966,7 @@ PROGRAM JK6_v2
          END IF
          IF ( PrintType == CORRFUNCT ) THEN
             XatT0(:) = X(:) 
-            PowerSpec(0) = PowerSpec(0) + CrossCorrelation( XatT0(1:4), XatT0(1:4) )
+            PowerSpec(0) = PowerSpec(0) + CrossCorrelation( XatT0(:), XatT0(:) )
          ENDIF
 
          ! Write the CH bond distance in output file
@@ -964,6 +1029,9 @@ PROGRAM JK6_v2
                ! Store DeltaZ only in the print steps
                DeltaZ(kstep) = ZHinTime
 
+               ! Store average coordinates
+               AverageCoord(1:size(X),kstep) = AverageCoord(1:size(X),kstep) + X(:)
+
                ! If massive level of output, print traj information to std out
                IF ( PrintType == DEBUG ) THEN
                   WRITE(NWriteUnit,800) dt*real(iStep)/MyConsts_fs2AU, PotEnergy*MyConsts_Hartree2eV,  &
@@ -984,7 +1052,7 @@ PROGRAM JK6_v2
                WRITE(TrajOutputUnit,"(F14.8,2F14.8)")  dt*real(iStep)/MyConsts_fs2AU, (X(3)- X(4))*MyConsts_Bohr2Ang
 
                ! store the autocorrelation function for power spectrum computation
-               IF ( PrintType == CORRFUNCT )  PowerSpec(kstep) = PowerSpec(kstep) + CrossCorrelation( XatT0(1:4), X(1:4) )
+               IF ( PrintType == CORRFUNCT )  PowerSpec(kstep) = PowerSpec(kstep) + CrossCorrelation( XatT0(:), X(:) )
 
             END IF 
 
@@ -1058,6 +1126,8 @@ PROGRAM JK6_v2
       
       ! Normalize global average of the temperature
       GlobalTemperature = GlobalTemperature / real( inum*nstep )
+      ! Normalize average coordinates
+      AverageCoord(1:size(X),:) = AverageCoord(1:size(X),:) / real(inum) 
 
       WRITE(*,701)  GlobalTemperature
       701 FORMAT (/, " Average temperature for all trajs and time steps ",/   &
@@ -1084,15 +1154,14 @@ PROGRAM JK6_v2
 
       ! normalize autocorrelation function, compute fourier transfrom and print
       IF ( PrintType == CORRFUNCT ) THEN
+            AverCoordOverTime(:) = SUM ( AverageCoord, 2 ) / real(ntime+1)
+
             PowerSpec(:) = PowerSpec(:) /  real(inum )
-            AveragePS = 0.0
-            DO iStep = 0, ntime
-               AveragePS = AveragePS + PowerSpec(iStep)
-            END DO
-            PowerSpec(:) = PowerSpec(:) - AveragePS
+            PowerSpec(:) = PowerSpec(:) - DOT_PRODUCT(AverCoordOverTime(1:size(X)), AverCoordOverTime(1:size(X)) )
+
             CALL DiscreteInverseFourier( PowerSpec )
             DO iOmega = 0, ntime
-               WRITE( PowerSpectrumUnit,* )  iOmega*dOmega*MyConsts_fs2AU,  real( PowerSpec(iOmega) ), aimag( PowerSpec(iOmega) )
+               WRITE( PowerSpectrumUnit,* )  iOmega*dOmega/MyConsts_cmmin1toAU,  real(PowerSpec(iOmega)), aimag( PowerSpec(iOmega))
             END DO
             CLOSE( PowerSpectrumUnit )
       ENDIF
@@ -1429,6 +1498,9 @@ PROGRAM JK6_v2
       
       LOGICAL, DIMENSION(nevo+3) :: OptimizationMask
 
+      REAL, DIMENSION(:,:), ALLOCATABLE :: Hessian, EigenModes
+      REAL, DIMENSION(:), ALLOCATABLE :: EigenFreq
+
       PRINT "(2/,A)",    "***************************************************"
       PRINT "(A,F10.5)", "               PES ANALYSIS "
       PRINT "(A,/)" ,    "***************************************************"
@@ -1491,8 +1563,6 @@ PROGRAM JK6_v2
       PotEnergy =  VHSticking( X, A )
       ZCFreq = ZCFreq + A(4) / ( 2.0 * dd )
       ZCFreq = sqrt( ZCFreq /  rmc )
-      
-     
       
       WRITE(*,801) MinimumE*MyConsts_Hartree2eV, MinimumZH*MyConsts_Bohr2Ang, MinimumZC*MyConsts_Bohr2Ang, &
                    (MinimumZH-MinimumZC)*MyConsts_Bohr2Ang, ZHFreq/MyConsts_cmmin1toAU, ZCFreq/MyConsts_cmmin1toAU
@@ -1582,6 +1652,54 @@ PROGRAM JK6_v2
       ! Deallocate memory
       DEALLOCATE( PotentialArray, ZHArray, ZCArray )
 
+      !*************************************************************
+      !  COMPUTE HARMONIC FREQUENCIES IN THE MINIMUM
+      !*************************************************************
+
+      ALLOCATE( Hessian(2,2), EigenModes(2,2), EigenFreq(2) )
+
+      CALL FivePointDifferenceHessian( CollinearOnlyV, (/ MinimumZH, MinimumZC /), 1.E-4, Hessian )
+
+      Hessian(1,1) = Hessian(1,1) / rmh
+      Hessian(2,2) = Hessian(2,2) / rmc
+      Hessian(1,2) = Hessian(1,2) / SQRT(rmh*rmc)
+      Hessian(2,1) = Hessian(2,1) / SQRT(rmh*rmc)
+
+      CALL TheOneWithDiagonalization( Hessian, EigenModes, EigenFreq )
+
+      PRINT*, " "
+      PRINT*, " frequencies "
+      PRINT*, SQRT(EigenFreq), " au"
+      PRINT*, SQRT(EigenFreq)/MyConsts_cmmin1toAU, " cm-1"
+      PRINT*, " "
+      PRINT*, " eigenvalues "
+      DO iZC = 1, 2
+         PRINT*, " eig ", iZC, " : ", EigenModes(:, iZC)
+      END DO
+      DEALLOCATE( Hessian, EigenModes, EigenFreq )
+
+      ALLOCATE( Hessian(4,4), EigenModes(4,4), EigenFreq(4) )
+
+      CALL FivePointDifferenceHessian( NonCollinearOnlyV, (/ 0.0, 0.0, MinimumZH, MinimumZC /), 1.E-4, Hessian )
+
+      Hessian(1:3,1:3) = Hessian(1:3,1:3) / rmh
+      Hessian(4,4) = Hessian(4,4) / rmc
+      Hessian(1:3,4) = Hessian(1:3,4) / SQRT(rmh*rmc)
+      Hessian(4,1:3) = Hessian(4,1:3) / SQRT(rmh*rmc)
+
+      CALL TheOneWithDiagonalization( Hessian, EigenModes, EigenFreq )
+
+      PRINT*, " "
+      PRINT*, " frequencies "
+      WRITE(*,"(4F20.12, A)") SQRT(EigenFreq), " au"
+      WRITE(*,"(4F20.12, A)") SQRT(EigenFreq)/MyConsts_cmmin1toAU, " cm-1"
+      PRINT*, " "
+      PRINT*, " eigenvalues "
+      DO iZC = 1, 4
+         WRITE(*,"(A,I3,A,4F20.12)") " eig ", iZC, " : ", EigenModes(:, iZC)
+      END DO
+      DEALLOCATE( Hessian, EigenModes, EigenFreq )
+
       ! OTHER FEATURE TO IMPLEMENT IN THIS SECTION:
       ! * calculation of the harmonic frequencies at the minimum by diagonalization
       !   of the hessian, in the 2D collinear model and the 4D non collinear model
@@ -1614,27 +1732,40 @@ PROGRAM JK6_v2
 
    SUBROUTINE HGraphiteVibrationalRelax()
       IMPLICIT NONE
-      REAL, DIMENSION(:), ALLOCATABLE      :: AverageZC, AverageZH, AverageCollectiveBath
       REAL, DIMENSION(:), ALLOCATABLE      :: AverageEBath, AverageECoup, AverageESys
+      REAL, DIMENSION(:,:), ALLOCATABLE    :: AverageCoord
+      REAL, DIMENSION(:), ALLOCATABLE      :: AverCoordOverTime
+      REAL, DIMENSION(:,:), ALLOCATABLE    :: OscillCorrelations
       INTEGER                              :: AvEnergyOutputUnit, AvCoordOutputUnit
+      INTEGER                              :: AvBathCoordUnit, OscillCorrUnit, InitialCondUnit
       REAL, DIMENSION(NrOfInitSnapshots,8) :: CHInitConditions
       INTEGER                              :: NTimeStepEachSnap
-      REAL, DIMENSION(4)                   :: Dummy, XShifted
+      REAL, DIMENSION(4)                   :: Dummy
+      INTEGER                              :: DebugUnitEn, DebugUnitCoord, DebugUnitVel
 
-      REAL :: VSys, KSys, Ecoup, VBath, KBath, CollectiveQ
+      REAL :: VSys, KSys, Ecoup, VBath, KBath
 
       ! ALLOCATE AND INITIALIZE DATA WITH THE AVERAGES OVER THE SET OF TRAJECTORIES
 
       ALLOCATE( AverageESys(0:ntime), AverageEBath(0:ntime), AverageECoup(0:ntime) )
-      ALLOCATE( AverageCollectiveBath(0:ntime), AverageZC(0:ntime), AverageZH(0:ntime) )
+      ALLOCATE( AverageCoord(size(X),0:ntime) )
+
+      ! allocate arrays for the power spectrum computation
+      IF ( PrintType >= FULL ) THEN
+         ALLOCATE( PowerSpec(0:ntime), XatT0(size(X)) )
+         ALLOCATE( AverCoordOverTime(size(X)) )
+         PowerSpec(:) = cmplx( 0.0, 0.0 )
+         IF ( RunType == CHAINBATH_RELAX ) THEN
+            ALLOCATE( OscillCorrelations(size(X)-4, 0:ntime) )
+            OscillCorrelations(:,:) = 0.0
+         ENDIF
+      ENDIF
 
       ! Initialize the variables for the trajectory averages
-      AverageESys(0:ntime)           = 0.0
-      AverageEBath(0:ntime)          = 0.0
-      AverageECoup(0:ntime)          = 0.0
-      AverageZC(0:ntime)             = 0.0
-      AverageZH(0:ntime)             = 0.0
-      AverageCollectiveBath(0:ntime) = 0.0
+      AverageESys(0:ntime)            = 0.0
+      AverageEBath(0:ntime)           = 0.0
+      AverageECoup(0:ntime)           = 0.0
+      AverageCoord(1:size(X),0:ntime) = 0.0
 
       ! Open output file to print the brownian realizations vs time
       AvEnergyOutputUnit = LookForFreeUnit()
@@ -1643,6 +1774,20 @@ PROGRAM JK6_v2
       AvCoordOutputUnit = LookForFreeUnit()
       OPEN( FILE="AverageCoords.dat", UNIT=AvCoordOutputUnit )
       WRITE(AvCoordOutputUnit, "(A,I6,A,/)") "# average coordinate vs time (fs | Ang)"
+      AvBathCoordUnit = LookForFreeUnit()
+      OPEN( FILE="AverageBathCoords.dat", UNIT=AvBathCoordUnit )
+      WRITE(AvBathCoordUnit, "(A,I6,A,/)") "# average Q coordinate vs time (Ang | fs)"
+
+      IF ( PrintType >= FULL ) THEN
+         PowerSpectrumUnit = LookForFreeUnit()
+         OPEN( FILE="PowerSpectrum.dat", UNIT=PowerSpectrumUnit )
+         WRITE(PowerSpectrumUnit, "(A,I6,A,/)") "# Power spectrum of the trajs - ", inum, " trajectories (fs | au)"
+         IF ( RunType == CHAINBATH_RELAX ) THEN
+            OscillCorrUnit = LookForFreeUnit()
+            OPEN( FILE="OscillCorrelations.dat", UNIT=OscillCorrUnit )
+            WRITE(OscillCorrUnit, "(A,I6,A,/)") "# Correlations of oscillators - ", inum, " trajectories (fs | au)"
+         END IF
+      ENDIF
 
       ! Initialize random number seed
       CALL SetSeed( 1 )
@@ -1660,19 +1805,14 @@ PROGRAM JK6_v2
                PRINT "(A,F15.6)"," Distorsion force constant: ", GetDistorsionForce() 
 
       ! Define the set of initial conditions for CH:
-      ! atoms in the equilibrium geometry
+      ! atoms in the equilibrium geometry, energy in the stretching normal mode
+
       X(1:2) = 0.0
-      X(3) = HZEquilibrium
+      V(1:2) = 0.0
+      X(3) = HZEquilibrium 
       X(4) = C1Puckering  
-      ! energy shared between the 3 dof of the H atom
-      IF ( .NOT. Collinear ) THEN
-         V(1:2) = SQRT( 2.0 * (InitEnergy-MinimumEnergy) / 3.0 / rmh  )
-         V(3) = -SQRT( 2.0 * (InitEnergy-MinimumEnergy) / 3.0 / rmh  )
-      ELSE IF ( Collinear ) THEN
-         V(1:2) = 0.0
-         V(3) = -SQRT( 2.0 * (InitEnergy-MinimumEnergy) / rmh  )
-      END IF
-      V(4) = 0.0
+      V(3) = + sqrt( 2.0 * ( InitEnergy-MinimumEnergy ) / rmh ) * 0.958234410548192
+      V(4) = - sqrt( 2.0 * ( InitEnergy-MinimumEnergy ) / rmc ) * 0.285983940880181 
 
       ! Define when to store the dynamics snapshot
       NTimeStepEachSnap = INT( TimeBetweenSnaps / dt )
@@ -1680,8 +1820,9 @@ PROGRAM JK6_v2
       ! Compute starting potential and forces
       A(:) = 0.0
       PotEnergy = VHFourDimensional( X(1:4), A(1:4) )
-      A(1:3) = A(1:3) / rmh
-      A(4) = A(4) / rmc   
+      DO iCoord = 1,4
+         A(iCoord) = A(iCoord) / MassVector(iCoord)
+      END DO
 
       ! Cycle over the nr of snapshot to store
       DO iTraj = 1, NrOfInitSnapshots
@@ -1698,8 +1839,16 @@ PROGRAM JK6_v2
          ! Store snapshot
          CHInitConditions( iTraj, 1:4 ) = X(1:4)
          CHInitConditions( iTraj, 5:8 ) = V(1:4)
-         WRITE( 689, "(8F15.5)" ) X(1:4), V(1:4)
       END DO
+
+      IF ( PrintType == EQUILIBRDBG ) THEN
+         InitialCondUnit = LookForFreeUnit()
+         OPEN( FILE="InitialConditionsCH.dat", UNIT=InitialCondUnit )
+         WRITE(InitialCondUnit, "(A,I6,A,/)") "# Initial Conditions of the system: X_H, Y_H, Z_H, Z_C and velocities (au)"
+         DO iTraj = 1, NrOfInitSnapshots
+            WRITE( InitialCondUnit, "(8F15.5)" ) CHInitConditions( iTraj, : )
+         END DO
+      ENDIF
 
       !run inum number of trajectories
       DO iTraj = 1,inum
@@ -1717,57 +1866,75 @@ PROGRAM JK6_v2
                CALL ZeroKelvinBathConditions( X, V, CHInitConditions )
          END IF
 
+         ! for atomistic model of the bath, move the slab so that C2-C3-C4 plane has z=0
+         IF ( RunType == RELAXATION ) THEN 
+            X(3:size(X)) = X(3:size(X))  - (X(5)+X(6)+X(7))/3.0
+         ENDIF
+
          !*************************************************************
          ! INFORMATION ON INITIAL CONDITIONS, INITIALIZATION, OTHER...
          !*************************************************************
 
          ! Compute kinetic energy of system and bath and istantaneous temperature
          KinEnergy = EOM_KineticEnergy( MolecularDynamics, V )
-         IstTemperature = 2.0*KinEnergy/(MyConsts_K2AU*(nevo+3))
-
-         ! for atomistic model of the bath, move the C2-C3-C4 plane in the origin
-         XShifted(:) =  X(1:4)
-         IF ( RunType == RELAXATION ) THEN 
-            XShifted(3:4) = XShifted(3:4)  - (X(5)+X(6)+X(7))/3.0
-         ENDIF
-
          ! Energy of the system
          KSys = EOM_KineticEnergy( InitialConditions, V(1:4) )
-         VSys = VHFourDimensional( XShifted(1:4), Dummy )
-
+         VSys = VHFourDimensional( X(1:4), Dummy )
          ! Coupling energy and energy of the bath
          IF ( RunType == RELAXATION ) THEN 
             CALL WARN( 1>0,  " NOT IMPLEMENTED YET ! " )
          ELSE IF ( RunType == OSCIBATH_RELAX .OR. RunType == CHAINBATH_RELAX ) THEN
-            Ecoup = CouplingEnergy( X, CollectiveQ )
+            Ecoup = CouplingEnergy( X )
             VBath = PotEnergyOfTheBath( X )
             KBath = KinEnergy - KSys
          END IF
+         IstTemperature = 2.0*KBath/(MyConsts_K2AU*(size(X)-4))
 
          ! Store starting values of the averages
-         AverageESys(0)           = AverageESys(0)  + KSys + VSys
-         AverageEBath(0)          = AverageEBath(0) + KBath + VBath
-         AverageECoup(0)          = AverageECoup(0) + Ecoup
-         AverageZC(0)             = AverageZC(0)    + XShifted(4)
-         AverageZH(0)             = AverageZH(0)    + XShifted(3)
-         AverageCollectiveBath(0) = AverageCollectiveBath(0) + CollectiveQ
+         AverageESys(0)            = AverageESys(0)  + KSys + VSys
+         AverageEBath(0)           = AverageEBath(0) + KBath + VBath
+         AverageECoup(0)           = AverageECoup(0) + Ecoup
+         AverageCoord(1:size(X),0) = AverageCoord(1:size(X),0) + X(:)
+         IF ( PrintType >= FULL ) THEN
+            XatT0(:) = X(:) 
+            PowerSpec(0) = PowerSpec(0) + CrossCorrelation( XatT0(1:size(X)), XatT0(1:size(X)) )
+            IF ( RunType == CHAINBATH_RELAX ) THEN
+               DO iCoord = 1, size(X)-4
+                  OscillCorrelations(iCoord, 0) = OscillCorrelations(iCoord, 0) + X(3+iCoord) * X(3+iCoord+1) 
+               END DO
+            END IF
+         ENDIF
 
          ! PRINT INITIAL CONDITIONS of THE TRAJECTORY
          IF ( PrintType >= FULL ) THEN
-            WRITE(*,600)  (KSys+VSys)*MyConsts_Hartree2eV, KinEnergy*MyConsts_Hartree2eV, IstTemperature
+            WRITE(*,600)  (KSys+VSys)*MyConsts_Hartree2eV, KBath*MyConsts_Hartree2eV, IstTemperature
             600 FORMAT (/, " Initial condition of the MD trajectory ",/   &
-                           " * Energy of the system (eV)    ",1F10.4,/    &
-                           " * Full Kinetic Energy (eV)     ",1F10.4,/    &
-                           " * Istantaneous temperature (K) ",1F10.4,/ ) 
+                           " * Energy of the system (eV)        ",1F10.4,/    &
+                           " * Kinetic Energy of the bath (eV)  ",1F10.4,/    &
+                           " * Istantaneous temperature (K)     ",1F10.4,/ ) 
          END IF
 
          IF ( PrintType == DEBUG ) THEN
-            ! Open file to store trajectory information
-            WRITE(OutFileName,"(A,I4.4,A)") "Traj_",iTraj,".dat"
-            NWriteUnit = LookForFreeUnit()
-            OPEN( Unit=NWriteUnit, File=OutFileName, Position="APPEND" )
-            WRITE( NWriteUnit, "(/,A)" ) "# TRAJECTORY "
-         ENDIF
+            ! Open unit for massive output, with detailed info on trajectories
+            WRITE(OutFileName,"(A,I4.4,A)") "Traj_",iTraj,"_Energy.dat"
+            DebugUnitEn = LookForFreeUnit()
+            OPEN( Unit=DebugUnitEn, File=OutFileName, Position="APPEND" )
+            WRITE(OutFileName,"(A,I4.4,A)") "Traj_",iTraj,"_Coord.dat"
+            DebugUnitCoord = LookForFreeUnit()
+            OPEN( Unit=DebugUnitCoord, File=OutFileName, Position="APPEND" )
+            WRITE(OutFileName,"(A,I4.4,A)") "Traj_",iTraj,"_Vel.dat"
+            DebugUnitVel = LookForFreeUnit()
+            OPEN( Unit=DebugUnitVel, File=OutFileName, Position="APPEND" )
+
+            ! Write initial values
+            WRITE( DebugUnitEn, "(/,A)" ) "# TRAJECTORY ENERGY: time / fs | ESys, ECoup, EBath, KSys, VSys, KBath, VBath / Eh "
+            WRITE(DebugUnitEn,800) 0.0,  KSys+VSys, Ecoup, KBath+VBath, KSys, VSys, KBath, VBath
+            WRITE( DebugUnitCoord, "(/,A)" ) "# TRAJECTORY COORD: time / fs | X(1) X(2) ... X(N) / bohr "
+            WRITE(DebugUnitCoord,800) 0.0, X(1), X(2), X(3), X(4), (/ (X(iCoord+4)+0.05*iCoord, iCoord = 1, size(X)-4) /)
+            WRITE( DebugUnitVel, "(/,A)" ) "# TRAJECTORY VELOCITIES: time / fs | X(1) X(2) ... X(N) / au "
+            WRITE(DebugUnitVel,800) 0.0, V(:)
+            800 FORMAT(F12.5,1000F15.8)
+          ENDIF
 
          !*************************************************************
          !         TIME EVOLUTION OF THE TRAJECTORY
@@ -1778,6 +1945,17 @@ PROGRAM JK6_v2
 
          PRINT "(/,A)", " Propagating the H-Graphene system in time... "
          
+         ! Compute starting potential and forces
+         A(:) = 0.0
+         IF ( RunType == RELAXATION ) THEN 
+               PotEnergy = VHSticking( X, A )
+         ELSE IF ( RunType == OSCIBATH_RELAX .OR. RunType == CHAINBATH_RELAX ) THEN
+               PotEnergy = PotentialIndepOscillatorsModel( X, A )
+         END IF
+         DO iCoord = 1,size(X)
+            A(iCoord) = A(iCoord) / MassVector(iCoord)
+         END DO
+
          ! cycle over nstep velocity verlet iterations
          DO iStep = 1,nstep
 
@@ -1798,41 +1976,44 @@ PROGRAM JK6_v2
                KinEnergy = EOM_KineticEnergy( MolecularDynamics, V )
                TotEnergy = PotEnergy + KinEnergy
 
-               ! for atomistic model of the bath, move the C2-C3-C4 plane in the origin
-               XShifted(:) =  X(1:4)
+               ! for atomistic model of the bath, move the slab so that C2-C3-C4 plane has z=0
                IF ( RunType == RELAXATION ) THEN 
-                  XShifted(3:4) = XShifted(3:4)  - (X(5)+X(6)+X(7))/3.0
+                  X(3:size(X)) = X(3:size(X))  - (X(5)+X(6)+X(7))/3.0
                ENDIF
 
                ! Energy of the system
                KSys = EOM_KineticEnergy( InitialConditions, V(1:4) )
-               VSys = VHFourDimensional( XShifted(1:4), Dummy )
-
+               VSys = VHFourDimensional( X(1:4), Dummy )
                ! Coupling energy and energy of the bath
                IF ( RunType == RELAXATION ) THEN 
                   CALL WARN( 1>0,  " NOT IMPLEMENTED YET ! " )
                ELSE IF ( RunType == OSCIBATH_RELAX .OR. RunType == CHAINBATH_RELAX ) THEN
-                  Ecoup = CouplingEnergy( X, CollectiveQ )
+                  Ecoup = CouplingEnergy( X )
                   VBath = PotEnergyOfTheBath( X )
                   KBath = KinEnergy - KSys
                END IF
                
                ! Update averages over time
-               AverageESys(kstep)           = AverageESys(kstep)  + KSys + VSys
-               AverageEBath(kstep)          = AverageEBath(kstep) + KBath + VBath
-               AverageECoup(kstep)          = AverageECoup(kstep) + Ecoup
-               AverageZC(kstep)             = AverageZC(kstep)    + XShifted(4)
-               AverageZH(kstep)             = AverageZH(kstep)    + XShifted(3)
-               AverageCollectiveBath(kstep) = AverageCollectiveBath(kstep) + CollectiveQ
+               AverageESys(kstep)            = AverageESys(kstep)  + KSys + VSys
+               AverageEBath(kstep)           = AverageEBath(kstep) + KBath + VBath
+               AverageECoup(kstep)           = AverageECoup(kstep) + Ecoup
+               AverageCoord(1:size(X),kstep) = AverageCoord(1:size(X),kstep) + X(:)
+               ! store the autocorrelation function for power spectrum computation
+               IF ( PrintType >= FULL )  THEN
+                  PowerSpec(kstep) = PowerSpec(kstep) + CrossCorrelation( XatT0(1:size(X)), X(1:size(X)) )
+                  IF ( RunType == CHAINBATH_RELAX ) THEN
+                     DO iCoord = 1, size(X)-4
+                        OscillCorrelations(iCoord, kstep) = OscillCorrelations(iCoord, kstep) + X(3+iCoord) * X(3+iCoord+1) 
+                     END DO
+                  END IF
+               END IF
 
                ! If massive level of output, print traj information to std out
                IF ( PrintType == DEBUG ) THEN
-                  WRITE(NWriteUnit,800) dt*real(iStep)/MyConsts_fs2AU, PotEnergy*MyConsts_Hartree2eV,  &
-                        KinEnergy*MyConsts_Hartree2eV, TotEnergy*MyConsts_Hartree2eV, IstTemperature                    
-                  WRITE(NWriteUnit,801)  dt*real(iStep)/MyConsts_fs2AU, X(1:5)*MyConsts_Bohr2Ang, X(8)*MyConsts_Bohr2Ang, &
-                                             X(14)*MyConsts_Bohr2Ang, X(17)*MyConsts_Bohr2Ang
-                  800 FORMAT("T= ",F12.5," V= ",1F15.8," K= ",1F15.8," E= ",1F15.8," Temp= ", 1F15.8)
-                  801 FORMAT("T= ",F12.5," COORDS= ", 8F8.4)
+                  WRITE(DebugUnitEn,800) dt*real(iStep)/MyConsts_fs2AU, KSys+VSys, Ecoup, KBath+VBath, KSys, VSys, KBath, VBath
+                  WRITE(DebugUnitCoord,800) dt*real(iStep)/MyConsts_fs2AU, X(1:4), &
+                                                        (/ (X(iCoord+4)+0.05*iCoord, iCoord = 1, size(X)-4) /)
+                  WRITE(DebugUnitVel,800) dt*real(iStep)/MyConsts_fs2AU, V(:)
                END IF
 
             END IF 
@@ -1842,8 +2023,9 @@ PROGRAM JK6_v2
          PRINT "(A)", " Time propagation completed! "
 
          IF ( PrintType == DEBUG ) THEN
-               ! Close file to store equilibration
-               CLOSE( Unit=NWriteUnit )
+               CLOSE( Unit=DebugUnitEn )
+               CLOSE( Unit=DebugUnitCoord )
+               CLOSE( Unit=DebugUnitVel )
          ENDIF
 
       END DO
@@ -1855,12 +2037,11 @@ PROGRAM JK6_v2
       !*************************************************************
 
       ! Normalize averages 
-      AverageESys(:)   = AverageESys(:)  / real(inum)
-      AverageEBath(:)  = AverageEBath(:) / real(inum)
-      AverageECoup(:)  = AverageECoup(:) / real(inum)
-      AverageZC(:)     = AverageZC(:)    / real(inum) 
-      AverageZH(:)     = AverageZH(:)    / real(inum)
-      AverageCollectiveBath(:) = AverageCollectiveBath(:) / real(inum)
+      AverageESys(:)            = AverageESys(:)            / real(inum)
+      AverageEBath(:)           = AverageEBath(:)           / real(inum)
+      AverageECoup(:)           = AverageECoup(:)           / real(inum)
+      AverageCoord(1:size(X),:) = AverageCoord(1:size(X),:) / real(inum) 
+      OscillCorrelations(1:size(X)-4,:) = OscillCorrelations(1:size(X)-4,:)  / real(inum)
 
       ! PRINT average energy of the system, of the coupling, of the bath
       DO iStep = 0, ntime
@@ -1870,9 +2051,44 @@ PROGRAM JK6_v2
 
       ! PRINT average coordinates
       DO iStep = 0, ntime
-         WRITE(AvCoordOutputUnit,"(F14.8,3F14.8)")  dt*real(nprint*iStep)/MyConsts_fs2AU, AverageZH(iStep)*MyConsts_Bohr2Ang, &
-                    AverageZC(iStep)*MyConsts_Bohr2Ang, AverageCollectiveBath(iStep)*MyConsts_Bohr2Ang
+         WRITE(AvCoordOutputUnit,"(F14.8,3F14.8)") dt*real(nprint*iStep)/MyConsts_fs2AU, AverageCoord(3,iStep)*MyConsts_Bohr2Ang, &
+                    AverageCoord(4,iStep)*MyConsts_Bohr2Ang, FirstEffectiveMode(AverageCoord(5:size(X),iStep))*MyConsts_Bohr2Ang
       END DO
+
+      ! PRINT average bath coordinates
+      DO iCoord = 1, nevo-1
+         WRITE(AvBathCoordUnit,"(/,A,I5,/)") "#  Bath Coord # ", iCoord
+         DO iStep = 0, ntime
+            WRITE(AvBathCoordUnit,"(F20.8,3F20.8)") real(iCoord)+AverageCoord(4+iCoord,iStep)*10, &
+                      dt*real(nprint*iStep)/MyConsts_fs2AU
+                    
+         END DO
+      END DO
+
+      ! normalize autocorrelation function, compute fourier transfrom and print
+      IF ( PrintType >= FULL ) THEN
+            AverCoordOverTime(:) = SUM ( AverageCoord, 2 ) / real(ntime+1)
+
+            PowerSpec(:) = PowerSpec(:) /  real(inum )
+            PowerSpec(:) = PowerSpec(:) - DOT_PRODUCT(AverCoordOverTime(1:size(X)), AverCoordOverTime(1:size(X)) )
+            dOmega =  2.*MyConsts_PI/( real(nstep) * dt )
+
+            CALL DiscreteInverseFourier( PowerSpec )
+            DO iOmega = 0, ntime
+               WRITE( PowerSpectrumUnit,* )  iOmega*dOmega/MyConsts_cmmin1toAU,  real(PowerSpec(iOmega)), aimag( PowerSpec(iOmega))
+            END DO
+            CLOSE( PowerSpectrumUnit )
+
+            IF ( RunType == CHAINBATH_RELAX ) THEN
+               DO iCoord = 1, size(X)-4
+                  OscillCorrelations(iCoord,:) = OscillCorrelations(iCoord,:) - &
+                                          AverCoordOverTime(3+1)*AverCoordOverTime(3+iCoord+1) 
+                  WRITE(OscillCorrUnit, *) iCoord, SUM( OscillCorrelations(iCoord, :) )/real(ntime+1)
+               END DO
+            END IF
+
+            DEALLOCATE( PowerSpec, AverCoordOverTime )
+      ENDIF
 
       ! Close output files
       CLOSE( AvEnergyOutputUnit )
@@ -1882,8 +2098,91 @@ PROGRAM JK6_v2
    END SUBROUTINE HGraphiteVibrationalRelax
 
 
+!***************************************************************************************************
+!                       CHAIN EIGEN-FREQUENCIES
+!***************************************************************************************************
 
+   SUBROUTINE ChainEigenfrequencies()
+      IMPLICIT NONE
 
+      REAL, PARAMETER :: dd = 0.0001
+
+      REAL, DIMENSION(:,:), ALLOCATABLE :: Hessian, EigenModes
+      REAL, DIMENSION(:), ALLOCATABLE :: EigenFreq
+
+      INTEGER :: SpectrumOutUnit
+
+      REAL :: MinimumZH, MinimumZC
+      REAL :: Frequency, Spectrum
+      REAL :: MaxFreq, DeltaFreq, SigmaPeak
+      INTEGER :: NFreq, iFreq
+      INTEGER :: iEigen
+
+      PRINT "(2/,A)",    "***************************************************"
+      PRINT "(A,F10.5)", "          CHAIN EIGENFREQUENCIES ANALYSIS "
+      PRINT "(A,/)" ,    "***************************************************"
+
+      ALLOCATE( Hessian(nevo+3,nevo+3), EigenModes(nevo+3,nevo+3), EigenFreq(nevo+3) )
+      Hessian(:,:) = 0.0
+
+      ! Open output file to print the spectrum
+      SpectrumOutUnit = LookForFreeUnit()
+      OPEN( FILE="EigenNormalModes.dat", UNIT=SpectrumOutUnit )
+      WRITE(SpectrumOutUnit, "(A,I6,A,/)") "# ", inum, " eigenfrequency spectrum of the normal modes (cm-1 | arbitrary)"
+
+      ! Compute the part of the potential related to the system potential
+      CALL FivePointDifferenceHessian( NonCollinearOnlyV, (/ 0.0, 0.0, HZEquilibrium, C1Puckering /), dd, Hessian(1:4,1:4) )
+      ! mass scaling
+      Hessian(1:3,1:3) = Hessian(1:3,1:3) / rmh
+      Hessian(4,4) = Hessian(4,4) / rmc
+      Hessian(1:3,4) = Hessian(1:3,4) / SQRT(rmh*rmc)
+      Hessian(4,1:3) = Hessian(4,1:3) / SQRT(rmh*rmc)
+
+      ! add the part of the hessian of the independent oscillator model
+      CALL  HessianIndepOscillatorsModel( Hessian, rmc )
+
+      DO iFreq = 1, size(EigenFreq) 
+         WRITE(*,"(100F10.6)") Hessian(iFreq,:)
+      END DO
+
+      ! Diagonalize hessian matrix
+      CALL TheOneWithDiagonalization( Hessian, EigenModes, EigenFreq )
+
+      PRINT*, " "
+      PRINT*, " frequencies (au) "
+      WRITE(*,"(5F20.12)") SQRT(EigenFreq)
+      PRINT*, " "
+      PRINT*, " frequencies (cm-1) "
+      WRITE(*,"(5F20.12)") SQRT(EigenFreq)/MyConsts_cmmin1toAU
+      PRINT*, " "
+
+      MaxFreq = 5000.*MyConsts_cmmin1toAU
+      DeltaFreq = 1.*MyConsts_cmmin1toAU
+      SigmaPeak = 2.0*MyConsts_cmmin1toAU
+
+      NFreq = INT( MaxFreq / DeltaFreq )
+      DO iFreq = 1, NFreq
+
+         ! initialize frequency value and value of the signal
+         Frequency = iFreq*DeltaFreq
+         Spectrum = 0.0
+
+         ! sum over eigenfreq centered gaussians
+         DO iEigen = 1, size(EigenFreq)
+            Spectrum = Spectrum + EXP(- (Frequency-SQRT(EigenFreq(iEigen)))**2 / 2.0 / SigmaPeak**2 )
+         END DO
+
+         ! PRINT
+         WRITE(SpectrumOutUnit,*) Frequency/MyConsts_cmmin1toAU, Spectrum
+
+      END DO
+
+      DEALLOCATE( Hessian, EigenModes, EigenFreq )
+      
+      ! Close output files
+      CLOSE( SpectrumOutUnit )
+
+   END SUBROUTINE ChainEigenfrequencies
 
 
 

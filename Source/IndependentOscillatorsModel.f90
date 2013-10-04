@@ -43,7 +43,8 @@ MODULE IndependentOscillatorsModel
    PRIVATE
    PUBLIC :: SetupIndepOscillatorsModel, PotentialIndepOscillatorsModel, DisposeIndepOscillatorsModel
    PUBLIC :: ZeroKelvinBathConditions, InitialBathConditions
-   PUBLIC :: CouplingEnergy, PotEnergyOfTheBath, GetDistorsionForce
+   PUBLIC :: CouplingEnergy, PotEnergyOfTheBath, GetDistorsionForce, FirstEffectiveMode
+   PUBLIC :: HessianIndepOscillatorsModel
 
    INTEGER, PARAMETER, PUBLIC :: STANDARD_BATH = 0        ! < normal bath, in which all the oscillators are coupled to the system
    INTEGER, PARAMETER, PUBLIC :: CHAIN_BATH    = 1        ! < chain bath, in which all the oscillators are coupled in chain
@@ -221,6 +222,7 @@ CONTAINS
       WRITE(*,*) " ... (details) ... "
       WRITE(*,*) " Distorsion frequency coefficient (atomic units): ", DistorsionForce
       WRITE(*,*) " D0 (atomic units): ", D0
+      WRITE(*,*) " Oscillators mass (atomic units): ", OscillatorsMass
 #endif
 
    END SUBROUTINE SetupIndepOscillatorsModel
@@ -424,6 +426,7 @@ CONTAINS
                Positions(5:BathSize+4) = 0.0
                Value = MinimizeBathCoords( Positions, (/ (.FALSE., iCoord=1,4) ,(.TRUE., iCoord=5,BathSize+4)  /)  )
          ELSE IF ( BathType == STANDARD_BATH ) THEN
+               Positions(4) = C1Puckering
                DO iCoord = 1, BathSize
                   Positions(4+iCoord) = 0.0
                   Velocities(4+iCoord) = 0.0
@@ -559,6 +562,70 @@ CONTAINS
       IMPLICIT NONE
       Dist = DistorsionForce
    END FUNCTION GetDistorsionForce
+
+   REAL FUNCTION FirstEffectiveMode( Q ) RESULT( Mode )
+      IMPLICIT NONE
+      REAL, DIMENSION( BathSize ), INTENT(IN) :: Q
+      INTEGER :: iBath
+
+      ! Check if the bath is setup
+      CALL ERROR( .NOT. BathIsSetup, "IndependentOscillatorsModel.FirstEffectiveMode: bath is not setup" )
+
+      ! BATH FIRST EFFECTIVE MODE
+      IF ( BathType == CHAIN_BATH ) THEN
+         Mode = Couplings(1)*Q(1)
+      ELSE IF ( BathType == STANDARD_BATH ) THEN
+         DO iBath = 1, BathSize
+            Mode = Mode + Couplings(iBath) * Q(iBath)
+         END DO
+      END IF
+   END FUNCTION
+
+! ------------------------------------------------------------------------------------------------------------
+
+!*******************************************************************************
+!> Compute the Hessian of the potential of the bath
+!>
+!> @param Hessian    output matrix of size NxN, where N is the size of the bath
+!*******************************************************************************     
+   SUBROUTINE HessianIndepOscillatorsModel( Hessian, MassZH ) 
+      IMPLICIT NONE
+      REAL, DIMENSION(BathSize+4, BathSize+4), INTENT(INOUT) :: Hessian
+      REAL, INTENT(IN) :: MassZH
+      INTEGER :: IBath
+
+      ! Check if the bath is setup
+      CALL ERROR( .NOT. BathIsSetup, " IndependentOscillatorsModel.HessianIndepOscillatorsModel: bath is not setup" )
+
+      ! Initialize
+      Hessian(5:BathSize+4,5:BathSize+4) = 0.0
+      Hessian(1:4,5:BathSize+4) = 0.0
+      Hessian(5:BathSize+4,1:4) = 0.0
+
+      IF ( BathType == CHAIN_BATH ) THEN
+
+         ! Distorsion correction of the Zc coordinate
+         Hessian(4,4) = Hessian(4,4) + DistorsionForce / MassZH
+         ! Bath system coupling
+         Hessian(4,5) = - Couplings(1) /  ( SQRT(MassZH) * SQRT(OscillatorsMass) )
+         Hessian(5,4) = - Couplings(1) /  ( SQRT(MassZH) * SQRT(OscillatorsMass) )
+         ! Diagonal elements: quadratic terms of the potential
+         DO IBath = 1, BathSize
+            Hessian(4+IBath,4+IBath) = Frequencies(IBath)**2
+         END DO
+         ! off-diagonal elements: couplings
+         DO IBath = 1, BathSize-1
+            Hessian(4+IBath,4+IBath+1) = -Couplings(IBath+1) / OscillatorsMass
+            Hessian(4+IBath+1,4+IBath) = -Couplings(IBath+1) / OscillatorsMass
+         END DO
+
+      ELSE IF ( BathType == STANDARD_BATH ) THEN
+         CALL ERROR( 1 == 1, " IndependentOscillatorsModel.HessianIndepOscillatorsModel: standard bath not yet implemented" )
+
+      END IF
+
+   END SUBROUTINE HessianIndepOscillatorsModel
+
 
 
 ! ------------------------------------------------------------------------------------------------------------

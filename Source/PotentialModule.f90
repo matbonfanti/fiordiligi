@@ -7,6 +7,7 @@ MODULE PotentialModule
    PUBLIC :: SetupPotential, VHSticking, VHarmonic, VHFourDimensional, MinimizePotential
    PUBLIC :: ThermalEquilibriumConditions, ScatteringConditions, HarmonicConditions, ZeroKelvinSlabConditions
    PUBLIC :: CarbonForceConstant, GraphiteLatticeConstant
+   PUBLIC :: CollinearOnlyV, NonCollinearOnlyV
 
    !> Setup variable for the potential
    LOGICAL :: PotentialModuleIsSetup = .FALSE.
@@ -20,11 +21,15 @@ MODULE PotentialModule
    REAL, PUBLIC :: HZEquilibrium = 1.4811 / MyConsts_Bohr2Ang
    !> Energy of the minimum
    REAL, PUBLIC :: MinimumEnergy = 0.0000
+   !> H Z vibration frequency at the minimum
+   REAL, PUBLIC :: HZForceConst = 0.0000
 
    !> Max nr of iterations for potential optimization
    INTEGER, PARAMETER :: MaxIter = 10000
    !> Threshold for conjugate gradient convergence
    REAL, PARAMETER :: GradEps = 1.0E-4
+   !> Parameter for finite difference computation
+   REAL, PARAMETER :: Delta = 1.0E-4
 
 !> \name STICKING POTENTIAL
 !> Parameters of the 4D Potential for C-H
@@ -68,6 +73,7 @@ MODULE PotentialModule
          REAL, DIMENSION(124) :: Positions
          INTEGER :: iCoord
          REAL    :: Value
+         REAL, DIMENSION(size(Positions)) :: Gradient
 
          ! exit if module is setup
          IF ( PotentialModuleIsSetup ) RETURN
@@ -106,6 +112,17 @@ MODULE PotentialModule
          ! Store the carbon puckering and the H Z at equilibrium
          C1Puckering = Positions(4)
          HZEquilibrium = Positions(3)
+
+         ! HZFrequency initialization
+         HZForceConst = - 2. * MinimumEnergy
+         ! add displacement in +delta
+         Positions(3) = HZEquilibrium + Delta
+         HZForceConst = HZForceConst + VHSticking( Positions, Gradient )
+         ! add displacement in -delta
+         Positions(3) = HZEquilibrium - Delta
+         HZForceConst = HZForceConst + VHSticking( Positions, Gradient )
+         ! normalize force constant
+         HZForceConst = HZForceConst / Delta**2
 
 !       PRINT*, " "
 !       DO iBath = 1,8
@@ -476,6 +493,40 @@ MODULE PotentialModule
          END IF
 
       END FUNCTION VHFourDimensional
+
+!*******************************************************************************
+!> 4D adiabatic H-Graphene potential, only potential computation 
+!>
+!> @param Positions    Array with 3 cartesian coordinates for the H atom and 
+!>                     1 Z coordinates for the first carbon atoms (in au)
+!> @return V           output potential in atomic units
+!*******************************************************************************   
+      REAL FUNCTION NonCollinearOnlyV( Positions ) RESULT(V) 
+         IMPLICIT NONE
+         REAL, DIMENSION(:)  :: Positions
+         REAL, DIMENSION(124) :: Dummy
+
+         CALL ERROR( size(Positions) /= 4, " NonCollinearOnlyV: wrong nr of dofs " )
+         ! use the full potential with the carbon atoms in the equilibrium geometry
+         V = VHSticking( (/ Positions, MinSlab(:) /), Dummy(:) ) 
+      END FUNCTION NonCollinearOnlyV
+
+!*******************************************************************************
+!> 2D adiabatic H-Graphene potential, only potential computation 
+!>
+!> @param Positions    Array with 1 Z coordinate for the H atom and 
+!>                     1 Z coordinates for the first carbon atoms (in au)
+!> @return V           output potential in atomic units
+!*******************************************************************************   
+      REAL FUNCTION CollinearOnlyV( Positions ) RESULT(V) 
+         IMPLICIT NONE
+         REAL, DIMENSION(:)  :: Positions
+         REAL, DIMENSION(124) :: Dummy
+
+         CALL ERROR( size(Positions) /= 2, " CollinearOnlyV: wrong nr of dofs " )
+         ! use the full potential with the carbon atoms in the equilibrium geometry
+         V = VHSticking( (/ 0.0, 0.0, Positions, MinSlab(:) /), Dummy(:) ) 
+      END FUNCTION CollinearOnlyV
 
 !*******************************************************************************
 !> H-Graphene potential by Jackson and coworkers.

@@ -27,19 +27,20 @@ MODULE CommonData
    
    !> Variable to define which kind of calculation is required 
    INTEGER :: RunType
-   INTEGER, PARAMETER :: SCATTERING      = 1, &  ! Scattering calculation with H coming from gas-phase
-                         EQUILIBRIUM     = 2, &  ! Equilibrium calculation with H already adsorbed
-                         HARMONICMODEL   = 3, &  ! Test the parameters with a 1D harmonic langevin model 
-                         OSCIBATH_EQUIL  = 4, &  ! Equilibrium calculation with harmonic oscillator bath
-                         CHAINBATH_EQUIL = 5, &  ! Equilibrium calculation with HO bath in chain form
-                         RELAXATION      = 6, &  ! Relaxation dynamics of a CH bound state, with the bath at 0K
-                         OSCIBATH_RELAX  = 7, &  ! Relaxation dynamics of a CH bound state, with the bath at 0K
-                         CHAINBATH_RELAX = 8, &  ! Relaxation dynamics of a CH bound state, with the bath at 0K
-                         POTENTIALPRINT  = 10    ! Print cuts of the H-graphite potential 
+   INTEGER, PARAMETER :: SCATTERING      = 1,  & ! Scattering calculation with H coming from gas-phase
+                         EQUILIBRIUM     = 2,  & ! Equilibrium calculation with H already adsorbed
+                         HARMONICMODEL   = 3,  & ! Test the parameters with a 1D harmonic langevin model 
+                         OSCIBATH_EQUIL  = 4,  & ! Equilibrium calculation with harmonic oscillator bath
+                         CHAINBATH_EQUIL = 5,  & ! Equilibrium calculation with HO bath in chain form
+                         RELAXATION      = 6,  & ! Relaxation dynamics of a CH bound state, with the bath at 0K
+                         OSCIBATH_RELAX  = 7,  & ! Relaxation dynamics of a CH bound state, with the bath at 0K
+                         CHAINBATH_RELAX = 8,  & ! Relaxation dynamics of a CH bound state, with the bath at 0K
+                         POTENTIALPRINT  = 10, & ! Print cuts of the H-graphite potential 
+                         CHAINEIGEN      = 11    ! Compute eigenfrequencies of the chain potential 
 
    !> Variable to set the print level of the calculation
    INTEGER :: PrintType
-   INTEGER, PARAMETER :: EQUILIBRDBG = 5, &   ! fully detailed information about the equilibration
+   INTEGER, PARAMETER :: EQUILIBRDBG = 5, &   ! fully detailed information about the equilibration, or the initial conditions
                          DEBUG       = 4, &   ! fully detailed information about the trajs
                          FULL        = 3, &   ! files to plot the make animations, averages for each traj
                          CORRFUNCT   = 2, &   ! compute the full correlation function vs time 

@@ -18,9 +18,11 @@
 !
 !>  \par Updates
 !>  \arg 9 March 2013: diagonalization implemented with Numerical Recipes
+!>  \arg 9 September 2013: diagonalization implemented with LAPACK
 !
 !>  \todo          Implement diagonalization with LAPACK
 !>  \todo          Implement matrix inversion with Numerical Recipes
+!>  \todo          Implement computation of euler angles from rotation matrix
 !
 !***************************************************************************************
 !
@@ -36,9 +38,17 @@
 !>               Copyright (C) 1986-1996 by Cambridge University Press 
 !
 !***************************************************************************************
+
+#if !defined(WITH_LAPACK) 
+#warning "MyLinearAlgebra: LAPACK not available: using NR instead."
+#define WITH_NR
+#else
+#warning "MyLinearAlgebra: compiling with LAPACK libraries."
+#undef WITH_NR
+#endif
+
 MODULE MyLinearAlgebra
-   USE ErrorTrap
-   USE MyConsts
+#include "preprocessoptions.cpp"
 #if defined(WITH_NR)
    USE NRUtility
 #endif
@@ -75,7 +85,121 @@ MODULE MyLinearAlgebra
 
    END FUNCTION TheOneWithIdentityMatrix
 
-   
+
+!*******************************************************************************
+!          TheOneWithDiagonalMatrix
+!*******************************************************************************
+!> Function giving back a diagonal matrix with given diagonal elements
+!>
+!> @param      N   size of the output matrix 
+!> @param      Vector  diagonal elements
+!> @returns    Diagonal matrix of size N
+!*******************************************************************************
+   FUNCTION TheOneWithDiagonalMatrix( Vector, N ) RESULT( Matrix )
+      IMPLICIT NONE
+      INTEGER, INTENT(IN)  :: N
+      REAL, DIMENSION(N), INTENT(IN) :: Vector
+      REAL, DIMENSION(N,N)           :: Matrix
+      INTEGER :: i
+
+      ! initialize the matrix
+      Matrix = 0.0
+
+      ! set the diagonal element equal to 1
+      DO i=1,N
+         Matrix(i,i) = Vector(i)
+      END DO
+
+   END FUNCTION TheOneWithDiagonalMatrix
+
+
+!*******************************************************************************
+!          TheOneWithNMinus1SubMatrix
+!*******************************************************************************
+!> Remove the ith row and column from the input matrix, and gives back the 
+!> so defined submatrix.
+!>
+!> @param      N               size of the input matrix 
+!> @param      Matrix          input NxN matrix
+!> @param      IndexToRemove   index of the column/row to remove
+!> @returns    SubMatrix       square matrix of dimension N-1
+!*******************************************************************************
+   FUNCTION TheOneWithNMinus1SubMatrix( N, Matrix, IndexToRemove ) RESULT( SubMatrix )
+      IMPLICIT NONE
+      INTEGER, INTENT(IN)                :: N
+      REAL, DIMENSION(N,N), INTENT(IN)   :: Matrix
+      INTEGER, INTENT(IN)                :: IndexToRemove
+      REAL, DIMENSION(N-1,N-1)           :: SubMatrix
+      INTEGER :: i, j, iprime, jprime
+
+      iprime = 0
+      DO i = 1, N
+         IF ( i == IndexToRemove ) CYCLE
+         iprime = iprime + 1
+         jprime = 0
+         DO j = 1, N
+            IF ( j == IndexToRemove ) CYCLE
+            jprime = jprime + 1
+            SubMatrix( iprime, jprime ) = Matrix(i, j)
+         END DO
+      END DO
+
+   END FUNCTION TheOneWithNMinus1SubMatrix
+
+
+
+!*******************************************************************************
+!          TheOneWithTransposeMatrix
+!*******************************************************************************
+!> Function giving back the transpose matrix of a given real matrix of size N 
+!>
+!> @param      N   size of the output matrix 
+!> @returns    Identity matrix of size N
+!*******************************************************************************
+   FUNCTION TheOneWithTransposeMatrix( Matrix, N ) RESULT( TransposeM )
+      IMPLICIT NONE
+      INTEGER                            :: N
+      REAL, DIMENSION(N,N), INTENT(IN)   :: Matrix
+      REAL, DIMENSION(N,N)               :: TransposeM
+      INTEGER :: i, j
+
+      ! transpose matrix
+      DO i = 1, N
+         DO j = 1, N
+            TransposeM(i,j) = Matrix(j,i)
+         END DO
+      END DO
+
+   END FUNCTION TheOneWithTransposeMatrix   
+
+
+!*******************************************************************************
+!          TheOneWithOverlapMatrix
+!*******************************************************************************
+!> Function giving back the overlap matrix of a given real matrix of size N 
+!> the overlap matrix is defined as O_{ij} = SUM_{k} M_{ik} M_{jk} 
+!>
+!> @param      N         size of the input matrix
+!> @param      Matrix    input matrix
+!> @returns    Overlap   overlap matrix
+!*******************************************************************************
+   FUNCTION TheOneWithOverlapMatrix( Matrix, N ) RESULT( Overlap )
+      IMPLICIT NONE
+      INTEGER                            :: N
+      REAL, DIMENSION(N,N), INTENT(IN)   :: Matrix
+      REAL, DIMENSION(N,N)               :: Overlap
+      INTEGER :: i, j
+
+      ! overlap matrix
+      DO i = 1, N
+         DO j = 1, N
+            Overlap(i, j) = TheOneWithVectorDotVector( Matrix(i,:), Matrix(j,:) )
+         END DO
+      END DO
+
+   END FUNCTION TheOneWithOverlapMatrix   
+
+
 !*******************************************************************************
 !          TheOneWithInverseMatrix
 !*******************************************************************************
@@ -101,6 +225,7 @@ MODULE MyLinearAlgebra
       REAL, DIMENSION( N, N )                       :: Mat
       INTEGER( SHORT_INTEGER_KIND ), DIMENSION( N ) :: Pivot
       CHARACTER(100)                                :: ErrMsg
+      REAL, DIMENSION( N*N )                        :: Work
 #endif
 
       ! Check and define the dimension of the matrices
@@ -114,26 +239,67 @@ MODULE MyLinearAlgebra
       Mat = Matrix
       ! Define the dimension in a lapack compatible integer kind
       DimShort = N
+      Stat = 0
+
+!     DGETRF computes an LU factorization of a general M-by-N matrix A
+!     using partial pivoting with row interchanges.
 
       ! Check kind of real data
       IF ( KIND( Mat(1,1) ) == SINGLE_PRECISION_KIND ) THEN
-            ! use lapack routine (single precision, general matrix, linear system solution )
-            CALL SGESV( DimShort, DimShort, Mat, DimShort, Pivot, Inverse, DimShort, Stat )
-            
+            ! use lapack routine (single precision, LU factorization )
+            CALL SGETRF( N, N, Mat, N, Pivot, Stat )
       ELSE IF ( KIND( Mat(1,1) ) == DOUBLE_PRECISION_KIND ) THEN
-            ! use lapack routine (double precision, general matrix, linear system solution )
-            CALL DGESV( DimShort, DimShort, Mat, DimShort, Pivot, Inverse, DimShort, Stat )
+            ! use lapack routine (double precision, LU factorization )
+            CALL DGETRF( N, N, Mat, N, Pivot, Stat )
       END IF
 
-      ! chech if result is correctly computed
       IF ( Stat < 0 ) THEN
-         WRITE(ErrMsg, *) " TheOneWithInverseMatrix: The argument ", -Stat, " had an illegal value."
+         WRITE(ErrMsg, *) " TheOneWithInverseMatrix: LU decomposition - illegal value."
          CALL AbortWithError( ErrMsg )
       END IF
       IF ( Stat > 0 ) THEN
-         WRITE(ErrMsg, *) " TheOneWithInverseMatrix: The factor U is exactly singular, so the solution could not be computed."
+         WRITE(ErrMsg, *) " TheOneWithInverseMatrix: LU decomposition - U(",Stat,",",Stat,") = 0 "
+         CALL AbortWithError( ErrMsg )
+      ENDIF
+
+!     DGETRI computes the inverse of a matrix using the LU factorization
+!     computed by DGETRF.
+
+      ! Check kind of real data
+      IF ( KIND( Mat(1,1) ) == SINGLE_PRECISION_KIND ) THEN
+            ! use lapack routine (single precision, matrix inversion )
+            CALL SGETRI(N, Mat, N, Pivot, Work, N*N, Stat)
+      ELSE IF ( KIND( Mat(1,1) ) == DOUBLE_PRECISION_KIND ) THEN
+            ! use lapack routine (double precision, matrix inversion )
+            CALL DGETRI(N, Mat, N, Pivot, Work, N*N, Stat)
+      END IF
+
+      IF ( Stat /= 0 ) THEN
+         WRITE(ErrMsg, *) " TheOneWithInverseMatrix: Matrix inversion failed "
          CALL AbortWithError( ErrMsg )
       END IF
+
+      Inverse = Mat
+! 
+!       ! Check kind of real data
+!       IF ( KIND( Mat(1,1) ) == SINGLE_PRECISION_KIND ) THEN
+!             ! use lapack routine (single precision, general matrix, linear system solution )
+!             CALL SGESV( DimShort, DimShort, Mat, DimShort, Pivot, Inverse, DimShort, Stat )
+!             
+!       ELSE IF ( KIND( Mat(1,1) ) == DOUBLE_PRECISION_KIND ) THEN
+!             ! use lapack routine (double precision, general matrix, linear system solution )
+!             CALL DGESV( DimShort, DimShort, Mat, DimShort, Pivot, Inverse, DimShort, Stat )
+!       END IF
+! 
+!       ! chech if result is correctly computed
+!       IF ( Stat < 0 ) THEN
+!          WRITE(ErrMsg, *) " TheOneWithInverseMatrix: The argument ", -Stat, " had an illegal value."
+!          CALL AbortWithError( ErrMsg )
+!       END IF
+!       IF ( Stat > 0 ) THEN
+!          WRITE(ErrMsg, *) " TheOneWithInverseMatrix: The factor U is exactly singular, so the solution could not be computed."
+!          CALL AbortWithError( ErrMsg )
+!       END IF
 #endif
 #if !defined(WITH_LAPACK)
       CALL AbortWithError( " TheOneWithInverseMatrix: Matrix inversion implemented only with LAPACK ")
@@ -328,7 +494,16 @@ MODULE MyLinearAlgebra
       REAL, DIMENSION(:,:), INTENT(IN)  :: Matrix
       REAL, DIMENSION(:,:), INTENT(OUT) :: EigenVectors
       REAL, DIMENSION(:), INTENT(OUT)   :: EigenValues
+#if defined(WITH_LAPACK)
+      REAL, DIMENSION(:), ALLOCATABLE   :: Workspace
+      REAL, DIMENSION(1)                :: OptDim
+      INTEGER( SHORT_INTEGER_KIND )     :: NShort, Stat, LWork
+      INTEGER                           :: StatLong
+      CHARACTER(300)                    :: ErrMsg
+#endif
+#if defined(WITH_NR)
       REAL, DIMENSION(:), ALLOCATABLE   :: OffDiagonal
+#endif
       INTEGER  :: N
       
       ! Check and define the dimension of the matrices
@@ -337,7 +512,37 @@ MODULE MyLinearAlgebra
       CALL ERROR( size(EigenVectors,1) /= N , " TheOneWithDiagonalization: eigenvector matrix mismatch (1) ")
       CALL ERROR( size(EigenVectors,2) /= N , " TheOneWithDiagonalization: eigenvector matrix mismatch (2) ")
       CALL ERROR( size(EigenValues) /= N , " TheOneWithDiagonalization: eigenvalues vector mismatch ")
-      
+
+#if defined(WITH_LAPACK)
+      EigenVectors = Matrix
+      LWork = -1
+      NShort = N
+      IF ( KIND( Matrix(1,1) ) == SINGLE_PRECISION_KIND ) THEN
+            CALL SSYEV( 'Vectors', 'Upper', NShort, EigenVectors, NShort, EigenValues, OptDim, LWork, Stat )
+            LWork = INT( OptDim(1) )
+            ALLOCATE( Workspace( LWork ) )
+            CALL SSYEV( 'Vectors', 'Upper', NShort, EigenVectors, NShort, EigenValues, Workspace, LWork, Stat )
+      ELSE IF ( KIND( Matrix(1,1) ) == DOUBLE_PRECISION_KIND ) THEN
+            CALL DSYEV( 'Vectors', 'Upper', NShort, EigenVectors, NShort, EigenValues, OptDim, LWork, Stat )
+            LWork = INT( OptDim(1) )
+            ALLOCATE( Workspace( LWork ) )
+            CALL DSYEV( 'Vectors', 'Upper', NShort, EigenVectors, NShort, EigenValues, Workspace, LWork, Stat )
+      END IF
+
+      StatLong = Stat
+      IF ( StatLong < 0 ) THEN
+         WRITE(ErrMsg, *) " TheOneWithDiagonalization: the ",-StatLong,"-th argument had an illegal value."
+         CALL AbortWithError( ErrMsg )
+      END IF
+      IF ( StatLong > 0 ) THEN
+         WRITE(ErrMsg, "(A,I7,A)") " TheOneWithDiagonalization: the algorithm failed to converge; ",StatLong, &
+                " off-diagonal elements of an intermediate tridiagonal form did not converge to zero."
+         CALL ShowWarning( ErrMsg )
+      ENDIF
+      DEALLOCATE( Workspace )
+
+#endif
+#if !defined(WITH_LAPACK)
 #if defined(WITH_NR)
       ALLOCATE( OffDiagonal(N) )
 
@@ -350,9 +555,173 @@ MODULE MyLinearAlgebra
 #if !defined(WITH_NR)
       CALL AbortWithError( " TheOneWithDiagonalization: Matrix diagonalization implemented only with NR ")
 #endif
+#endif
 
    END SUBROUTINE TheOneWithDiagonalization
+
+!*******************************************************************************
+!          TheOneWithRankAnalysis
+!*******************************************************************************
+!> 
+!>
+!> @param    Matrix         N x N  real symmetric matrix.
+!> 
+!> 
+!*******************************************************************************
+   SUBROUTINE TheOneWithRankAnalysis(Matrix, Eps)
+      IMPLICIT NONE
+      REAL, DIMENSION(:,:), INTENT(IN)  :: Matrix
+      REAL, INTENT(IN)  :: Eps
+      INTEGER :: NrZeroEigen
+
+      REAL, DIMENSION(size(Matrix,1),size(Matrix,1)) :: EigenVectors, Overlap
+      REAL, DIMENSION(size(Matrix,1))  :: EigenValues
+      REAL, DIMENSION(size(Matrix,1)-1, size(Matrix,1)-1 ) :: ReducedBasis
+      INTEGER  :: N, i, NrZeroEigenSubMatrix, j, l,m
+
+      ! Check and define the dimension of the matrices
+      N = size(Matrix,1)
+      CALL ERROR( size(Matrix,2) /= N , " TheOneWithDiagonalization: input matrix is not square ")
+
+      ! Count nr of eigenvalues which are less than EPS
+      Overlap = TheOneWithOverlapMatrix( Matrix, N )
+
+      CALL TheOneWithDiagonalization(Overlap,EigenVectors,EigenValues)
+      NrZeroEigen = 0
+      WRITE(800,*) " "
+      DO i = 1, N
+         IF ( EigenValues(i) < Eps ) NrZeroEigen = NrZeroEigen + 1
+         IF ( EigenValues(i) < Eps ) WRITE(800,*) " eigen ",i,"    value ", EigenValues(i)
+      END DO
+      WRITE(800,*) " NR ZERO EIGEN = ",NrZeroEigen
+      WRITE(800,*) " "
+
+      ! Exit from the subroutine if there are no zero eigenvalues
+      IF (NrZeroEigen == 0) RETURN
+
+      DO j = 1, N
+
+!          WRITE(800,*) " removing column ", j
+         ReducedBasis =  TheOneWithNMinus1SubMatrix( N, Matrix, j )
+         Overlap(1:N-1,1:N-1) = TheOneWithOverlapMatrix( ReducedBasis, N-1 )
+         
+         ! Diagonalize overlap of N-1 matrices obtained removing nth ROW and nth COLUMN
+         CALL TheOneWithDiagonalization( Overlap(1:N-1,1:N-1), EigenVectors(1:N-1,1:N-1), EigenValues(1:N-1) )
+
+         ! Count nr of eigenvalues which are less than EPS
+         NrZeroEigenSubMatrix = 0
+         DO i = 1, N
+            IF ( EigenValues(i) < Eps ) NrZeroEigenSubMatrix = NrZeroEigenSubMatrix + 1
+!             IF ( EigenValues(i) < Eps ) WRITE(800,*) " eigen ",i,"    value ", EigenValues(i)
+         END DO
+!          WRITE(800,*) " NR ZERO EIGEN = ",NrZeroEigenSubMatrix
+
+         ! If the nr of zero eigenvalues is less than before, ...
+         IF ( NrZeroEigenSubMatrix < NrZeroEigen ) WRITE(800,*) " LINEAR DEPENDENCE i = ",j
+
+      END DO
+         
+
+   END SUBROUTINE TheOneWithRankAnalysis
+
    
+!*******************************************************************************
+!          TheOneWithEulerRotation
+!*******************************************************************************
+!> Compute the rotation corresponding to given Euler angles \n
+!> Use the ZYZ convention, right-handed rotations. \n
+!> \see http://en.wikipedia.org/wiki/Euler_angles
+!>
+!>  @param    Alpha            First Euler angle Alpha
+!>  @param    Beta             Second Euler angle Beta
+!>  @param    Gamma            Third Euler angle Gamma
+!>  @return   3x3 real array   Unitary matrix expressing the rotation in cartesian coords
+!*******************************************************************************
+   FUNCTION TheOneWithEulerRotation( Alpha, Beta, Gamma ) RESULT( Rotation )
+      IMPLICIT NONE
+      REAL, INTENT(IN)  :: Alpha, Beta, Gamma
+      REAL, DIMENSION(3,3)  :: Rotation
+
+      REAL, DIMENSION(3,3) :: R1, R2, R3
+
+      ! represent euler rotation as composition of alpha beta gamma rotation in ZYZ
+      ! with rigid frame
+
+      ! rotation along Z of angle alpha
+      R1(1,:) = (/ COS( Alpha ), -SIN( Alpha ), 0.0          /) 
+      R1(2,:) = (/ SIN( Alpha ),  COS( Alpha ), 0.0          /) 
+      R1(3,:) = (/ 0.0         ,  0.0         , 1.0          /) 
+
+      ! rotation along Y of angle beta
+      R2(1,:) = (/ COS( Beta  ) ,  0.0         , SIN( Beta )  /) 
+      R2(2,:) = (/ 0.0          ,  1.0         , 0.0          /) 
+      R2(3,:) = (/ -SIN( Beta  ),  0.0         , COS( Beta  ) /) 
+
+      ! rotation along Z of angle gamma
+      R3(1,:) = (/ COS( Gamma ), -SIN( Gamma ), 0.0          /) 
+      R3(2,:) = (/ SIN( Gamma ),  COS( Gamma ), 0.0          /) 
+      R3(3,:) = (/ 0.0         ,  0.0         , 1.0          /) 
+
+      ! compose alpha, gamma and beta rotation
+      Rotation = TheOneWithMatrixMultiplication( R1, TheOneWithMatrixMultiplication( R2, R3 ) )
+
+   END FUNCTION TheOneWithEulerRotation
+   
+
+
+! ## Compute the Euler angles corresponding to a given rotation ( http://en.wikipedia.org/wiki/Euler_angles )
+! #  @param Rotation 3x3 matrix defining a rotation of the space
+! #  @return a list with the three parameters alpha, beta, gamma
+! def EulerAngles( Rotation ):
+! 
+!             z3 = Rotation[2,2]
+! 
+!             # check if beta is equal to 0 or pi
+!             if ( z3 == 1.0 ):
+! 
+!                x = Rotation[0,0]
+!                y = Rotation[1,0]
+! 
+!                # beta is zero
+!                beta = 0.0
+!                # fix gamma = 0
+!                gamma = 0.0
+!                # compute alpha
+!                alpha = math.atan2( y , x )
+! 
+!             elif ( z3 == -1.0 ):
+! 
+!                x = -Rotation[0,0]
+!                y = -Rotation[1,0]
+! 
+!                # beta is pi
+!                beta = math.pi
+!                # fix gamma = 0
+!                gamma = 0.0
+!                # compute alpha
+!                alpha = math.atan2( y , x )
+! 
+!             else:
+! 
+!                # compute proj of z along plane
+!                senbeta = math.sqrt( 1.0 - z3**2 )
+! 
+!                salpha = -Rotation[1,2]/senbeta
+!                calpha = -Rotation[0,2]/senbeta
+!                sgamma = -Rotation[2,1]/senbeta
+!                cgamma = -Rotation[2,0]/senbeta
+! 
+!                # compute beta angle
+!                beta = math.acos( z3 )
+!                # compute alpha
+!                alpha = math.atan2( salpha , calpha )
+!                # compute gamma
+!                gamma = math.atan2( sgamma, cgamma )
+! 
+!             return [ alpha, beta, gamma ]
+
+
+
 #if defined(WITH_NR)
 !* * * * * * * * * * * * * * * * * NR SUBROUTINE * * * * * * * * * * * * * * * * * * * *
 !* The following subroutines are taken from NR for FORTRAN 90/95
