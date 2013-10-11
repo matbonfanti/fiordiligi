@@ -6,17 +6,17 @@
 #----------------------------------------------------------------------------
 
 # Executable name
-EXENAME = JK6_v2
+EXENAME = JK6_v3
 
 # Print relevant output to log file
 LOGFILE = yes
-LOGNAME = jk6_v2.log
+LOGNAME = jk6_v3.log
 
 # Compiler ( gfortran, ifort )
 FC = ifort      
 
 # Debugging options ( yes or no )
-DEBUG = no 
+DEBUG = yes
 
 # Optimization level
 OPTLEVEL = 3
@@ -190,7 +190,8 @@ EXEDIR  = Executables
 
 # Define list of object from the list of all f90 files in the directory
 OBJSWITHMAIN =$(patsubst Source/%,Objects/%,$(patsubst %.f90,%.o,$(wildcard ${SRCDIR}/*.f90)))
-OBJS =$(patsubst %/Main.o,,${OBJSWITHMAIN})
+OBJS2 =$(patsubst %/Main.o,,${OBJSWITHMAIN})
+OBJS =$(patsubst %/Main_v3.o,,${OBJS2})
 
 #----------------------------------------------------------------------------
 #       Construct the compile, link, preprocess variables.
@@ -212,8 +213,15 @@ AR 			= ar cr
 #                       START OF MAKE RULES
 #----------------------------------------------------------------------------
 
-# Link objects to the produce the executable file 
-${EXENAME} : ${SRCDIR}/Main.f90 ${OBJS} 
+# Link objects to the produce the executable file ( JK_v3 )
+${EXENAME} : ${SRCDIR}/Main_v3.f90 ${OBJS} 
+	${PREPROCESS} ${SRCDIR}/Main_v3.f90 ${PPDIR}/Main_v3.f90
+	${COMPILE} ${PPDIR}/Main_v3.f90
+	${LINK} ${EXEDIR}/$@ Main_v3.o $(OBJS) ${LIBFLG}
+	rm Main_v3.o
+
+# Link objects to the produce the executable file ( JK_v2 )
+JK6_v2 : ${SRCDIR}/Main.f90 ${OBJS} 
 	${PREPROCESS} ${SRCDIR}/Main.f90 ${PPDIR}/Main.f90
 	${COMPILE} ${PPDIR}/Main.f90
 	${LINK} ${EXEDIR}/$@ Main.o $(OBJS) ${LIBFLG}
@@ -251,7 +259,22 @@ clean-doc :
 # --------------------------------------------------------------------------------------------
 
 # Very basic files, which everything depends on
-COMMONDEP = Makefile ${OBJDIR}/ErrorTrap.o  ${OBJDIR}/MyConsts.o
+COMMONDEP = Makefile ${OBJDIR}/ErrorTrap.o  ${OBJDIR}/MyConsts.o ${OBJDIR}/MyLinearAlgebra.o
+
+# Program to simulate the vibrational relaxation
+${OBJDIR}/VibrationalRelax.o : ${SRCDIR}/VibrationalRelax.f90 ${OBJDIR}/SharedData.o ${OBJDIR}/InputField.o \
+                               ${OBJDIR}/ClassicalEqMotion.o ${OBJDIR}/PotentialModule.o ${OBJDIR}/IndependentOscillatorsModel.o \
+                               ${OBJDIR}/RandomNumberGenerator.o ${COMMONDEP}
+
+# Program to simulate the vibrational relaxation
+${OBJDIR}/ThermalEquilibrium.o : ${SRCDIR}/VibrationalRelax.f90 ${OBJDIR}/SharedData.o ${OBJDIR}/InputField.o \
+                                 ${OBJDIR}/ClassicalEqMotion.o ${OBJDIR}/PotentialModule.o ${OBJDIR}/IndependentOscillatorsModel.o \
+                                 ${OBJDIR}/RandomNumberGenerator.o ${COMMONDEP}
+
+# Program to simulate the vibrational relaxation
+${OBJDIR}/Harmonic1DModel.o : ${SRCDIR}/Harmonic1DModel.f90 ${OBJDIR}/SharedData.o ${OBJDIR}/InputField.o \
+                              ${OBJDIR}/ClassicalEqMotion.o ${OBJDIR}/IndependentOscillatorsModel.o \
+                              ${OBJDIR}/RandomNumberGenerator.o ${COMMONDEP}
 
 # Set error and warning procedures
 ${OBJDIR}/ErrorTrap.o        : ${SRCDIR}/ErrorTrap.f90
@@ -262,11 +285,14 @@ ${OBJDIR}/MyConsts.o         : ${SRCDIR}/MyConsts.f90 ${OBJDIR}/ErrorTrap.o
 # Set procedure for reading quasi-free format input file
 ${OBJDIR}/InputField.o       : ${SRCDIR}/InputField.f90 ${COMMONDEP}
 
-# Module containing the common data
+# Module containing the common data (v2)
 ${OBJDIR}/CommonData.o       : ${SRCDIR}/CommonData.f90 ${COMMONDEP}
 
+# Module containing the common data (v3)
+${OBJDIR}/SharedData.o       : ${SRCDIR}/SharedData.f90 ${COMMONDEP}
+
 # Module containing the potential energy surface
-${OBJDIR}/PotentialModule.o  : ${SRCDIR}/PotentialModule.f90 ${OBJDIR}/CommonData.o ${COMMONDEP}
+${OBJDIR}/PotentialModule.o  : ${SRCDIR}/PotentialModule.f90 ${OBJDIR}/RandomNumberGenerator.o ${COMMONDEP}
 
 # Module containing the random number generator
 ${OBJDIR}/RandomNumberGenerator.o  : ${SRCDIR}/RandomNumberGenerator.f90 ${COMMONDEP}
@@ -289,4 +315,5 @@ ${OBJDIR}/MyLinearAlgebra.o : ${SRCDIR}/MyLinearAlgebra.f90 ${OBJDIR}/NRUtility.
 
 # Derivatives with finite difference methods
 ${OBJDIR}/DifferenceDerivatives.o : ${SRCDIR}/DifferenceDerivatives.f90 ${COMMONDEP}
+
 

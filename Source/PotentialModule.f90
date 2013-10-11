@@ -4,10 +4,9 @@ MODULE PotentialModule
    USE RandomNumberGenerator
 
    PRIVATE
-   PUBLIC :: SetupPotential, VHSticking, VHarmonic, VHFourDimensional, MinimizePotential
-   PUBLIC :: ThermalEquilibriumConditions, ScatteringConditions, HarmonicConditions, ZeroKelvinSlabConditions
+   PUBLIC :: SetupPotential, VHSticking, VHFourDimensional, MinimizePotential
+   PUBLIC :: ThermalEquilibriumConditions, ScatteringConditions, ZeroKelvinSlabConditions
    PUBLIC :: CarbonForceConstant, GraphiteLatticeConstant
-   PUBLIC :: CollinearOnlyV, NonCollinearOnlyV
 
    !> Setup variable for the potential
    LOGICAL :: PotentialModuleIsSetup = .FALSE.
@@ -247,7 +246,6 @@ MODULE PotentialModule
 
 ! ************************************************************************************
 
-
       ! Setup initial conditions for the scattering of H atom on a thermalized C slab
       ! data are initialized in ATOMIC UNITS
       SUBROUTINE ScatteringConditions( Positions, Velocities, ImpactParam, InitZ, IncEnergy, Temperature, MassHydro, MassCarb )
@@ -316,33 +314,6 @@ MODULE PotentialModule
 
 ! ************************************************************************************
 
-
-      ! Setup initial conditions for the harmonic potential
-      ! data are initialized in ATOMIC UNITS
-      SUBROUTINE HarmonicConditions( Positions, Velocities )
-         IMPLICIT NONE
-
-         REAL, DIMENSION(:), INTENT(OUT) :: Positions, Velocities
-         INTEGER           :: NDoF
-
-         ! Check the number of non frozen degree of freedom
-         NDoF = size( Positions )
-         CALL ERROR( size(Velocities) /= NDoF, "PotentialModule.HarmonicConditions: array dimension mismatch" )
-
-         ! Check if the nr of dimension is compatible with the slab maximum size
-         CALL ERROR(  (NDoF < 1), "PotentialModule.HarmonicConditions: wrong number of DoFs" )
-            
-         ! Equilibrium position of H atom
-         Positions(:) = 0.0
-         Velocities(:) = 0.0
-
-
-      END SUBROUTINE HarmonicConditions
-
-
-! ************************************************************************************
-
-
       REAL FUNCTION GraphiteLatticeConstant()
          IMPLICIT NONE
 
@@ -353,9 +324,7 @@ MODULE PotentialModule
 
       END FUNCTION GraphiteLatticeConstant
 
-
 ! ******************************************************************************************      
-
 
       REAL FUNCTION CarbonForceConstant()
          IMPLICIT NONE
@@ -366,7 +335,6 @@ MODULE PotentialModule
          CarbonForceConstant = rkc * (MyConsts_Bohr2Ang)**2 / MyConsts_Hartree2eV
 
       END FUNCTION CarbonForceConstant
-
 
 ! ******************************************************************************************      
 
@@ -392,10 +360,6 @@ MODULE PotentialModule
 
             ! compute negative of the gradient
             Pot = VHSticking( Coords, Gradient )
-!             print*, Pot
-!             print*, Gradient
-!             Gradient(:) = - Gradient(:)
-!             print*, Gradient
 
             ! compute norm of the gradient
             Norm = 0.0
@@ -405,7 +369,6 @@ MODULE PotentialModule
                END IF
             END DO
             Norm = SQRT( Norm / NrOptimization )
-!             IF ( mod(iIter,1000) == 0 ) print*, "Iteration ",iIter, "    norm ",Norm
 
             ! check convergence
             IF (Norm < GradEps) EXIT
@@ -418,54 +381,13 @@ MODULE PotentialModule
             END DO
 
          END DO
-!          PRINT*, "Convergence in ", iIter, " steps"
-         IF ( iIter == MaxIter ) PRINT*, " NOT CONVERGED !!!!!"
+
+#if defined(VERBOSE_OUTPUT)
+         WRITE(*,"(/,A,I6,A)") "Convergence in ", iIter, " steps"
+#endif
+         CALL WARN( iIter == MaxIter, "PotentialModule. MinimizePotential: convergence not reached" )
 
       END FUNCTION MinimizePotential
-
-
-!*******************************************************************************
-!> test harmonic potential (input and output in AU).
-!>
-!> @param Positions    Array with 3 cartesian coordinates for the H atom and 
-!>                     121 Z coordinates for the carbon atoms (in au)
-!> @param Forces       Output array with the derivatives of the potential (in au)
-!> @param vv           output potential in atomic units
-!*******************************************************************************     
-      REAL FUNCTION VHarmonic( Positions, Forces )
-         IMPLICIT NONE
-
-         REAL, DIMENSION(:), TARGET, INTENT(IN)  :: Positions
-         REAL, DIMENSION(:), TARGET, INTENT(OUT) :: Forces 
-
-         ! Number of non frozen degrees of freedom
-         INTEGER :: NrNonFrozen, i       
-
-         ! Force constants
-         REAL :: ForceConstant
-         
-         ! Error if module not have been setup yet
-         CALL ERROR( .NOT. PotentialModuleIsSetup, "PotentialModule.VHarmonic : Module not Setup" )
-
-         ! Check the number of non frozen degree of freedom
-         NrNonFrozen = size( Positions )
-         CALL ERROR( size(Forces) /= NrNonFrozen, "PotentialModule.VHarmonic: array dimension mismatch" )
-
-         ! Check if the nr of dimension is compatible with the slab maximum size
-         CALL ERROR( (NrNonFrozen < 1), "PotentialModule.VHarmonic: wrong number of DoFs" )
-         
-         ! Setup force constants of harmonic potentials
-!         ForceConstant = 1.00782503207*MyConsts_Uma2Au * (MyConsts_PI*2./(100.*MyConsts_fs2AU))**2 
-         ForceConstant = 1.00782503207*MyConsts_Uma2Au * ( 0.484969 / MyConsts_fs2AU )**2 
-
-         ! Compute potential and forces
-         VHarmonic = 0.0
-         DO i = 1, NrNonFrozen
-            VHarmonic = VHarmonic + 0.5 * ForceConstant * Positions(i)**2
-            Forces(i) = -  ForceConstant * Positions(i)
-         END DO
-         
-      END FUNCTION VHarmonic
 
 
 ! ******************************************************************************************      
@@ -494,39 +416,6 @@ MODULE PotentialModule
 
       END FUNCTION VHFourDimensional
 
-!*******************************************************************************
-!> 4D adiabatic H-Graphene potential, only potential computation 
-!>
-!> @param Positions    Array with 3 cartesian coordinates for the H atom and 
-!>                     1 Z coordinates for the first carbon atoms (in au)
-!> @return V           output potential in atomic units
-!*******************************************************************************   
-      REAL FUNCTION NonCollinearOnlyV( Positions ) RESULT(V) 
-         IMPLICIT NONE
-         REAL, DIMENSION(:)  :: Positions
-         REAL, DIMENSION(124) :: Dummy
-
-         CALL ERROR( size(Positions) /= 4, " NonCollinearOnlyV: wrong nr of dofs " )
-         ! use the full potential with the carbon atoms in the equilibrium geometry
-         V = VHSticking( (/ Positions, MinSlab(:) /), Dummy(:) ) 
-      END FUNCTION NonCollinearOnlyV
-
-!*******************************************************************************
-!> 2D adiabatic H-Graphene potential, only potential computation 
-!>
-!> @param Positions    Array with 1 Z coordinate for the H atom and 
-!>                     1 Z coordinates for the first carbon atoms (in au)
-!> @return V           output potential in atomic units
-!*******************************************************************************   
-      REAL FUNCTION CollinearOnlyV( Positions ) RESULT(V) 
-         IMPLICIT NONE
-         REAL, DIMENSION(:)  :: Positions
-         REAL, DIMENSION(124) :: Dummy
-
-         CALL ERROR( size(Positions) /= 2, " CollinearOnlyV: wrong nr of dofs " )
-         ! use the full potential with the carbon atoms in the equilibrium geometry
-         V = VHSticking( (/ 0.0, 0.0, Positions, MinSlab(:) /), Dummy(:) ) 
-      END FUNCTION CollinearOnlyV
 
 !*******************************************************************************
 !> H-Graphene potential by Jackson and coworkers.

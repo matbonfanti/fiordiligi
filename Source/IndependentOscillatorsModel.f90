@@ -42,12 +42,12 @@ MODULE IndependentOscillatorsModel
 
    PRIVATE
    PUBLIC :: SetupIndepOscillatorsModel, PotentialIndepOscillatorsModel, DisposeIndepOscillatorsModel
-   PUBLIC :: ZeroKelvinBathConditions, InitialBathConditions
+   PUBLIC :: ZeroKelvinBathConditions, InitialBathConditions, GenericSystemAndBath
    PUBLIC :: CouplingEnergy, PotEnergyOfTheBath, GetDistorsionForce, FirstEffectiveMode
    PUBLIC :: HessianIndepOscillatorsModel
 
-   INTEGER, PARAMETER, PUBLIC :: STANDARD_BATH = 0        ! < normal bath, in which all the oscillators are coupled to the system
-   INTEGER, PARAMETER, PUBLIC :: CHAIN_BATH    = 1        ! < chain bath, in which all the oscillators are coupled in chain
+   INTEGER, PARAMETER :: STANDARD_BATH = 0        ! < normal bath, in which all the oscillators are coupled to the system
+   INTEGER, PARAMETER :: CHAIN_BATH    = 1        ! < chain bath, in which all the oscillators are coupled in chain
     
    ! > Integer parameter to store the bath type (chain, standard ... )
    INTEGER :: BathType 
@@ -93,7 +93,7 @@ CONTAINS
       INTEGER, INTENT(IN)        :: SetBathType
       CHARACTER(*), INTENT(IN)   :: FileName
       REAL, INTENT(IN)           :: Mass
-      REAL, OPTIONAL, INTENT(IN) :: CutOffFreq
+      REAL, INTENT(IN)           :: CutOffFreq
 
       INTEGER :: InpUnit, RdStatus
       INTEGER :: iBath, NData
@@ -136,7 +136,7 @@ CONTAINS
                READ(InpUnit,*, IOSTAT=RdStatus) Frequencies(iBath), Couplings(iBath)
                ! if data is missing, a rubin continuation of the chain is assumed 
                IF ( RdStatus /= 0 ) THEN
-                  IF ( PRESENT( CutOffFreq )) THEN
+                  IF ( CutOffFreq > 0.0 ) THEN
                      Frequencies(iBath) = CutOffFreq / SQRT(2.)
                      Couplings(iBath) = 0.4999 * Frequencies(iBath)**2
                   ELSE 
@@ -179,7 +179,7 @@ CONTAINS
             CLOSE( InpUnit )
 
             ! Set cutoff frequency
-            IF ( PRESENT( CutOffFreq )) THEN
+            IF ( CutOffFreq > 0.0 ) THEN
                CutOff = CutOffFreq               ! if is given from input
             ELSE 
                CutOff = RdSpectralDens( NData )  ! otherwise is the last freq in the input file
@@ -316,6 +316,93 @@ CONTAINS
 ! ------------------------------------------------------------------------------------------------------------
 
 !*******************************************************************************
+!> Generic subroutine for computing potential and its derivative of a system
+!> bilinearly coupled to a bath. The coupling coordinate should be the last degree
+!> of freedom of the system potential.
+!>
+!> @param  Positions    Array with the cartesian coordinates for the system and the bath 
+!> @param  Forces       Output array with the derivatives of the potential (in au)
+!> @param  NSystem      Nr of coordinates of the system
+!> @result V            output potential in atomic units
+!*******************************************************************************     
+      REAL FUNCTION GenericSystemAndBath( Positions, Forces, SystemV, NSystem ) RESULT(V) 
+         IMPLICIT NONE
+
+         REAL, DIMENSION(:), TARGET, INTENT(IN)  :: Positions
+         REAL, DIMENSION(:), TARGET, INTENT(OUT) :: Forces 
+         INTERFACE
+            REAL FUNCTION SystemV( X, Force )
+               REAL, DIMENSION(:), TARGET, INTENT(IN)  :: X
+               REAL, DIMENSION(:), TARGET, INTENT(OUT) :: Force
+            END FUNCTION SystemV
+         END INTERFACE
+         INTEGER, INTENT(IN)                     :: NSystem
+
+         INTEGER :: IBath
+         REAL    :: Coupl, CouplCoord
+         REAL, DIMENSION(:), POINTER :: Qbath, Dn
+         REAL, POINTER :: D0
+
+         ! Check if the bath is setup
+         CALL ERROR( .NOT. BathIsSetup, "IndependentOscillatorsModel.GenericSystemAndBath: bath is not setup" )
+
+         ! Check the size of the position and forces arrays
+         CALL ERROR( size(Positions) /= size(Forces), &
+                        "IndependentOscillatorsModel.GenericSystemAndBath: array dimension mismatch" )
+         CALL ERROR( size(Positions) /= BathSize+NSystem, &
+                        "IndependentOscillatorsModel.GenericSystemAndBath: wrong bath size" )
+
+         V = 0.0
+         Forces(:) = 0.0
+
+         ! 4D POTENTIAL OF THE SYSTEM
+         V = SystemV( Positions(1:NSystem), Forces(1:NSystem) ) 
+
+         IF ( BathType == CHAIN_BATH ) THEN
+
+               CouplCoord = Positions(NSystem)
+               Qbath => Positions(NSystem+1:NSystem+BathSize)
+               D0 => Couplings(1)
+               Dn => Couplings(2:BathSize)
+
+               ! POTENTIAL OF THE BATH OSCILLATORS PLUS COUPLING
+
+               V = V - D0 * CouplCoord * Qbath(1) + 0.5 * DistorsionForce * CouplCoord**2
+               DO iBath = 1, BathSize - 1
+                  V = V + 0.5 * OscillatorsMass * ( Frequencies(iBath) * Qbath(iBath) )**2 - &
+                          Dn(iBath) * Qbath(iBath) * Qbath(iBath+1)
+               END DO
+               V = V + 0.5 * OscillatorsMass *( Frequencies(BathSize) * Qbath(BathSize) )**2
+
+               Forces(NSystem) = Forces(NSystem) + Couplings(1)*Qbath(1) - DistorsionForce * CouplCoord
+               Forces(NSystem+1) = - OscillatorsMass*Frequencies(1)**2 * Qbath(1) + Couplings(1)*CouplCoord + Couplings(2)*Qbath(2)
+               DO iBath = 2, BathSize-1
+                  Forces(NSystem+iBath) = - OscillatorsMass*Frequencies(iBath)**2 * Qbath(iBath) + &
+                                    Couplings(iBath)*Qbath(iBath-1) + Couplings(iBath+1)*Qbath(iBath+1)
+               END DO
+               Forces(NSystem+BathSize) = - OscillatorsMass*Frequencies(BathSize)**2 * Qbath(BathSize)  + &
+                                      Couplings(BathSize) * Qbath(BathSize-1)
+
+         ELSE IF ( BathType == STANDARD_BATH ) THEN
+
+               ! POTENTIAL OF THE BATH OSCILLATORS PLUS COUPLING
+               Coupl = 0.0
+               DO iBath = 1, BathSize
+                  V = V + 0.5 * OscillatorsMass * ( Frequencies(iBath) * Positions(NSystem+iBath) )**2
+                  Forces(NSystem+iBath) = - OscillatorsMass * ( Frequencies(iBath) )**2 * Positions(NSystem+iBath)  &
+                                   + Positions(NSystem) * Couplings(iBath)
+                  Coupl = Coupl + Couplings(iBath) * Positions(NSystem+iBath)
+               END DO
+               V = V - Coupl * Positions(NSystem) + 0.5*DistorsionForce*Positions(NSystem)**2
+               Forces(NSystem) = Forces(NSystem) + Coupl - DistorsionForce*Positions(NSystem)
+
+         END IF
+
+      END FUNCTION GenericSystemAndBath
+
+! ------------------------------------------------------------------------------------------------------------
+
+!*******************************************************************************
 !> Initial conditions for an independent oscillators model in normal or chain form
 !> DETAILS ABOUT THE INITIAL CONDITIONS 
 !>
@@ -398,6 +485,7 @@ CONTAINS
          IMPLICIT NONE
          REAL, DIMENSION(:), INTENT(OUT) :: Positions, Velocities
          REAL, DIMENSION(:,:), INTENT(IN) :: CHInitialConditions
+         LOGICAL, DIMENSION( size(Positions ) ) :: MinimizeCheck
          INTEGER :: NRandom, iCoord, NInit
          REAL :: Value
 
@@ -424,7 +512,8 @@ CONTAINS
                Positions(3) = HZEquilibrium
                Positions(4) = C1Puckering
                Positions(5:BathSize+4) = 0.0
-               Value = MinimizeBathCoords( Positions, (/ (.FALSE., iCoord=1,4) ,(.TRUE., iCoord=5,BathSize+4)  /)  )
+               MinimizeCheck = (/ (.FALSE., iCoord=1,4) ,(.TRUE., iCoord=5,BathSize+4)  /)
+               Value = MinimizeBathCoords( Positions, MinimizeCheck  )
          ELSE IF ( BathType == STANDARD_BATH ) THEN
                Positions(4) = C1Puckering
                DO iCoord = 1, BathSize

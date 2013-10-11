@@ -46,6 +46,17 @@ MODULE CommonData
                          CORRFUNCT   = 2, &   ! compute the full correlation function vs time 
                          MINIMAL     = 1      ! minimal level of output, only final averages
 
+   !> Variable to set the kind of bath included in the dynamics
+   INTEGER :: BathType
+   INTEGER, PARAMETER :: SLAB_POTENTIAL = 4, &   ! 
+                         NORMAL_BATH    = 3, &   ! 
+                         CHAIN_BATH     = 2, &   ! 
+                         LANGEVIN_DYN   = 1      ! 
+
+   !> Variable to set a collinear calculation
+   LOGICAL :: Collinear = .TRUE.
+
+
    ! THE FOLLOWING INPUT DATA ARE RELEVANT FOR ALL THE KIND OF CALCULATIONS
    
    REAL    :: dt     !< Time step for the integration of the classical EOM

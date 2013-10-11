@@ -45,7 +45,7 @@ MODULE InputField
    !> A wrapper for different reading different kind of input data.
    INTERFACE SetFieldFromInput
       MODULE PROCEDURE SetRealFieldFromInput, &
-               SetIntegerFieldFromInput, SetStringFieldFromInput
+               SetIntegerFieldFromInput, SetStringFieldFromInput, SetLogicalFieldFromInput
    END INTERFACE
 
 !********************************************************************************************************
@@ -378,6 +378,89 @@ MODULE InputField
 
    END SUBROUTINE SetStringFieldFromInput
 
+!*******************************************************************************
+!           SetLogicalFieldFromInput
+!*******************************************************************************
+!>  Look for the field name in input file and store the corresponding
+!>  boolean variable. If the optional argument DefaultV is absent, the subroutine
+!>  stops with error in case the Field is not found in the input file. Otherwise,
+!>  the default value DefaultV is assigned to the variable.
+!>
+!>  @param Input       Data type to store the input file related variables
+!>  @param FieldName   Field name to find in the input file 
+!>  @param Variable    Logical variable to store input data
+!>  @param DefaultV    Default value to assign to the variable
+!*******************************************************************************
+   SUBROUTINE SetLogicalFieldFromInput( Input, FieldName, Variable, DefaultV)
+      IMPLICIT NONE
+      TYPE( InputFile ), INTENT(INOUT) :: Input
+      CHARACTER(*), INTENT(IN)         :: FieldName
+      LOGICAL, INTENT(OUT)             :: Variable
+      LOGICAL, INTENT(IN), OPTIONAL    :: DefaultV
+
+      CHARACTER(len=1024)              :: Line
+      INTEGER                          :: LineLength, ColonPos, ReadingStatus
+      CHARACTER(30)                    :: String, RdFormat
+
+      ! check if file of the datatype is open
+      CALL ERROR( Input%Status == FILE_IS_CLOSED, " SetLogicalFieldFromInput: trying to read a closed file input file " )
+
+#if defined(VERBOSE_OUTPUT)
+      WRITE(*,"(/,A,A,A,I3)") " SetLogicalFieldFromInput: Looking for boolean field ", trim(FieldName), " in unit ", Input%Unit
+#endif
+
+      ! Rewind input file
+      REWIND( Input%Unit )
+
+      ! cycle over the lines of the input file
+      DO 
+         ! read input file
+         READ( Input%Unit, "(A1024)", IOSTAT=ReadingStatus ) Line
+
+         ! if file is finished without finding the fild, give error or set default value
+         IF ( ReadingStatus /= 0 ) THEN
+            IF ( .NOT. PRESENT(DefaultV ) ) THEN
+               CALL AbortWithError( " SetLogicalFieldFromInput: could not find field "//TRIM(FieldName) )
+            ELSE
+               Variable = DefaultV
+               WRITE(String,*) DefaultV
+               CALL ShowWarning( "Variable "//FieldName//" set to default value of "//String ); EXIT
+            END IF
+         END IF
+
+         ! remove leading blanks...
+         Line = ADJUSTL( Line )
+         ! get length of line without the spaces at the end...
+         LineLength = LEN_TRIM( Line )
+
+         ! skip line if empty or starts with #
+         IF ( LineLength == 0 .OR. Line(1:1) == '#' ) CYCLE
+
+         ! Find position of the first colon
+         ColonPos = SCAN( Line, ':' )
+         ! skip line if not present
+         IF ( ColonPos <= 1 ) CYCLE
+
+         ! check if the field name corresponds
+         IF ( TRIM( FieldName ) ==  TRIM( ADJUSTL( Line(1:ColonPos-1) ) )  ) THEN
+#if defined(VERBOSE_OUTPUT)
+            WRITE(*,*) " Found field ", trim(FieldName)
+#endif
+            ! rewind one record
+            BACKSPACE( Input%Unit )
+            ! define reading format
+            WRITE( String, * ) ColonPos
+            RdFormat = "(A"//TRIM( ADJUSTL( String))//",L200)" 
+            ! store the value of the variable
+            READ(  Input%Unit, RdFormat ) String, Variable
+#if defined(VERBOSE_OUTPUT)
+            WRITE(*,*) " Set variable equal to ", Variable
+#endif
+            EXIT
+         ENDIF
+      END DO
+
+   END SUBROUTINE SetLogicalFieldFromInput
 
 
 END MODULE InputField
