@@ -16,7 +16,7 @@ LOGNAME = jk6_v3.log
 FC = ifort      
 
 # Debugging options ( yes or no )
-DEBUG = yes
+DEBUG = no 
 
 # Optimization level
 OPTLEVEL = 3
@@ -289,7 +289,7 @@ ${OBJDIR}/InputField.o       : ${SRCDIR}/InputField.f90 ${COMMONDEP}
 ${OBJDIR}/CommonData.o       : ${SRCDIR}/CommonData.f90 ${COMMONDEP}
 
 # Module containing the common data (v3)
-${OBJDIR}/SharedData.o       : ${SRCDIR}/SharedData.f90 ${COMMONDEP}
+${OBJDIR}/SharedData.o       : ${SRCDIR}/SharedData.f90 ${OBJDIR}/IndependentOscillatorsModel.o ${COMMONDEP}
 
 # Module containing the potential energy surface
 ${OBJDIR}/PotentialModule.o  : ${SRCDIR}/PotentialModule.f90 ${OBJDIR}/RandomNumberGenerator.o ${COMMONDEP}

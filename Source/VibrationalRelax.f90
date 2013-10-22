@@ -133,7 +133,7 @@ MODULE VibrationalRelax
 !*******************************************************************************
    SUBROUTINE VibrationalRelax_Initialize()
       IMPLICIT NONE
-      INTEGER :: iCoord, NDim
+      INTEGER :: iCoord
       LOGICAL, DIMENSION(:), ALLOCATABLE :: LangevinSwitchOn
 
       ! Allocate memory and initialize vectors for trajectory, acceleration and masses
@@ -144,6 +144,10 @@ MODULE VibrationalRelax
 
       ELSE IF ( BathType ==  NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
          ALLOCATE( X(4+NBath), V(4+NBath), A(4+NBath), APre(4+NBath), MassVector(4+NBath), LangevinSwitchOn(4+NBath) )
+         MassVector = (/ (MassH, iCoord=1,3), MassC, (MassBath, iCoord=1,NBath) /)
+
+      ELSE IF ( BathType ==  DOUBLE_CHAIN ) THEN
+         ALLOCATE( X(4+2*NBath), V(4+2*NBath), A(4+2*NBath), APre(4+2*NBath), MassVector(4+2*NBath), LangevinSwitchOn(4+2*NBath) )
          MassVector = (/ (MassH, iCoord=1,3), MassC, (MassBath, iCoord=1,NBath) /)
 
       ELSE IF ( BathType == LANGEVIN_DYN ) THEN
@@ -327,7 +331,10 @@ MODULE VibrationalRelax
                ! for atomistic model of the bath, move the slab so that C2-C3-C4 plane has z=0
                X(3:NDim) = X(3:NDim)  - (X(5)+X(6)+X(7))/3.0
          ELSE IF ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
-               CALL ZeroKelvinBathConditions( X, V, CHInitConditions )
+               NInit = CEILING( UniformRandomNr(0.0, real(NrOfInitSnapshots) ) )
+               X(1:4) = CHInitConditions( NInit, 1:4 )
+               V(1:4) = CHInitConditions( NInit, 5:8 )
+               CALL ZeroKelvinBathConditions( Bath, X(5:), V(5:), ZPECorrection )
          ELSE IF ( BathType == LANGEVIN_DYN ) THEN
                NInit = CEILING( UniformRandomNr(0.0, real(NrOfInitSnapshots) ) )
                X(1:4) = CHInitConditions( NInit, 1:4 )
@@ -339,7 +346,7 @@ MODULE VibrationalRelax
          !*************************************************************
 
          ! Energy of the system, Coupling energy and energy of the bath
-         CALL IstantaneousEnergies( KSys, VSys, Ecoup, VBath, KBath )
+         CALL IstantaneousEnergies( PotEnergy, KSys, VSys, Ecoup, VBath, KBath )
          IF ( NDim > 4 ) THEN
             IstTemperature = 2.0*KBath/(MyConsts_K2AU*(NDim-4))
          ELSE
@@ -426,7 +433,7 @@ MODULE VibrationalRelax
                ENDIF
 
                ! Energy of the system
-               CALL IstantaneousEnergies( KSys, VSys, Ecoup, VBath, KBath )
+               CALL IstantaneousEnergies( PotEnergy, KSys, VSys, Ecoup, VBath, KBath )
                
                ! Update averages over time
                AverageESys(kStep)            = AverageESys(kStep)  + KSys + VSys
@@ -587,13 +594,20 @@ MODULE VibrationalRelax
       CALL ERROR( size(Forces) /= NrDOF, "VibrationalRelax.VibrRelaxPotential: array dimension mismatch" )
       CALL ERROR( NrDOF /= NDim, "VibrationalRelax.VibrRelaxPotential: wrong number of DoFs" )
 
+      ! Initialize forces and potential
+      VibrRelaxPotential = 0.0
+      Forces(:)          = 0.0
+
       IF ( BathType == SLAB_POTENTIAL ) THEN 
          ! Compute potential using the potential subroutine
          VibrRelaxPotential = VHSticking( Positions, Forces )
 
       ELSE IF ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
-         ! Compute potential and forces with independentoscillatormodel subroutine
-         VibrRelaxPotential = GenericSystemAndBath( Positions, Forces, VHFourDimensional, 4 ) 
+         ! Compute potential and forces of the system
+         VibrRelaxPotential = VHFourDimensional( Positions(1:4), Forces(1:4) )
+         ! Add potential and forces of the bath and the coupling
+         CALL BathPotentialAndForces( Bath, Positions(4)-C1Puckering, Positions(5:), VibrRelaxPotential, &
+                                                                               Forces(4), Forces(5:) ) 
 
       ELSE IF ( BathType == LANGEVIN_DYN ) THEN
          ! Compute potential using only the 4D subroutine
@@ -605,8 +619,9 @@ MODULE VibrationalRelax
 
 !*************************************************************************************************
 
-   SUBROUTINE IstantaneousEnergies( KSys, VSys, Ecoup, VBath, KBath )
+   SUBROUTINE IstantaneousEnergies( PotEnergy, KSys, VSys, Ecoup, VBath, KBath )
       IMPLICIT NONE
+      REAL, INTENT(IN)  :: PotEnergy
       REAL, INTENT(OUT) :: KSys, VSys, Ecoup, VBath, KBath
       REAL, DIMENSION(4) :: Dummy
       REAL :: KinEnergy
@@ -624,8 +639,7 @@ MODULE VibrationalRelax
          VBath = PotEnergy - VSys
          KBath = KinEnergy - KSys
       ELSE IF ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
-         Ecoup = CouplingEnergy( X )
-         VBath = PotEnergyOfTheBath( X )
+         CALL EnergyOfTheBath( Bath, X(4)-C1Puckering, X(5:), Ecoup, VBath )
          KBath = KinEnergy - KSys
       ELSE IF ( BathType == LANGEVIN_DYN ) THEN
          Ecoup = 0.0

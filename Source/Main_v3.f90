@@ -126,6 +126,8 @@ PROGRAM JK6_v3
       BathCutOffFreq = BathCutOffFreq * MyConsts_cmmin1toAU
       ! Read file with spectral density
       CALL SetFieldFromInput( InputData, "SpectralDensityFile", SpectralDensityFile )
+      ! Quasi-classical correction of the initial conditions of the bath (ZPE), relevant only for 0K
+      CALL SetFieldFromInput( InputData, "ZPECorrection", ZPECorrection, .FALSE. )
 
    ELSE IF ( BathType == CHAIN_BATH ) THEN
       ! Langevin relaxation at the end of the chain
@@ -141,6 +143,24 @@ PROGRAM JK6_v3
       BathCutOffFreq = BathCutOffFreq * MyConsts_cmmin1toAU
       ! Read file with normal modes freq and couplings
       CALL SetFieldFromInput( InputData, "SpectralDensityFile", SpectralDensityFile )
+      ! Quasi-classical correction of the initial conditions of the bath (ZPE), relevant only for 0K
+      CALL SetFieldFromInput( InputData, "ZPECorrection", ZPECorrection, .FALSE. )
+
+   ELSE IF ( BathType == DOUBLE_CHAIN ) THEN
+      ! Langevin relaxation at the end of the chain
+      CALL SetFieldFromInput( InputData, "DynamicsGamma",  DynamicsGamma, 0.0 ) 
+      DynamicsGamma = DynamicsGamma / MyConsts_fs2AU
+      ! Mass of the bath oscillator
+      CALL SetFieldFromInput( InputData, "MassBath", MassBath )
+      MassBath = MassBath * MyConsts_Uma2Au
+      ! Nr of bath degrees of freedom
+      CALL SetFieldFromInput( InputData, "NBath",  NBath )
+      ! Read cutoff frequency of the bath, if BathCutOffFreq is not present, it is set to zero
+      CALL SetFieldFromInput( InputData, "BathCutOffFreq", BathCutOffFreq, 0.0 )
+      BathCutOffFreq = BathCutOffFreq * MyConsts_cmmin1toAU
+      ! Read file with normal modes freq and couplings
+      CALL SetFieldFromInput( InputData, "SpectralDensityFile", SpectralDensityFile )
+      CALL SetFieldFromInput( InputData, "SpectralDensityFile2", SpectralDensityFile2 )
 
    ELSE IF ( BathType == LANGEVIN_DYN ) THEN
       ! Langevin relaxation of the system (at the carbon atom)
@@ -181,7 +201,10 @@ PROGRAM JK6_v3
          WRITE(*,900) NBath, MassBath/MyConsts_Uma2Au, BathCutOffFreq/MyConsts_cmmin1toAU, trim(adjustl(SpectralDensityFile))
       CASE( CHAIN_BATH )
          WRITE(*,901) NBath, MassBath/MyConsts_Uma2Au, BathCutOffFreq/MyConsts_cmmin1toAU, &
-                      DynamicsGamma*MyConsts_fs2AU, SpectralDensityFile
+                      DynamicsGamma*MyConsts_fs2AU, trim(adjustl(SpectralDensityFile))
+      CASE( DOUBLE_CHAIN )
+         WRITE(*,903) NBath, MassBath/MyConsts_Uma2Au, BathCutOffFreq/MyConsts_cmmin1toAU, &
+                      DynamicsGamma*MyConsts_fs2AU, trim(adjustl(SpectralDensityFile)), trim(adjustl(SpectralDensityFile2))
       CASE( LANGEVIN_DYN )
          WRITE(*,902) DynamicsGamma*MyConsts_fs2AU
    END SELECT
@@ -191,9 +214,9 @@ PROGRAM JK6_v3
       CASE( MINIMAL )
          WRITE(*,"(A)") " * Minimal output will be written "
       CASE( FULL )
-         WRITE(*,"(A)") " * Detailed information on each trajectory will be computed "
+         WRITE(*,"(A)") " * All the averages will be written to output files "
       CASE( DEBUG )
-         WRITE(*,"(A)") " * Debug level of output for each trajectory "
+         WRITE(*,"(A)") " * Detailed information on each trajectory will be printed "
    END SELECT
 
    898 FORMAT(" * Mass of the H atom (UMA):                    ",F10.4,/,&
@@ -206,15 +229,22 @@ PROGRAM JK6_v3
               " * Nr of bath oscillators:                      ",I10,  /,& 
               " * Mass of the bath oscillator (UMA):           ",F10.4,/,& 
               " * Cutoff frequency of the bath (1/cm):         ",F10.1,/,& 
-              " * File with the spectral density:              ",A10,/ )
+              " * File with the spectral density:  "            ,A22,/ )
    901 FORMAT(" * Bath is is a linear chain of harmonic oscillators ", /,&
               " * Nr of bath oscillators:                      ",I10,  /,& 
               " * Mass of the bath oscillator (UMA):           ",F10.4,/,& 
               " * Cutoff frequency of the bath (1/cm):         ",F10.1,/,& 
               " * Langevin friction at the end (1/fs):         ",F10.4,/,&
-              " * File with the spectral density:              ",A10,  / )
+              " * File with the spectral density:  "            ,A22,  / )
    902 FORMAT(" * Bath is effectively represented by Langevin dynamics ", /,&
               " * Langevin friction coefficient (1/fs):        ",F10.4,/ )
+   903 FORMAT(" * Bath is double linear chain of harmonic oscillators ", /,&
+              " * Nr of bath oscillators per chain:            ",I10,  /,& 
+              " * Mass of the bath oscillator (UMA):           ",F10.4,/,& 
+              " * Cutoff freq of the low freq chain (1/cm):    ",F10.1,/,& 
+              " * Langevin friction at the end (1/fs):         ",F10.4,/,&
+              " * File with the first spectral density:        ",A10,  /,&
+              " * File with the second spectral density:       ",A10,  / )
 
    !*************************************************************
    !       POTENTIAL SETUP 
@@ -225,13 +255,20 @@ PROGRAM JK6_v3
    
    ! If needed setup bath frequencies and coupling for oscillator bath models
    IF (  BathType == NORMAL_BATH ) THEN
-         CALL SetupIndepOscillatorsModel( NBath, 0, SpectralDensityFile, MassBath, BathCutOffFreq )
+         CALL SetupIndepOscillatorsModel( Bath, NBath, 0, SpectralDensityFile, MassBath, BathCutOffFreq )
    ELSE IF (  BathType == CHAIN_BATH ) THEN
-         CALL SetupIndepOscillatorsModel( NBath, 1, SpectralDensityFile, MassBath, BathCutOffFreq )
+         CALL SetupIndepOscillatorsModel( Bath, NBath, 1, SpectralDensityFile, MassBath, BathCutOffFreq )
+   ELSE IF ( BathType == DOUBLE_CHAIN ) THEN 
+         CALL SetupIndepOscillatorsModel( DblBath(1), NBath, 1, SpectralDensityFile, MassBath, BathCutOffFreq )
+         CALL SetupIndepOscillatorsModel( DblBath(2), NBath, 1, SpectralDensityFile2, MassBath, 0.0 )
    END IF
    
-   IF  ( RunType == NORMAL_BATH .OR. RunType == CHAIN_BATH ) &
-              PRINT "(A,F15.6)"," Bath distorsion force constant: ", GetDistorsionForce() 
+   IF  ( RunType == NORMAL_BATH .OR. RunType == CHAIN_BATH ) THEN
+      PRINT "(/,A,F10.6,/)"," * Bath distorsion force constant:              ", GetDistorsionForce( Bath ) 
+   ELSE IF ( RunType == DOUBLE_CHAIN ) THEN
+      PRINT "(/,A,F10.6)"," * Bath 1 distorsion force constant:              ", GetDistorsionForce( DblBath(1) ) 
+      PRINT "(A,F10.6,/)"," * Bath 2 distorsion force constant:              ", GetDistorsionForce( DblBath(2) ) 
+   END IF
 
    !*************************************************************
    !       SPECIFIC INPUT SECTION 
@@ -289,10 +326,11 @@ PROGRAM JK6_v3
          ! ...
    END SELECT
 
-   IF ( BathType == NORMAL_BATH ) THEN
-         CALL DisposeIndepOscillatorsModel( )
-   ELSE IF ( BathType == CHAIN_BATH ) THEN
-         CALL DisposeIndepOscillatorsModel( )
+   IF ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
+      CALL DisposeIndepOscillatorsModel( Bath )
+   ELSE IF ( BathType == DOUBLE_CHAIN ) THEN
+      CALL DisposeIndepOscillatorsModel( DblBath(1) )
+      CALL DisposeIndepOscillatorsModel( DblBath(2) )
    END IF
 
 END PROGRAM JK6_v3

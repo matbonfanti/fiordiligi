@@ -639,7 +639,8 @@ MODULE Harmonic1DModel
       CALL ERROR( size(Forces) /= NrDOF, "PotentialModule.VHarmonicPlusBath: array dimension mismatch" )
       
       ! Compute potential and forces
-      VHarmonicPlusBath = GenericSystemAndBath( Positions, Forces, VHarmonic, 1 ) 
+      VHarmonicPlusBath = VHarmonic(Positions(1:1), Forces(1:1) )
+      CALL BathPotentialAndForces( Bath, Positions(1), Positions(2:), VHarmonicPlusBath, Forces(1), Forces(2:) ) 
       
    END FUNCTION VHarmonicPlusBath
 

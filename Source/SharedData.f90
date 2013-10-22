@@ -9,6 +9,7 @@
 !***************************************************************************************
 MODULE SharedData
    USE ErrorTrap
+   USE IndependentOscillatorsModel
 
    IMPLICIT NONE
 
@@ -44,6 +45,7 @@ MODULE SharedData
    INTEGER, PARAMETER :: SLAB_POTENTIAL = 4, &   ! the bath is a slab of carbon atom
                          NORMAL_BATH    = 3, &   ! bath of HO on a regular freq grid, all coupled to the system
                          CHAIN_BATH     = 2, &   ! bath of HO in a linear chain form
+                         DOUBLE_CHAIN   = 5, &   ! bath in double chain form
                          LANGEVIN_DYN   = 1      ! effective relaxation dynamics, with langevin eq of motion
 
    !> Variable to set a collinear calculation
@@ -67,6 +69,10 @@ MODULE SharedData
    REAL           :: MassBath                  !< Mass of the HO in the bath
    REAL           :: BathCutOffFreq            !< cutoff frequency of the bath
    CHARACTER(100) :: SpectralDensityFile       !< spectral density file name
+   CHARACTER(100) :: SpectralDensityFile2      !< spectral density file name
+   TYPE(BathData) :: Bath                      !< derived datatype to define a single bath
+   TYPE(BathData), DIMENSION(2) :: DblBath     !< derived datatype to define a double chain bath
+   LOGICAL        :: ZPECorrection             !< ZeroPointEnergy correction in the initial conditions of the bath (at 0 K)
 
    ! POSITION, VELOCITY, ACCELERATION 
 
@@ -117,6 +123,7 @@ CONTAINS
       Check = ( IntNr /= SLAB_POTENTIAL .AND. &
                 IntNr /= NORMAL_BATH .AND. &
                 IntNr /= CHAIN_BATH .AND. &
+                IntNr /= DOUBLE_CHAIN .AND. &
                 IntNr /= LANGEVIN_DYN  )
       CALL ERROR( Check, " SharedData.CheckBathType: Invalid BathType option " )
    END SUBROUTINE CheckBathType

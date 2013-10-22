@@ -34,6 +34,9 @@ MODULE ThermalEquilibrium
 
    PUBLIC :: ThermalEquilibrium_ReadInput, ThermalEquilibrium_Initialize, ThermalEquilibrium_Run, ThermalEquilibrium_Dispose
 
+   !> Nr of dimension of the system + bath 
+   INTEGER :: NDim
+
    ! Variables of the propagation
    INTEGER :: NrTrajs                   !< Nr of trajectories
    INTEGER :: NrOfSteps                 !< Total nr of time step per trajectory
@@ -138,7 +141,7 @@ MODULE ThermalEquilibrium
 !*******************************************************************************
    SUBROUTINE ThermalEquilibrium_Initialize()
       IMPLICIT NONE
-      INTEGER :: iCoord, NDim
+      INTEGER :: iCoord
       LOGICAL, DIMENSION(:), ALLOCATABLE :: LangevinSwitchOn
 
       ! Allocate memory and initialize vectors for trajectory, acceleration and masses
@@ -280,16 +283,19 @@ MODULE ThermalEquilibrium
          ! INITIALIZATION OF THE COORDINATES AND MOMENTA OF THE SYSTEM
          !*************************************************************
 
-         ! Set initial conditions
+         ! Equilibrium position of H and C atom
+         X(1:2) = 0.0000
+         X(3) = 1.483 / MyConsts_Bohr2Ang
+         X(4) = C1Puckering
+         V(1:4) = 0.0
+
+         ! Set initial conditions of the bath
          IF ( BathType == SLAB_POTENTIAL ) THEN 
                CALL ThermalEquilibriumConditions( X, V, Temperature, MassH, MassC )
          ELSE IF ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
-               CALL InitialBathConditions( X, V, Temperature )
+               CALL ThermalEquilibriumBathConditions( Bath, X(5:), V(5:), Temperature )
          ELSE IF ( BathType == LANGEVIN_DYN ) THEN
-               X(1:2) = 0.0
-               X(3) = HZEquilibrium 
-               X(4) = C1Puckering  
-               V(1:4) = 0.0
+               ! nothing to do
          END IF
 
          PRINT "(/,A,F6.1)"," Equilibrating the initial conditions at T = ", Temperature / MyConsts_K2AU
@@ -308,11 +314,7 @@ MODULE ThermalEquilibrium
 
          ! Compute starting potential and forces
          A(:) = 0.0
-         IF ( BathType ==  SLAB_POTENTIAL .OR. BathType == LANGEVIN_DYN ) THEN 
-               PotEnergy = VHSticking( X, A )
-         ELSE IF ( BathType ==  NORMAL_BATH .OR. BathType == CHAIN_BATH  ) THEN
-               PotEnergy = PotentialIndepOscillatorsModel( X, A )
-         END IF
+         PotEnergy = ThermalEquilibriumPotential( X, A )
          DO iCoord = 1,size(X)
             A(iCoord) = A(iCoord) / MassVector(iCoord)
          END DO
@@ -325,18 +327,10 @@ MODULE ThermalEquilibrium
                ! Store initial accelerations
                APre(:) = A(:)
                ! Propagate for one timestep with Velocity-Verlet and langevin thermostat
-               IF ( BathType ==  SLAB_POTENTIAL .OR. BathType == LANGEVIN_DYN ) THEN 
-                     CALL EOM_VelocityVerlet( Equilibration, X, V, A, VHSticking, PotEnergy )
-               ELSE IF ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH  ) THEN
-                     CALL EOM_VelocityVerlet( Equilibration, X, V, A, PotentialIndepOscillatorsModel, PotEnergy )
-               END IF
+               CALL EOM_VelocityVerlet( Equilibration, X, V, A, ThermalEquilibriumPotential, PotEnergy )
             ELSE
                ! Propagate for one timestep with Beeman's method and langevin thermostat
-               IF ( BathType ==  SLAB_POTENTIAL .OR. BathType == LANGEVIN_DYN ) THEN 
-                     CALL EOM_Beeman( Equilibration, X, V, A, APre, VHSticking, PotEnergy )
-               ELSE IF ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH  ) THEN
-                     CALL EOM_Beeman( Equilibration, X, V, A, APre, PotentialIndepOscillatorsModel, PotEnergy )
-               END IF
+               CALL EOM_Beeman( Equilibration, X, V, A, APre, ThermalEquilibriumPotential, PotEnergy )
             END IF
 
             ! compute kinetic energy and total energy
@@ -448,11 +442,7 @@ MODULE ThermalEquilibrium
          Propagation: DO iStep = 1, NrOfSteps
 
             ! Propagate for one timestep
-            IF ( BathType ==  SLAB_POTENTIAL .OR. BathType == LANGEVIN_DYN ) THEN 
-               CALL EOM_VelocityVerlet( MolecularDynamics, X, V, A, VHSticking, PotEnergy )
-            ELSE IF ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH  ) THEN
-               CALL EOM_VelocityVerlet( MolecularDynamics, X, V, A, PotentialIndepOscillatorsModel, PotEnergy )
-            END IF
+            CALL EOM_VelocityVerlet( MolecularDynamics, X, V, A, ThermalEquilibriumPotential, PotEnergy )
 
             ! Compute kin energy and temperature
             KinEnergy = EOM_KineticEnergy( MolecularDynamics, V )
@@ -642,6 +632,37 @@ MODULE ThermalEquilibrium
       CALL DisposeEvolutionData( Equilibration )
 
    END SUBROUTINE ThermalEquilibrium_Dispose
+
+!*************************************************************************************************
+
+   REAL FUNCTION ThermalEquilibriumPotential( Positions, Forces )
+      REAL, DIMENSION(:), TARGET, INTENT(IN)  :: Positions
+      REAL, DIMENSION(:), TARGET, INTENT(OUT) :: Forces
+      INTEGER :: NrDOF, i       
+
+      ! Check the number degrees of freedom
+      NrDOF = size( Positions )
+      CALL ERROR( size(Forces) /= NrDOF, "ThermalEquilibrium.ThermalEquilibriumPotential: array dimension mismatch" )
+      CALL ERROR( NrDOF /= NDim, "ThermalEquilibrium.ThermalEquilibriumPotential: wrong number of DoFs" )
+
+      IF ( BathType == SLAB_POTENTIAL ) THEN 
+         ! Compute potential using the potential subroutine
+         ThermalEquilibriumPotential = VHSticking( Positions, Forces )
+
+      ELSE IF ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
+         ! Compute potential and forces of the system
+         ThermalEquilibriumPotential = VHFourDimensional( Positions(1:4), Forces(1:4) )
+         ! Add potential and forces of the bath and the coupling
+         CALL BathPotentialAndForces( Bath, Positions(4)-C1Puckering, Positions(5:), ThermalEquilibriumPotential, &
+                                                                               Forces(4), Forces(5:) ) 
+
+      ELSE IF ( BathType == LANGEVIN_DYN ) THEN
+         ! Compute potential using only the 4D subroutine
+         ThermalEquilibriumPotential = VHFourDimensional( Positions, Forces )
+
+      END IF
+
+   END FUNCTION ThermalEquilibriumPotential
 
 !*************************************************************************************************
 
