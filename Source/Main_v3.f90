@@ -243,8 +243,8 @@ PROGRAM JK6_v3
               " * Mass of the bath oscillator (UMA):           ",F10.4,/,& 
               " * Cutoff freq of the low freq chain (1/cm):    ",F10.1,/,& 
               " * Langevin friction at the end (1/fs):         ",F10.4,/,&
-              " * File with the first spectral density:        ",A10,  /,&
-              " * File with the second spectral density:       ",A10,  / )
+              " * File with the first SD:  ",                    A30,  /,&
+              " * File with the second SD: ",                    A30,  / )
 
    !*************************************************************
    !       POTENTIAL SETUP 

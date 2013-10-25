@@ -11,11 +11,15 @@
 !>  \author           Matteo Bonfanti
 !>  \version          1.0
 !>  \date             4 October 2013
-!>
+!
+!***************************************************************************************
+!
+!>  \par Updates
+!>  \arg 23 October 2013: double chain bath has been implemented
+!
 !>  \todo         Implement energy flux along the chain
 !>  \todo         The cluster bath has some problems... needs debugging
-!>  |todo         Initial conditions for non collinear calculations should
-!>                be defined
+!>  |todo         Initial conditions for non collinear calculations should be defined
 !>                 
 !***************************************************************************************
 MODULE VibrationalRelax
@@ -148,7 +152,7 @@ MODULE VibrationalRelax
 
       ELSE IF ( BathType ==  DOUBLE_CHAIN ) THEN
          ALLOCATE( X(4+2*NBath), V(4+2*NBath), A(4+2*NBath), APre(4+2*NBath), MassVector(4+2*NBath), LangevinSwitchOn(4+2*NBath) )
-         MassVector = (/ (MassH, iCoord=1,3), MassC, (MassBath, iCoord=1,NBath) /)
+         MassVector = (/ (MassH, iCoord=1,3), MassC, (MassBath, iCoord=1,2*NBath) /)
 
       ELSE IF ( BathType == LANGEVIN_DYN ) THEN
          ALLOCATE( X(4), V(4), A(4), APre(4), MassVector(4), LangevinSwitchOn(4) )
@@ -168,10 +172,16 @@ MODULE VibrationalRelax
          CALL SetupThermostat( MolecularDynamics, DynamicsGamma, 0.0, LangevinSwitchOn )
       END IF
 
-      ! Set canonical dynamics at the end of the oscillator chain
+      ! Set canonical dynamics at the end of the oscillator chain or chains
       IF ( BathType == CHAIN_BATH .AND. DynamicsGamma /= 0.0 ) THEN 
          LangevinSwitchOn = .FALSE.
          LangevinSwitchOn( NDim ) = .TRUE.
+         CALL SetupThermostat( MolecularDynamics, DynamicsGamma, 0.0, LangevinSwitchOn )
+      END IF
+      IF ( BathType == DOUBLE_CHAIN .AND. DynamicsGamma /= 0.0 ) THEN 
+         LangevinSwitchOn = .FALSE.
+         LangevinSwitchOn( 4+NBath ) = .TRUE.  ! end of the first chain
+         LangevinSwitchOn( NDim )    = .TRUE.  ! end of the second chain
          CALL SetupThermostat( MolecularDynamics, DynamicsGamma, 0.0, LangevinSwitchOn )
       END IF
 
@@ -335,6 +345,12 @@ MODULE VibrationalRelax
                X(1:4) = CHInitConditions( NInit, 1:4 )
                V(1:4) = CHInitConditions( NInit, 5:8 )
                CALL ZeroKelvinBathConditions( Bath, X(5:), V(5:), ZPECorrection )
+         ELSE IF ( BathType == DOUBLE_CHAIN ) THEN
+               NInit = CEILING( UniformRandomNr(0.0, real(NrOfInitSnapshots) ) )
+               X(1:4) = CHInitConditions( NInit, 1:4 )
+               V(1:4) = CHInitConditions( NInit, 5:8 )
+               CALL ZeroKelvinBathConditions( DblBath(1), X(5:NBath+4), V(5:NBath+4), ZPECorrection )
+               CALL ZeroKelvinBathConditions( DblBath(2), X(NBath+5:2*NBath+4), V(NBath+5:2*NBath+4), ZPECorrection )
          ELSE IF ( BathType == LANGEVIN_DYN ) THEN
                NInit = CEILING( UniformRandomNr(0.0, real(NrOfInitSnapshots) ) )
                X(1:4) = CHInitConditions( NInit, 1:4 )
@@ -346,7 +362,7 @@ MODULE VibrationalRelax
          !*************************************************************
 
          ! Energy of the system, Coupling energy and energy of the bath
-         CALL IstantaneousEnergies( PotEnergy, KSys, VSys, Ecoup, VBath, KBath )
+         CALL IstantaneousEnergies( PotEnergy, KSys, VSys, Ecoup, VBath, KBath, iTraj, iStep )
          IF ( NDim > 4 ) THEN
             IstTemperature = 2.0*KBath/(MyConsts_K2AU*(NDim-4))
          ELSE
@@ -433,7 +449,7 @@ MODULE VibrationalRelax
                ENDIF
 
                ! Energy of the system
-               CALL IstantaneousEnergies( PotEnergy, KSys, VSys, Ecoup, VBath, KBath )
+               CALL IstantaneousEnergies( PotEnergy, KSys, VSys, Ecoup, VBath, KBath, iTraj, iStep )
                
                ! Update averages over time
                AverageESys(kStep)            = AverageESys(kStep)  + KSys + VSys
@@ -609,6 +625,15 @@ MODULE VibrationalRelax
          CALL BathPotentialAndForces( Bath, Positions(4)-C1Puckering, Positions(5:), VibrRelaxPotential, &
                                                                                Forces(4), Forces(5:) ) 
 
+      ELSE IF ( BathType == DOUBLE_CHAIN ) THEN
+         ! Compute potential and forces of the system
+         VibrRelaxPotential = VHFourDimensional( Positions(1:4), Forces(1:4) )
+         ! Add potential and forces of the bath and the coupling
+         CALL BathPotentialAndForces( DblBath(1), Positions(4)-C1Puckering, Positions(5:NBath+4), VibrRelaxPotential, &
+                                                                               Forces(4), Forces(5:NBath+4) ) 
+         CALL BathPotentialAndForces( DblBath(2), Positions(4)-C1Puckering, Positions(NBath+5:2*NBath+4), VibrRelaxPotential, &
+                                                                               Forces(4), Forces(NBath+5:2*NBath+4) ) 
+
       ELSE IF ( BathType == LANGEVIN_DYN ) THEN
          ! Compute potential using only the 4D subroutine
          VibrRelaxPotential = VHFourDimensional( Positions, Forces )
@@ -619,12 +644,13 @@ MODULE VibrationalRelax
 
 !*************************************************************************************************
 
-   SUBROUTINE IstantaneousEnergies( PotEnergy, KSys, VSys, Ecoup, VBath, KBath )
+   SUBROUTINE IstantaneousEnergies( PotEnergy, KSys, VSys, Ecoup, VBath, KBath, iTraj, iStep )
       IMPLICIT NONE
       REAL, INTENT(IN)  :: PotEnergy
       REAL, INTENT(OUT) :: KSys, VSys, Ecoup, VBath, KBath
       REAL, DIMENSION(4) :: Dummy
-      REAL :: KinEnergy
+      INTEGER :: iTraj, iStep
+      REAL :: KinEnergy, VBath1, VBath2, ECoup1, ECoup2
 
       ! Total kinetic energy
       KinEnergy = EOM_KineticEnergy( MolecularDynamics, V )
@@ -640,6 +666,13 @@ MODULE VibrationalRelax
          KBath = KinEnergy - KSys
       ELSE IF ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
          CALL EnergyOfTheBath( Bath, X(4)-C1Puckering, X(5:), Ecoup, VBath )
+         KBath = KinEnergy - KSys
+      ELSE IF ( BathType == DOUBLE_CHAIN ) THEN
+         CALL EnergyOfTheBath( DblBath(1), X(4)-C1Puckering, X(5:NBath+4), Ecoup1, VBath1 )
+         CALL EnergyOfTheBath( DblBath(2), X(4)-C1Puckering, X(NBath+5:2*NBath+4), Ecoup2, VBath2 )
+!          WRITE(300+iTraj,*) TimeStep*real(iStep)/MyConsts_fs2AU, VBath1, VBath2
+         Ecoup = Ecoup1 + Ecoup2
+         VBath = VBath1 + VBath2
          KBath = KinEnergy - KSys
       ELSE IF ( BathType == LANGEVIN_DYN ) THEN
          Ecoup = 0.0

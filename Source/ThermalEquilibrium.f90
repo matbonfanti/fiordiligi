@@ -11,11 +11,16 @@
 !>  \author           Matteo Bonfanti
 !>  \version          1.0
 !>  \date             8 October 2013
-!>
+!
+!***************************************************************************************
+!
+!>  \par Updates
+!>  \arg 23 October 2013: double chain bath has been implemented
+!                
 !>  \todo     Implement the log of the input variables
 !>  \todo     Fix FT of the autocorrelation functions (they should be cosine transform)
 !>  \todo     Implement an option to print the xyz trajectory to visualize the traj
-!>                 
+!
 !***************************************************************************************
 MODULE ThermalEquilibrium
    USE MyConsts
@@ -154,6 +159,10 @@ MODULE ThermalEquilibrium
          ALLOCATE( X(4+NBath), V(4+NBath), A(4+NBath), APre(4+NBath), MassVector(4+NBath), LangevinSwitchOn(4+NBath) )
          MassVector = (/ (MassH, iCoord=1,3), MassC, (MassBath, iCoord=1,NBath) /)
 
+      ELSE IF ( BathType ==  DOUBLE_CHAIN ) THEN
+         ALLOCATE( X(4+2*NBath), V(4+2*NBath), A(4+2*NBath), APre(4+2*NBath), MassVector(4+2*NBath), LangevinSwitchOn(4+2*NBath) )
+         MassVector = (/ (MassH, iCoord=1,3), MassC, (MassBath, iCoord=1,2*NBath) /)
+
       ELSE IF ( BathType == LANGEVIN_DYN ) THEN
          ALLOCATE( X(4), V(4), A(4), APre(4), MassVector(4), LangevinSwitchOn(4) )
          MassVector = (/ (MassH, iCoord=1,3), MassC /)
@@ -172,10 +181,16 @@ MODULE ThermalEquilibrium
          CALL SetupThermostat( MolecularDynamics, DynamicsGamma, Temperature, LangevinSwitchOn )
       END IF
 
-      ! Set canonical dynamics at the end of the oscillator chain
+      ! Set canonical dynamics at the end of the oscillator chain or chains
       IF ( BathType == CHAIN_BATH .AND. DynamicsGamma /= 0.0 ) THEN 
          LangevinSwitchOn = .FALSE.
          LangevinSwitchOn( NDim ) = .TRUE.
+         CALL SetupThermostat( MolecularDynamics, DynamicsGamma, Temperature, LangevinSwitchOn )
+      END IF
+      IF ( BathType == DOUBLE_CHAIN .AND. DynamicsGamma /= 0.0 ) THEN 
+         LangevinSwitchOn = .FALSE.
+         LangevinSwitchOn( 4+NBath ) = .TRUE.  ! end of the first chain
+         LangevinSwitchOn( NDim )    = .TRUE.  ! end of the second chain
          CALL SetupThermostat( MolecularDynamics, DynamicsGamma, Temperature, LangevinSwitchOn )
       END IF
 
@@ -283,7 +298,7 @@ MODULE ThermalEquilibrium
          ! INITIALIZATION OF THE COORDINATES AND MOMENTA OF THE SYSTEM
          !*************************************************************
 
-         ! Equilibrium position of H and C atom
+         ! Equilibrium position of the system H and C atom
          X(1:2) = 0.0000
          X(3) = 1.483 / MyConsts_Bohr2Ang
          X(4) = C1Puckering
@@ -294,6 +309,9 @@ MODULE ThermalEquilibrium
                CALL ThermalEquilibriumConditions( X, V, Temperature, MassH, MassC )
          ELSE IF ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
                CALL ThermalEquilibriumBathConditions( Bath, X(5:), V(5:), Temperature )
+         ELSE IF ( BathType == DOUBLE_CHAIN ) THEN
+               CALL ThermalEquilibriumBathConditions( DblBath(1), X(5:NBath+4), V(5:NBath+4), Temperature )
+               CALL ThermalEquilibriumBathConditions( DblBath(2), X(NBath+5:2*NBath+4), V(NBath+5:2*NBath+4), Temperature )
          ELSE IF ( BathType == LANGEVIN_DYN ) THEN
                ! nothing to do
          END IF
@@ -645,6 +663,10 @@ MODULE ThermalEquilibrium
       CALL ERROR( size(Forces) /= NrDOF, "ThermalEquilibrium.ThermalEquilibriumPotential: array dimension mismatch" )
       CALL ERROR( NrDOF /= NDim, "ThermalEquilibrium.ThermalEquilibriumPotential: wrong number of DoFs" )
 
+      ! Initialize forces and potential
+      ThermalEquilibriumPotential = 0.0
+      Forces(:)                   = 0.0
+
       IF ( BathType == SLAB_POTENTIAL ) THEN 
          ! Compute potential using the potential subroutine
          ThermalEquilibriumPotential = VHSticking( Positions, Forces )
@@ -655,6 +677,14 @@ MODULE ThermalEquilibrium
          ! Add potential and forces of the bath and the coupling
          CALL BathPotentialAndForces( Bath, Positions(4)-C1Puckering, Positions(5:), ThermalEquilibriumPotential, &
                                                                                Forces(4), Forces(5:) ) 
+      ELSE IF ( BathType == DOUBLE_CHAIN ) THEN
+         ! Compute potential and forces of the system
+         ThermalEquilibriumPotential = VHFourDimensional( Positions(1:4), Forces(1:4) )
+         ! Add potential and forces of the bath and the coupling
+         CALL BathPotentialAndForces( DblBath(1), Positions(4)-C1Puckering, Positions(5:NBath+4), ThermalEquilibriumPotential, &
+                                                                               Forces(4), Forces(5:NBath+4) ) 
+         CALL BathPotentialAndForces( DblBath(2), Positions(4)-C1Puckering, Positions(NBath+5:2*NBath+4), &
+                                                            ThermalEquilibriumPotential, Forces(4), Forces(NBath+5:2*NBath+4) ) 
 
       ELSE IF ( BathType == LANGEVIN_DYN ) THEN
          ! Compute potential using only the 4D subroutine

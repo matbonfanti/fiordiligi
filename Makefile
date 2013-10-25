@@ -282,6 +282,9 @@ ${OBJDIR}/ErrorTrap.o        : ${SRCDIR}/ErrorTrap.f90
 # Define common physical and mathematical constants
 ${OBJDIR}/MyConsts.o         : ${SRCDIR}/MyConsts.f90 ${OBJDIR}/ErrorTrap.o
 
+# Linear algebra module
+${OBJDIR}/MyLinearAlgebra.o : ${SRCDIR}/MyLinearAlgebra.f90 ${OBJDIR}/ErrorTrap.o ${OBJDIR}/MyConsts.o ${OBJDIR}/NRUtility.o
+
 # Set procedure for reading quasi-free format input file
 ${OBJDIR}/InputField.o       : ${SRCDIR}/InputField.f90 ${COMMONDEP}
 
@@ -309,9 +312,6 @@ ${OBJDIR}/SplineInterpolator.o : ${SRCDIR}/SplineInterpolator.f90 ${OBJDIR}/NRUt
 
 # Module containing the subroutine to write data in vtk format
 ${OBJDIR}/PrintTools.o : ${SRCDIR}/PrintTools.f90 ${COMMONDEP}
-
-# Linear algebra module
-${OBJDIR}/MyLinearAlgebra.o : ${SRCDIR}/MyLinearAlgebra.f90 ${OBJDIR}/NRUtility.o ${COMMONDEP}
 
 # Derivatives with finite difference methods
 ${OBJDIR}/DifferenceDerivatives.o : ${SRCDIR}/DifferenceDerivatives.f90 ${COMMONDEP}

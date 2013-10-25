@@ -12,7 +12,12 @@
 !>  \author           Matteo Bonfanti
 !>  \version          1.0
 !>  \date             9 October 2013
-!>
+!
+!***************************************************************************************
+!
+!>  \par Updates
+!>  \arg 23 October 2013: double chain bath has been implemented
+!
 !>  \todo            fix the log of the input variables
 !>                 
 !***************************************************************************************
@@ -30,6 +35,9 @@ MODULE Harmonic1DModel
 
    PRIVATE
    PUBLIC :: Harmonic1DModel_ReadInput, Harmonic1DModel_Initialize, Harmonic1DModel_Run, Harmonic1DModel_Dispose
+
+   !> Nr of dimension of the system + bath 
+   INTEGER :: NDim
 
    ! Variables of the system
    REAL    :: QFreq                     !< Frequency of the harmonic oscillator
@@ -145,7 +153,7 @@ MODULE Harmonic1DModel
 !*******************************************************************************
    SUBROUTINE Harmonic1DModel_Initialize()
       IMPLICIT NONE
-      INTEGER :: iCoord, NDim
+      INTEGER :: iCoord
       LOGICAL, DIMENSION(:), ALLOCATABLE :: LangevinSwitchOn
 
       ! Allocate memory and initialize vectors for trajectory, acceleration and masses
@@ -155,6 +163,10 @@ MODULE Harmonic1DModel
       IF ( BathType ==  NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
          ALLOCATE( X(1+NBath), V(1+NBath), A(1+NBath), APre(1+NBath), MassVector(1+NBath), LangevinSwitchOn(1+NBath) )
          MassVector = (/ MassH, (MassBath, iCoord=1,NBath) /)
+
+      ELSE IF ( BathType ==  DOUBLE_CHAIN ) THEN
+         ALLOCATE( X(1+2*NBath), V(1+2*NBath), A(1+2*NBath), APre(1+2*NBath), MassVector(1+2*NBath), LangevinSwitchOn(1+2*NBath) )
+         MassVector = (/ MassH, (MassBath, iCoord=1,2*NBath) /)
 
       ELSE IF ( BathType == LANGEVIN_DYN ) THEN
          ALLOCATE( X(1), V(1), A(1), APre(1), MassVector(1), LangevinSwitchOn(1) )
@@ -167,10 +179,16 @@ MODULE Harmonic1DModel
       ! Set variables for EOM integration in the microcanonical ensamble (system + bath)
       CALL EvolutionSetup( MolecularDynamics, NDim, MassVector, TimeStep )
 
-      ! Set canonical dynamics at the end of the oscillator chain
+      ! Set canonical dynamics at the end of the oscillator chain or chains
       IF ( BathType == CHAIN_BATH .AND. DynamicsGamma /= 0.0 ) THEN 
          LangevinSwitchOn = .FALSE.
          LangevinSwitchOn( NDim ) = .TRUE.
+         CALL SetupThermostat( MolecularDynamics, DynamicsGamma, Temperature, LangevinSwitchOn )
+      END IF
+      IF ( BathType == DOUBLE_CHAIN .AND. DynamicsGamma /= 0.0 ) THEN 
+         LangevinSwitchOn = .FALSE.
+         LangevinSwitchOn( 1+NBath ) = .TRUE.  ! end of the first chain
+         LangevinSwitchOn( NDim )    = .TRUE.  ! end of the second chain
          CALL SetupThermostat( MolecularDynamics, DynamicsGamma, Temperature, LangevinSwitchOn )
       END IF
 
@@ -272,9 +290,19 @@ MODULE Harmonic1DModel
          ! INITIALIZATION OF THE COORDINATES AND MOMENTA OF THE SYSTEM
          !*************************************************************
 
-         ! Set initial conditions
-         X(:) = 0.0
-         V(:) = 0.0
+         ! Set initial conditions of the system
+         X(1) = 0.0
+         V(1) = 0.0
+
+         ! Set initial conditions of the bath
+         IF ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
+               CALL ThermalEquilibriumBathConditions( Bath, X(5:), V(5:), Temperature )
+         ELSE IF ( BathType == DOUBLE_CHAIN ) THEN
+               CALL ThermalEquilibriumBathConditions( DblBath(1), X(5:NBath+4), V(5:NBath+4), Temperature )
+               CALL ThermalEquilibriumBathConditions( DblBath(2), X(NBath+5:2*NBath+4), V(NBath+5:2*NBath+4), Temperature )
+         ELSE IF ( BathType == LANGEVIN_DYN ) THEN
+               ! nothing to do
+         END IF
 
          PRINT "(/,A,F6.1)"," Equilibrating the initial conditions at T = ", Temperature / MyConsts_K2AU
 
@@ -292,11 +320,7 @@ MODULE Harmonic1DModel
 
          ! Compute starting potential and forces
          A(:) = 0.0
-         IF ( BathType == LANGEVIN_DYN ) THEN 
-               PotEnergy = VHarmonic( X, A )
-         ELSE IF ( BathType ==  NORMAL_BATH .OR. BathType == CHAIN_BATH  ) THEN
-               PotEnergy = VHarmonicPlusBath( X, A )
-         END IF
+         PotEnergy = VHarmonic( X, A )
          DO iCoord = 1,size(X)
             A(iCoord) = A(iCoord) / MassVector(iCoord)
          END DO
@@ -309,18 +333,9 @@ MODULE Harmonic1DModel
                ! Store initial accelerations
                APre(:) = A(:)
                ! Propagate for one timestep with Velocity-Verlet and langevin thermostat
-               IF ( BathType == LANGEVIN_DYN ) THEN 
-                     CALL EOM_VelocityVerlet( Equilibration, X, V, A, VHarmonic, PotEnergy )
-               ELSE IF ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH  ) THEN
-                     CALL EOM_VelocityVerlet( Equilibration, X, V, A, VHarmonicPlusBath, PotEnergy )
-               END IF
+               CALL EOM_VelocityVerlet( Equilibration, X, V, A, VHarmonic, PotEnergy )
             ELSE
-               ! Propagate for one timestep with Beeman's method and langevin thermostat
-               IF ( BathType ==  SLAB_POTENTIAL .OR. BathType == LANGEVIN_DYN ) THEN 
-                     CALL EOM_Beeman( Equilibration, X, V, A, APre, VHarmonic, PotEnergy )
-               ELSE IF ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH  ) THEN
-                     CALL EOM_Beeman( Equilibration, X, V, A, APre, VHarmonicPlusBath, PotEnergy )
-               END IF
+               CALL EOM_Beeman( Equilibration, X, V, A, APre, VHarmonic, PotEnergy )
             END IF
 
             ! compute kinetic energy and total energy
@@ -429,11 +444,7 @@ MODULE Harmonic1DModel
          Propagation: DO iStep = 1, NrOfSteps
 
             ! Propagate for one timestep
-            IF ( BathType == LANGEVIN_DYN ) THEN 
-                  CALL EOM_VelocityVerlet( MolecularDynamics, X, V, A, VHarmonic, PotEnergy )
-            ELSE IF ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH  ) THEN
-                  CALL EOM_VelocityVerlet( MolecularDynamics, X, V, A, VHarmonicPlusBath, PotEnergy )
-            END IF
+            CALL EOM_VelocityVerlet( MolecularDynamics, X, V, A, VHarmonic, PotEnergy )
 
             ! Compute kin energy and temperature
             KinEnergy = EOM_KineticEnergy( MolecularDynamics, V )
@@ -605,44 +616,34 @@ MODULE Harmonic1DModel
       REAL, DIMENSION(:), TARGET, INTENT(OUT) :: Forces 
       INTEGER :: NrDOF, i       
       
-      ! Check the number of non frozen degree of freedom
+      ! Check the number of degree of freedom
       NrDOF = size( Positions )
       CALL ERROR( size(Forces) /= NrDOF, "PotentialModule.VHarmonic: array dimension mismatch" )
-      ! Check if the nr of dimension is compatible with the slab maximum size
-      CALL ERROR( (NrDOF /= 1), "PotentialModule.VHarmonic: wrong number of DoFs" )
+      CALL ERROR( (NrDOF /= NDim), "PotentialModule.VHarmonic: wrong number of DoFs" )
       
-      ! Compute potential and forces
+      ! Initialize forces and potential
       VHarmonic = 0.0
-      DO i = 1, NrDOF
-         VHarmonic = VHarmonic + 0.5 * ForceConstant * Positions(i)**2
-         Forces(i) = -  ForceConstant * Positions(i)
-      END DO
+      Forces(:) = 0.0
+
+      ! Compute potential and forces for the system potential
+      VHarmonic = VHarmonic + 0.5 * ForceConstant * Positions(1)**2
+      Forces(1) = -  ForceConstant * Positions(1)
+
+      IF ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
+         ! Add potential and forces of the bath and the coupling
+         CALL BathPotentialAndForces( Bath, Positions(1), Positions(2:), VHarmonic, Forces(1), Forces(2:) ) 
+
+      ELSE IF ( BathType == DOUBLE_CHAIN ) THEN
+         ! Add potential and forces of the bath and the coupling
+         CALL BathPotentialAndForces( DblBath(1), Positions(1), Positions(2:NBath+1), VHarmonic, Forces(1), Forces(2:NBath+1) ) 
+         CALL BathPotentialAndForces( DblBath(2), Positions(1), Positions(NBath+2:2*NBath+1), VHarmonic, &
+                                                                                          Forces(1), Forces(NBath+2:2*NBath+1) ) 
+
+      ELSE IF ( BathType == LANGEVIN_DYN ) THEN
+         ! nothing to do
+      END IF
       
    END FUNCTION VHarmonic
-
-!*******************************************************************************
-!> test harmonic potential plus bath (input and output in AU).
-!>
-!> @param Positions    Array with 1 cartesian coordinates for the brownian HO
-!> @param Forces       Output array with the derivatives of the potential 
-!> @param vv           output potential
-!*******************************************************************************     
-   REAL FUNCTION VHarmonicPlusBath( Positions, Forces )
-      IMPLICIT NONE
-      REAL, DIMENSION(:), TARGET, INTENT(IN)  :: Positions
-      REAL, DIMENSION(:), TARGET, INTENT(OUT) :: Forces 
-      ! Number of non frozen degrees of freedom
-      INTEGER :: NrDOF, i       
-      
-      ! Check the number of non frozen degree of freedom
-      NrDOF = size( Positions )
-      CALL ERROR( size(Forces) /= NrDOF, "PotentialModule.VHarmonicPlusBath: array dimension mismatch" )
-      
-      ! Compute potential and forces
-      VHarmonicPlusBath = VHarmonic(Positions(1:1), Forces(1:1) )
-      CALL BathPotentialAndForces( Bath, Positions(1), Positions(2:), VHarmonicPlusBath, Forces(1), Forces(2:) ) 
-      
-   END FUNCTION VHarmonicPlusBath
 
 !*************************************************************************************************
 
