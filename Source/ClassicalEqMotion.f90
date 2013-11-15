@@ -479,7 +479,7 @@ MODULE ClassicalEqMotion
             Vel(iDoF) = Vel(iDoF) + 0.5*Acc(iDoF)*EvolData%dt
          END IF
       END DO
-    
+
    END SUBROUTINE EOM_LangevinSecondOrder   
 
 

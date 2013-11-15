@@ -302,7 +302,7 @@ MODULE PolymerEquilibriumOscillator
          WRITE(AvCoordOutputUnit, "(A,I6,A,/)") "# average coordinate vs time (fs | Ang) - ", NrTrajs, " trajectories "
          InitTUnit = LookForFreeUnit()
          OPEN( FILE="EquilibrationFinalT.dat", UNIT=InitTUnit )
-         WRITE(InitTUnit, "(A,I6,A,/)") "# average T and sigma T for all the trajectories "
+         WRITE(InitTUnit, "(A,I6,A,/)") "# average T over all the trajectories vs Time (K | fs )", NrTrajs, " trajectories "
       ENDIF
 
       IF ( PrintType == DEBUG ) THEN

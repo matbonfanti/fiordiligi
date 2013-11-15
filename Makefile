@@ -280,6 +280,11 @@ ${OBJDIR}/Harmonic1DModel.o : ${SRCDIR}/Harmonic1DModel.f90 ${OBJDIR}/SharedData
 ${OBJDIR}/PolymerEquilibriumOscillator.o : ${SRCDIR}/PolymerEquilibriumOscillator.f90 ${OBJDIR}/SharedData.o ${OBJDIR}/InputField.o \
                               ${OBJDIR}/ClassicalEqMotion.o ${OBJDIR}/RandomNumberGenerator.o ${COMMONDEP}
 
+# Program to simulate the correlation functions with ring polymer dynamics
+${OBJDIR}/PolymerVibrationalRelax.o : ${SRCDIR}/PolymerVibrationalRelax.f90 ${OBJDIR}/SharedData.o ${OBJDIR}/InputField.o \
+                              ${OBJDIR}/ClassicalEqMotion.o ${OBJDIR}/RandomNumberGenerator.o \
+                              ${OBJDIR}/PotentialModule.o ${OBJDIR}/IndependentOscillatorsModel.o ${COMMONDEP}
+
 # Set error and warning procedures
 ${OBJDIR}/ErrorTrap.o        : ${SRCDIR}/ErrorTrap.f90
 
