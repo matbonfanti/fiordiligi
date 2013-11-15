@@ -373,7 +373,7 @@ MODULE VibrationalRelax
          AverageESys(0)         = AverageESys(0)  + KSys + VSys
          AverageEBath(0)        = AverageEBath(0) + KBath + VBath
          AverageECoup(0)        = AverageECoup(0) + Ecoup
-         AverageCoord(1:NDim,0) = AverageCoord(1:NDim,0) + X(:)
+         IF ( PrintType >= FULL )  AverageCoord(1:NDim,0) = AverageCoord(1:NDim,0) + X(:)
 
          IF ( PrintType >= FULL ) THEN
             XatT0(:) = X(:) 
@@ -513,13 +513,13 @@ MODULE VibrationalRelax
           AverageESys(iStep)*MyConsts_Hartree2eV, AverageECoup(iStep)*MyConsts_Hartree2eV,  AverageEBath(iStep)*MyConsts_Hartree2eV
       END DO
 
-      ! PRINT average coordinates
-      DO iStep = 0, NrOfPrintSteps
-         WRITE(AvCoordOutputUnit,"(F14.8,4F14.8)") TimeStep*real(PrintStepInterval*iStep)/MyConsts_fs2AU, &
-                                    AverageCoord(1:4,iStep)*MyConsts_Bohr2Ang 
-      END DO
-
       IF ( PrintType >= FULL ) THEN
+
+         ! PRINT average coordinates
+         DO iStep = 0, NrOfPrintSteps
+            WRITE(AvCoordOutputUnit,"(F14.8,4F14.8)") TimeStep*real(PrintStepInterval*iStep)/MyConsts_fs2AU, &
+                                       AverageCoord(1:4,iStep)*MyConsts_Bohr2Ang 
+         END DO
 
          ! PRINT average bath coordinates
          DO iCoord = 1, NDim-4

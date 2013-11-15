@@ -29,6 +29,8 @@ PROGRAM JK6_v3
    USE SharedData
    USE InputField
    USE VibrationalRelax
+   USE PolymerVibrationalRelax
+   USE PolymerEquilibriumOscillator
    USE ThermalEquilibrium
    USE Harmonic1DModel
    USE IndependentOscillatorsModel
@@ -184,11 +186,15 @@ PROGRAM JK6_v3
          WRITE(*,"(/,A)") " * Atom-surface vibrational relaxation simulation "
       CASE( SCATTERING )
          WRITE(*,"(/,A)") " * Atom-surface sticking simulation "
+      CASE( RPMD_RELAXATION )
+         WRITE(*,"(/,A)") " * Atom-surface vibrational relaxation simulation with Ring Polymer MD"
+      CASE( RPMD_EQUILIBRIUM )
+         WRITE(*,"(/,A)") " * Equilibrium simulation with Ring Polymer MD"
       CASE( POTENTIALPRINT )
          WRITE(*,"(/,A)") " * Analysis of the potential energy surfaces "
    END SELECT
 
-   IF ( .NOT. HARMONICMODEL ) THEN
+   IF ( .NOT. HARMONICMODEL .AND. .NOT. RPMD_EQUILIBRIUM ) THEN
       IF ( Collinear )  WRITE(*,"(/,A)") " * The atom is fixed in the collinear geometry "
       WRITE(*,898) MassH / MyConsts_Uma2Au, MassC / MyConsts_Uma2Au
    END IF
@@ -263,9 +269,9 @@ PROGRAM JK6_v3
          CALL SetupIndepOscillatorsModel( DblBath(2), NBath, 1, SpectralDensityFile2, MassBath, 0.0 )
    END IF
    
-   IF  ( RunType == NORMAL_BATH .OR. RunType == CHAIN_BATH ) THEN
+   IF  ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
       PRINT "(/,A,F10.6,/)"," * Bath distorsion force constant:              ", GetDistorsionForce( Bath ) 
-   ELSE IF ( RunType == DOUBLE_CHAIN ) THEN
+   ELSE IF ( BathType == DOUBLE_CHAIN ) THEN
       PRINT "(/,A,F10.6)"," * Bath 1 distorsion force constant:              ", GetDistorsionForce( DblBath(1) ) 
       PRINT "(A,F10.6,/)"," * Bath 2 distorsion force constant:              ", GetDistorsionForce( DblBath(2) ) 
    END IF
@@ -281,6 +287,10 @@ PROGRAM JK6_v3
          CALL Harmonic1DModel_ReadInput( InputData )
       CASE( RELAXATION )
          CALL VibrationalRelax_ReadInput( InputData )
+      CASE( RPMD_RELAXATION )
+         CALL PolymerVibrationalRelax_ReadInput( InputData )
+      CASE( RPMD_EQUILIBRIUM )
+         CALL PolymerEquilibriumOscillator_ReadInput( InputData )
       CASE( SCATTERING )
          ! ...
       CASE( POTENTIALPRINT )
@@ -303,6 +313,12 @@ PROGRAM JK6_v3
       CASE( RELAXATION )
          CALL VibrationalRelax_Initialize( )
          CALL VibrationalRelax_Run()
+      CASE( RPMD_RELAXATION )
+         CALL PolymerVibrationalRelax_Initialize( )
+         CALL PolymerVibrationalRelax_Run()
+      CASE( RPMD_EQUILIBRIUM )
+         CALL PolymerEquilibriumOscillator_Initialize( )
+         CALL PolymerEquilibriumOscillator_Run( )
       CASE( SCATTERING )
          ! ...
       CASE( POTENTIALPRINT )
@@ -320,6 +336,10 @@ PROGRAM JK6_v3
          CALL Harmonic1DModel_Dispose()
       CASE( RELAXATION )
          CALL VibrationalRelax_Dispose()
+      CASE( RPMD_RELAXATION )
+         CALL PolymerVibrationalRelax_Dispose()
+      CASE( RPMD_EQUILIBRIUM )
+         CALL PolymerEquilibriumOscillator_Dispose()
       CASE( SCATTERING )
          ! ...
       CASE( POTENTIALPRINT )

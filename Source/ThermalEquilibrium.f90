@@ -16,8 +16,8 @@
 !
 !>  \par Updates
 !>  \arg 23 October 2013: double chain bath has been implemented
+!>  \arg 8 Novembre 2013: implemented the log of the input variables
 !                
-!>  \todo     Implement the log of the input variables
 !>  \todo     Fix FT of the autocorrelation functions (they should be cosine transform)
 !>  \todo     Implement an option to print the xyz trajectory to visualize the traj
 !
@@ -117,23 +117,24 @@ MODULE ThermalEquilibrium
       ! Set nr of steps of the equilibration
       CALL SetFieldFromInput( InputData, "NrEquilibrSteps", NrEquilibSteps, int(10.0*(1.0/EquilGamma)/EquilTStep) )
 
-! 
-!       WRITE(*, 903) InitEnergy*MyConsts_Hartree2eV, (InitEnergy-MinimumEnergy)*MyConsts_Hartree2eV, &
-!                     NrOfInitSnapshots, TimeBetweenSnaps/MyConsts_fs2AU
-! 
-!       WRITE(*, 904) NrTrajs, TimeStep/MyConsts_fs2AU, NrOfSteps, NrOfPrintSteps
-! 
-!    903 FORMAT(" * Initial conditions of the atom-surface system ", /,&
-!               " * Absolute initial energy (eV):                ",F10.4,/,& 
-!               " *  - w.r.t. the bottom of the well (eV):       ",F10.4,/,& 
-!               " * Nr of initial system snapshots:              ",I10,  /,& 
-!               " * Time between snapshots (fs):                 ",F10.4,/ )
-! 
-!    904 FORMAT(" * Dynamical simulation variables               ", /,&
-!               " * Nr of trajectories:                          ",I10,  /,& 
-!               " * Propagation time step (fs):                  ",F10.4,/,& 
-!               " * Nr of time steps of each trajectory:         ",I10,  /,& 
-!               " * Nr of print steps of each trajectory:        ",I10,  / )
+
+      WRITE(*, 905) Temperature/MyConsts_K2AU, EquilTStep/MyConsts_fs2AU,  &
+                    EquilGamma*MyConsts_fs2AU, NrEquilibSteps
+
+      WRITE(*, 904) NrTrajs, TimeStep/MyConsts_fs2AU, NrOfSteps, NrOfPrintSteps
+
+
+   904 FORMAT(" * Dynamical simulation variables               ", /,&
+              " * Nr of trajectories:                          ",I10,  /,& 
+              " * Propagation time step (fs):                  ",F10.4,/,& 
+              " * Nr of time steps of each trajectory:         ",I10,  /,& 
+              " * Nr of print steps of each trajectory:        ",I10,  / )
+
+   905 FORMAT(" * Equilibration variables                      ", /,&
+              " * Temperature of the system+surface:           ",F10.4,/,&
+              " * Equilibration time step (fs):                ",F10.4,/,& 
+              " * Gamma of the Langevin force (fs^-1):         ",F10.4,/,& 
+              " * Nr of equilibration steps:                   ",I10,  / )
 
    END SUBROUTINE ThermalEquilibrium_ReadInput
 
@@ -333,9 +334,7 @@ MODULE ThermalEquilibrium
          ! Compute starting potential and forces
          A(:) = 0.0
          PotEnergy = ThermalEquilibriumPotential( X, A )
-         DO iCoord = 1,size(X)
-            A(iCoord) = A(iCoord) / MassVector(iCoord)
-         END DO
+         A(:) = A(:) / MassVector(:)
 
          ! Do an equilibration run
          EquilibrationCycle: DO iStep = 1, NrEquilibSteps
@@ -533,7 +532,6 @@ MODULE ThermalEquilibrium
          ! print the average values of that trajectory 
          WRITE(*,700)  TempAverage, TempVariance, AverageCoord(1:3)* MyConsts_Bohr2Ang, StDevCoord(1:3)* MyConsts_Bohr2Ang, &
                      AverageCoord(4)* MyConsts_Bohr2Ang, StDevCoord(4)* MyConsts_Bohr2Ang
-
 
 !             IF  ( RunType == EQUILIBRIUM ) THEN
 !                ! write the xyz file of the trajectory, if requested

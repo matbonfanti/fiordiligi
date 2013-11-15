@@ -16,6 +16,14 @@
 !>  \date             20 January 2013
 !>
 !***************************************************************************************
+!
+!>  \par Updates
+!>  \arg 8 Novembre 2013: thermoswitch is now an optional argument of the
+!>                        SetupThermostat subroutine (default: TRUE for all entries)
+!
+!>  \todo         
+!>                 
+!***************************************************************************************
 
 MODULE ClassicalEqMotion
    USE RandomNumberGenerator
@@ -26,7 +34,9 @@ MODULE ClassicalEqMotion
       PUBLIC :: Evolution
       PUBLIC :: EvolutionSetup, SetupThermostat, DisposeThermostat, DisposeEvolutionData
       PUBLIC :: EOM_KineticEnergy
-      PUBLIC :: EOM_VelocityVerlet, EOM_Beeman
+      PUBLIC :: EOM_VelocityVerlet, EOM_Beeman, EOM_LangevinSecondOrder
+
+      REAL, PARAMETER :: Over2Sqrt3 = 1.0 / ( 2.0 * SQRT(3.0) )
 
       LOGICAL :: GaussianNoise = .TRUE.
       
@@ -39,6 +49,7 @@ MODULE ClassicalEqMotion
          REAL  :: Gamma                                  !< Integrated Langevin friction for one timestep
          REAL  :: FrictionCoeff_HalfDt                   !< Coefficient including Langevin friction for half timestep
          REAL, DIMENSION(:), POINTER :: ThermalNoise     !< Vector of the thermal noise sigma
+         REAL, DIMENSION(:), POINTER :: ThermalNoise2     !< Vector of the thermal noise sigma
          LOGICAL, DIMENSION(:), POINTER :: ThermoSwitch  !< Vector to set the thermostat on or off for the dof
          LOGICAL :: HasThermostat = .FALSE.              !< Thermostat data has been setup
          LOGICAL :: IsSetup = .FALSE.                    !< Evolution data has been setup
@@ -60,8 +71,11 @@ MODULE ClassicalEqMotion
 
       TYPE( Evolution ), INTENT(INOUT)  :: EvolutionData
       INTEGER, INTENT(IN)               :: NDoF
-      REAL, DIMENSION(NDoF), INTENT(IN) :: MassVector
+      REAL, DIMENSION(:), INTENT(IN)    :: MassVector
       REAL, INTENT(IN)                  :: TimeStep
+
+      ! Check dimension of mass vector
+      CALL ERROR( size(MassVector) /= NDoF, "ClassicalEqMotion.EvolutionSetup: MassVector array dimension mismatch" )
 
       ! warn user if overwriting previously setup data
       CALL WARN( EvolutionData%IsSetup, "ClassicalEqMotion.EvolutionSetup: overwriting evolution data" ) 
@@ -98,9 +112,9 @@ MODULE ClassicalEqMotion
    SUBROUTINE SetupThermostat( EvolData, Gamma, Temperature, ThermoSwitch )
       IMPLICIT NONE
 
-      TYPE( Evolution ), INTENT(INOUT)  :: EvolData
-      REAL, INTENT(IN)                  :: Gamma, Temperature
-      LOGICAL, DIMENSION(:), INTENT(IN) :: ThermoSwitch
+      TYPE( Evolution ), INTENT(INOUT)            :: EvolData
+      REAL, INTENT(IN)                            :: Gamma, Temperature
+      LOGICAL, DIMENSION(:), INTENT(IN), OPTIONAL :: ThermoSwitch
 
       INTEGER :: iDoF
       
@@ -109,7 +123,7 @@ MODULE ClassicalEqMotion
       ! warn user if overwriting previously setup data
       CALL WARN( EvolData%HasThermostat, "ClassicalEqMotion.SetupThermostat: overwriting thermostat data" ) 
       ! error if the thermostat switch has wrong dimension
-      CALL ERROR( size(ThermoSwitch) /= EvolData%NDoF , &
+      IF ( PRESENT(ThermoSwitch) )  CALL ERROR( size(ThermoSwitch) /= EvolData%NDoF , &
                                           "ClassicalEqMotion.SetupThermostat: thermostat switch mismatch" )
 
       ! Store gamma value
@@ -119,14 +133,22 @@ MODULE ClassicalEqMotion
       
       ! Store the Thermostat switch array
       ALLOCATE( EvolData%ThermoSwitch(EvolData%NDoF) )
-      EvolData%ThermoSwitch(:) = ThermoSwitch(:)
+      IF ( PRESENT(ThermoSwitch) ) THEN
+         EvolData%ThermoSwitch(:) = ThermoSwitch(:)
+      ELSE
+         EvolData%ThermoSwitch(:) = .TRUE.
+      END IF
 
       ! Set standard deviations of the thermal noise
-      IF ( .NOT. EvolData%HasThermostat )  ALLOCATE( EvolData%ThermalNoise( EvolData%NDoF ) )
+      IF ( .NOT. EvolData%HasThermostat ) &
+                 ALLOCATE( EvolData%ThermalNoise( EvolData%NDoF ), EvolData%ThermalNoise2( EvolData%NDoF ) )
       EvolData%ThermalNoise(:) = 0.0
+      EvolData%ThermalNoise2(:) = 0.0
       DO iDoF = 1, EvolData%NDoF
-         IF ( EvolData%ThermoSwitch(iDoF) ) &
+         IF ( EvolData%ThermoSwitch(iDoF) ) THEN
             EvolData%ThermalNoise(iDoF) = sqrt( 2.0*Temperature*EvolData%Mass(iDoF)*Gamma/EvolData%dt )
+            EvolData%ThermalNoise2(iDoF) = sqrt( 2.0*Temperature*Gamma/EvolData%Mass(iDoF) )
+         END IF
       END DO
 
       ! Themostat data is now setup
@@ -395,6 +417,71 @@ MODULE ClassicalEqMotion
       Acc(:) = NewAcc(:)
 
    END SUBROUTINE EOM_Beeman   
+
+
+!*******************************************************************************
+!> Propagate trajectory with Vanden-Eijnden and Ciccoti algorith.
+!>
+!> @param EvolData     Evolution data type
+!*******************************************************************************
+   SUBROUTINE EOM_LangevinSecondOrder( EvolData, Pos, Vel, Acc, GetPotential, V )
+      IMPLICIT NONE
+
+      TYPE( Evolution ), INTENT(INOUT)                 :: EvolData
+      REAL, DIMENSION( EvolData%NDoF ), INTENT(INOUT)  :: Pos, Vel, Acc
+      REAL, INTENT(OUT)                                :: V
+
+      INTERFACE
+         REAL FUNCTION GetPotential( X, Force )
+            REAL, DIMENSION(:), TARGET, INTENT(IN)  :: X
+            REAL, DIMENSION(:), TARGET, INTENT(OUT) :: Force
+         END FUNCTION GetPotential
+      END INTERFACE
+
+      INTEGER :: iDoF
+      REAL, DIMENSION( EvolData%NDoF ) :: A
+      REAL, DIMENSION( EvolData%NDoF ) :: Xi, Eta 
+
+      ! (0) COMPUTE NECESSARY RANDOM VALUES
+      DO iDoF = 1, EvolData%NDoF
+         IF ( EvolData%ThermoSwitch(iDoF) ) THEN
+            Xi(iDoF)  = GaussianRandomNr(1.0)
+            Eta(iDoF) = GaussianRandomNr(1.0)
+            A(iDoF) = 0.5 * EvolData%dt**2 * ( Acc(iDoF) - EvolData%Gamma*Vel(iDoF) ) + &
+                     EvolData%ThermalNoise2(iDoF) * EvolData%dt**(1.5) * ( 0.5 * Xi(iDoF) + Over2Sqrt3 * Eta(iDoF)  )
+         ELSE IF ( .NOT. EvolData%ThermoSwitch(iDoF) ) THEN
+            A(iDoF) = 0.5 * EvolData%dt**2 * Acc(iDoF)
+         END IF
+      END DO
+
+      ! (1) PARTIAL UPDATE OF THE VELOCITIES
+      DO iDoF = 1, EvolData%NDoF
+         IF ( EvolData%ThermoSwitch(iDoF) ) THEN
+            Vel(iDoF) = (1.0 - EvolData%Gamma*EvolData%dt) * Vel(iDoF) + 0.5*Acc(iDoF)*EvolData%dt
+         ELSE IF ( .NOT. EvolData%ThermoSwitch(iDoF) ) THEN
+            Vel(iDoF) = Vel(iDoF) + 0.5*Acc(iDoF)*EvolData%dt
+         END IF
+      END DO
+
+      ! (2) UPDATE POSITION
+      Pos(:) = Pos(:) + Vel(:)*EvolData%dt + A(:)
+
+      ! (3) NEW FORCES AND ACCELERATIONS 
+      V = GetPotential( Pos, Acc )       ! Compute new forces and store the potential value
+      Acc(:) = Acc(:)  / EvolData%Mass(:)
+
+      ! (4) FINAL UPDATE OF THE VELOCITIES
+      DO iDoF = 1, EvolData%NDoF
+         IF ( EvolData%ThermoSwitch(iDoF) ) THEN
+            Vel(iDoF) = Vel(iDoF) + 0.5*Acc(iDoF)*EvolData%dt + SQRT(EvolData%dt) * EvolData%ThermalNoise2(iDoF) * Xi(iDoF) &
+                                  - EvolData%Gamma * A(iDoF)
+         ELSE IF ( .NOT. EvolData%ThermoSwitch(iDoF) ) THEN
+            Vel(iDoF) = Vel(iDoF) + 0.5*Acc(iDoF)*EvolData%dt
+         END IF
+      END DO
+    
+   END SUBROUTINE EOM_LangevinSecondOrder   
+
 
 !    SUBROUTINE EOM_ImpulseIntegrator( EvolData, Pos, Vel, Acc, PrePos, GetPotential, V )
 !       IMPLICIT NONE

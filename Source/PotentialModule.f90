@@ -407,6 +407,7 @@ MODULE PotentialModule
          REAL, DIMENSION(:), TARGET, INTENT(OUT) :: Forces 
          REAL, DIMENSION(124) :: Dummy
 
+         Dummy = 0.0
          ! use the full potential with the carbon atoms in the equilibrium geometry
          V = VHSticking( (/ Positions, MinSlab(:) /), Dummy(:) ) 
          Forces(1:4) = Dummy(1:4)

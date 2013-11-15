@@ -25,6 +25,7 @@
 !>  \par Updates
 !>  \arg 22 October 2013: to implement the possibility of having multiple baths, 
 !>             a bath datatype has been implemented and all the subroutine have been adapted accordingly
+!>  \arg 8 Novembre 2013: implemented debug output of frequencies and couplings
 !
 !>  \todo    Initial thermal conditions of a chain bath can be refined by taking into account the coupling
 !>  \todo    Quasi-classical 0K conditions of a chain bath need to be implemented
@@ -42,7 +43,7 @@ MODULE IndependentOscillatorsModel
    PRIVATE
    PUBLIC :: SetupIndepOscillatorsModel, BathPotentialAndForces, DisposeIndepOscillatorsModel
    PUBLIC :: ThermalEquilibriumBathConditions, ZeroKelvinBathConditions
-   PUBLIC :: EnergyOfTheBath, GetDistorsionForce
+   PUBLIC :: EnergyOfTheBath, GetDistorsionForce, GetDissipatedPower
 
    PUBLIC :: BathData
 
@@ -97,6 +98,9 @@ CONTAINS
       TYPE(SplineType) :: SpectralDensitySpline
       REAL, DIMENSION(124) :: Coord
       REAL :: Value, D0
+#if defined(VERBOSE_OUTPUT)
+      INTEGER :: SpectralDensityUnit
+#endif
 
       ! If data already setup give a warning and deallocate memory
       CALL WARN( Bath%BathIsSetup, "IndependentOscillatorsModel.SetupIndepOscillatorsModel: overwriting bath data" )
@@ -206,13 +210,25 @@ CONTAINS
 
       ENDIF
 
-      DO iBath = 1, Bath%BathSize
-         WRITE(888,*) Bath%Frequencies(iBath), Bath%Couplings(iBath) 
-      END DO
-      WRITE(888,*)
-
       ! Module is setup
       Bath%BathIsSetup = .TRUE.
+
+#if defined(VERBOSE_OUTPUT)
+      SpectralDensityUnit = LookForFreeUnit()
+      OPEN( FILE="ReadSpectralDensity.dat", UNIT=SpectralDensityUnit )
+      WRITE(SpectralDensityUnit, "(A,A)") "# Spectral Density read from file: ", TRIM(ADJUSTL(FileName))
+
+      IF ( Bath%BathType == CHAIN_BATH ) THEN
+         WRITE(SpectralDensityUnit, "(A,A,/)") "# Bath in linear chain form "
+      ELSE IF ( Bath%BathType == STANDARD_BATH ) THEN
+         WRITE(SpectralDensityUnit, "(A,A,/)") "# Bath in normal form "
+      END IF
+
+      DO iBath = 1, Bath%BathSize
+         WRITE(SpectralDensityUnit,"(2F20.12)") Bath%Frequencies(iBath), Bath%Couplings(iBath) 
+      END DO
+      WRITE(SpectralDensityUnit,"(/)") 
+#endif
 
 #if defined(VERBOSE_OUTPUT)
       WRITE(*,*) " Independent oscillator model potential has been setup"
@@ -549,6 +565,35 @@ CONTAINS
 
 !===============================================================================================================
 
+!*******************************************************************************
+!                     GetDissipatedPower
+!*******************************************************************************
+!> Give the distorsion force, stored in the bath data type.
+!>
+!> @param   Bath     Bath data type 
+!> @result  Dist     Distorsion force of the bath     
+!*******************************************************************************     
+   REAL FUNCTION GetDissipatedPower( Bath, QBath, CouplVelocity ) RESULT( Power )
+      IMPLICIT NONE
+      TYPE(BathData), INTENT(IN)     :: Bath
+      REAL, INTENT(IN), DIMENSION(:) :: QBath 
+      REAL, INTENT(IN)               :: CouplVelocity
+      INTEGER :: iBath
+
+      IF ( Bath%BathType == CHAIN_BATH ) THEN
+         Power = Bath%Couplings(1)*QBath(1)*CouplVelocity
+      ELSE IF ( Bath%BathType == STANDARD_BATH ) THEN
+         Power = 0.0
+         DO iBath = 1, Bath%BathSize
+            Power = Power + Bath%Couplings(iBath) * QBath(iBath)
+         END DO
+         Power = Power * CouplVelocity
+      END IF
+
+   END FUNCTION GetDissipatedPower
+
+
+!===============================================================================================================
 
 !*******************************************************************************
 !                     HessianOfTheBath

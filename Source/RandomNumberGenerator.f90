@@ -32,7 +32,7 @@ MODULE RandomNumberGenerator
 
    PRIVATE
    PUBLIC :: SetSeed, UniformRandomNr, GaussianRandomNr
-   PUBLIC :: TestGaussianDistribution
+   PUBLIC :: TestGaussianDistribution, TestGaussianDistribution2
 
    ! Integer type for the random number generation
    INTEGER, PARAMETER :: K4B=selected_int_kind(9)
@@ -51,10 +51,13 @@ CONTAINS
       IMPLICIT NONE
       REAL, INTENT(IN) :: Average, Sigma
       INTEGER, INTENT(IN) :: MaxN
-      INTEGER(K4B), INTENT(IN), OPTIONAL :: Seed
+!       INTEGER(K4B), INTENT(IN), OPTIONAL :: Seed
+      INTEGER, INTENT(IN), OPTIONAL :: Seed
 
       INTEGER :: PrintStep, iN
-      REAL :: AverageEst = 0.0, SigmaEst = 0.0, Random 
+      REAL :: Random1, Random2 
+      REAL :: AverageEst1 = 0.0, SigmaEst1 = 0.0
+      REAL :: AverageEst2 = 0.0, SigmaEst2 = 0.0
 
       ! In case initialize seed
       IF ( Present( Seed ) )   CALL SetSeed( Seed )
@@ -64,37 +67,80 @@ CONTAINS
 
       ! Print intestation of the table
       WRITE(123,*) "# Nr of random numbers, error in Average value, error in Standard deviation "
+      WRITE(124,*) "# Nr of random numbers, error in Average value, error in Standard deviation "
 
-      AverageEst = 0.0
-      SigmaEst = 0.0
+      AverageEst1 = 0.0
+      SigmaEst1 = 0.0
+      AverageEst2 = 0.0
+      SigmaEst2 = 0.0
       ! Cycle over nr of number to generate
       DO iN = 1, MaxN
             ! Generate gaussian rnd number
-           Random = Average + GaussianRandomNr( Sigma )
+           Random1 = Average + GaussianRandomNr( Sigma )
+           Random2 = Average + GaussianRandomNr( Sigma )
 !             Random = Average + UniformRandomNr( -sqrt(3.)*Sigma, sqrt(3.)*Sigma )
             ! increment sum and squared sum
-            AverageEst = AverageEst + Random
-            SigmaEst = SigmaEst + Random**2
+            AverageEst1 = AverageEst1 + Random1
+            SigmaEst1 = SigmaEst1 + Random1**2
+            AverageEst2 = AverageEst2 + Random2
+            SigmaEst2 = SigmaEst2 + Random2**2
             ! IF it's a printing step, print average and st dev
             IF ( mod( iN, PrintStep ) == 0 ) THEN
-               WRITE(123,*) iN, AverageEst/iN-Average, sqrt(SigmaEst/iN-(AverageEst/iN)**2)-Sigma
+               WRITE(123,*) iN, AverageEst1/iN-Average, sqrt(SigmaEst1/iN-(AverageEst1/iN)**2)-Sigma
+               WRITE(124,*) iN, AverageEst2/iN-Average, sqrt(SigmaEst2/iN-(AverageEst2/iN)**2)-Sigma
             ENDIF
       END DO
 
       WRITE(123,*) " "
       WRITE(123,*) "# Exact   ", Average, Sigma
+      WRITE(124,*) " "
+      WRITE(124,*) "# Exact   ", Average, Sigma
 
    END SUBROUTINE TestGaussianDistribution
 
+
+   SUBROUTINE TestGaussianDistribution2( Sigma, MaxN, Seed )
+      IMPLICIT NONE
+      REAL, INTENT(IN) :: Sigma
+      INTEGER, INTENT(IN) :: MaxN
+      INTEGER, INTENT(IN), OPTIONAL :: Seed
+
+      INTEGER, DIMENSION(61) :: IntCounter
+      REAL    :: Random
+      INTEGER :: iN, RanIndex
+
+      WRITE(122,*) "# Interval of x, Nr of random numbers "
+
+      ! In case initialize seed
+      IF ( Present( Seed ) )   CALL SetSeed( Seed )
+
+      IntCounter(:) = 0
+
+      DO iN = 1, MaxN 
+
+         Random = GaussianRandomNr( Sigma )
+         RanIndex = CEILING( 30.0 + 10.*Random/Sigma )
+         IF ( RanIndex >= 1 .OR. RanIndex <= 61 ) THEN
+            IntCounter(RanIndex) =  IntCounter(RanIndex) + 1
+         END IF
+
+      END DO
+
+      DO iN = 1, 61
+         WRITE(122,*)  (real(iN-31)/10.)*Sigma, IntCounter(iN)
+      END DO
+
+   END SUBROUTINE TestGaussianDistribution2
 
    !****************************************************************************
 
    SUBROUTINE SetSeed( Seed )
       IMPLICIT NONE
-      INTEGER(K4B), INTENT(IN) :: Seed
+!       INTEGER(K4B), INTENT(IN) :: Seed
+      INTEGER, INTENT(IN) :: Seed
       REAL :: Temp
 
-      CALL RANDOM_SEED( put= (/ Seed, Seed, Seed, Seed, Seed, Seed, Seed, Seed /) )
+      CALL RANDOM_SEED( put= (/ Seed /) )
 
    END SUBROUTINE SetSeed
 
@@ -129,15 +175,15 @@ CONTAINS
 
             ! Generate random number for 2D gaussian function
             Theta = UniformRandomNr( 0., 2.*MyConsts_PI )
-            R     = Sigma * SQRT( -2. * LOG( 1- UniformRandomNr() ) )
+            R     = SQRT( -2. * LOG( 1- UniformRandomNr() ) )
 
             ! TRansform in cartesian coordinate
             X = R * sin( Theta )
             Y = R * cos( Theta )
 
             ! Return one number and store the other
-            RandNr = X
-            TempGaussian = Y
+            RandNr = Sigma * X
+            TempGaussian = Sigma * Y
             GaussianAvail = .TRUE.
 
       ELSE IF ( GaussianAvail ) THEN

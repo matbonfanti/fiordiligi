@@ -32,6 +32,8 @@ MODULE SharedData
                          HARMONICMODEL   = 2,  & ! Test the parameters with a 1D harmonic model 
                          RELAXATION      = 3,  & ! Relaxation dynamics of a CH bound state, with the bath at 0K
                          SCATTERING      = 4,  & ! Scattering calculation with H coming from gas-phase
+                         RPMD_RELAXATION = 5,  & ! Relaxation dynamics with RING POLYMER DYNAMICS
+                         RPMD_EQUILIBRIUM = 6,  & ! Equilibrium simulation with Ring Polymer MD
                          POTENTIALPRINT  = 10    ! Static analysis of the potential 
 
    !> Variable to set the print level of the calculation
@@ -98,6 +100,8 @@ CONTAINS
                 IntNr /= HARMONICMODEL .AND. &
                 IntNr /= RELAXATION .AND. &
                 IntNr /= SCATTERING .AND. &
+                IntNr /= RPMD_RELAXATION .AND. &
+                IntNr /= RPMD_EQUILIBRIUM .AND. &
                 IntNr /= POTENTIALPRINT )
       CALL ERROR( Check, " SharedData.CheckRunType: Invalid RunType option " )
    END SUBROUTINE CheckRunType
