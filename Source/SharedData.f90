@@ -75,6 +75,7 @@ MODULE SharedData
    TYPE(BathData) :: Bath                      !< derived datatype to define a single bath
    TYPE(BathData), DIMENSION(2) :: DblBath     !< derived datatype to define a double chain bath
    LOGICAL        :: ZPECorrection             !< ZeroPointEnergy correction in the initial conditions of the bath (at 0 K)
+   REAL           :: OhmicGamma                !< Gamma of an ohmic spectral density of the bath
 
    ! POSITION, VELOCITY, ACCELERATION 
 

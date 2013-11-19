@@ -123,11 +123,19 @@ PROGRAM JK6_v3
       MassBath = MassBath * MyConsts_Uma2Au
       ! Nr of bath degrees of freedom
       CALL SetFieldFromInput( InputData, "NBath",  NBath ) 
-      ! Read cutoff frequency of the bath, if BathCutOffFreq is not present, it is set to zero
-      CALL SetFieldFromInput( InputData, "BathCutOffFreq", BathCutOffFreq, 0.0 )
+      ! Read ohmic spectral density, when zero read spectral density from file
+      CALL SetFieldFromInput( InputData, "OhmicGamma", OhmicGamma, 0.0 )
+      OhmicGamma = OhmicGamma / MyConsts_fs2AU
+      IF ( OhmicGamma == 0.0 ) THEN
+         ! Read file with spectral density
+         CALL SetFieldFromInput( InputData, "SpectralDensityFile", SpectralDensityFile )
+         ! Read cutoff frequency of the bath, if BathCutOffFreq is not present, it is set to zero
+         CALL SetFieldFromInput( InputData, "BathCutOffFreq", BathCutOffFreq, 0.0 )
+      ELSE
+         ! For an ohmic SD, cutoff freq is compulsory
+         CALL SetFieldFromInput( InputData, "BathCutOffFreq", BathCutOffFreq )
+      END IF
       BathCutOffFreq = BathCutOffFreq * MyConsts_cmmin1toAU
-      ! Read file with spectral density
-      CALL SetFieldFromInput( InputData, "SpectralDensityFile", SpectralDensityFile )
       ! Quasi-classical correction of the initial conditions of the bath (ZPE), relevant only for 0K
       CALL SetFieldFromInput( InputData, "ZPECorrection", ZPECorrection, .FALSE. )
 
@@ -204,7 +212,11 @@ PROGRAM JK6_v3
       CASE( SLAB_POTENTIAL )
          WRITE(*,899) NCarbon, DynamicsGamma*MyConsts_fs2AU
       CASE( NORMAL_BATH ) 
-         WRITE(*,900) NBath, MassBath/MyConsts_Uma2Au, BathCutOffFreq/MyConsts_cmmin1toAU, trim(adjustl(SpectralDensityFile))
+         IF ( OhmicGamma == 0.0 ) THEN
+            WRITE(*,900) NBath, MassBath/MyConsts_Uma2Au, BathCutOffFreq/MyConsts_cmmin1toAU, trim(adjustl(SpectralDensityFile))
+         ELSE
+            WRITE(*,910) NBath, MassBath/MyConsts_Uma2Au, BathCutOffFreq/MyConsts_cmmin1toAU, OhmicGamma*MyConsts_fs2AU
+         END IF
       CASE( CHAIN_BATH )
          WRITE(*,901) NBath, MassBath/MyConsts_Uma2Au, BathCutOffFreq/MyConsts_cmmin1toAU, &
                       DynamicsGamma*MyConsts_fs2AU, trim(adjustl(SpectralDensityFile))
@@ -236,6 +248,11 @@ PROGRAM JK6_v3
               " * Mass of the bath oscillator (UMA):           ",F10.4,/,& 
               " * Cutoff frequency of the bath (1/cm):         ",F10.1,/,& 
               " * File with the spectral density:  "            ,A22,/ )
+   910 FORMAT(" * Bath is a set of independent HO coupled to the system, ohmic SD ",/,&
+              " * Nr of bath oscillators:                      ",I10,  /,& 
+              " * Mass of the bath oscillator (UMA):           ",F10.4,/,& 
+              " * Cutoff frequency of the bath (1/cm):         ",F10.1,/,& 
+              " * Gamma of the spectral density (1/fs):        ",F10.4,/ )
    901 FORMAT(" * Bath is is a linear chain of harmonic oscillators ", /,&
               " * Nr of bath oscillators:                      ",I10,  /,& 
               " * Mass of the bath oscillator (UMA):           ",F10.4,/,& 
@@ -261,7 +278,11 @@ PROGRAM JK6_v3
    
    ! If needed setup bath frequencies and coupling for oscillator bath models
    IF (  BathType == NORMAL_BATH ) THEN
-         CALL SetupIndepOscillatorsModel( Bath, NBath, 0, SpectralDensityFile, MassBath, BathCutOffFreq )
+         IF ( OhmicGamma == 0.0 ) THEN
+            CALL SetupIndepOscillatorsModel( Bath, NBath, 0, SpectralDensityFile, MassBath, BathCutOffFreq )
+         ELSE
+            CALL SetupOhmicIndepOscillatorsModel( Bath, NBath, 0, OhmicGamma, MassBath, BathCutOffFreq )
+         END IF
    ELSE IF (  BathType == CHAIN_BATH ) THEN
          CALL SetupIndepOscillatorsModel( Bath, NBath, 1, SpectralDensityFile, MassBath, BathCutOffFreq )
    ELSE IF ( BathType == DOUBLE_CHAIN ) THEN 

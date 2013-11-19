@@ -41,7 +41,7 @@ MODULE IndependentOscillatorsModel
    IMPLICIT NONE
 
    PRIVATE
-   PUBLIC :: SetupIndepOscillatorsModel, BathPotentialAndForces, DisposeIndepOscillatorsModel
+   PUBLIC :: SetupIndepOscillatorsModel, SetupOhmicIndepOscillatorsModel, BathPotentialAndForces, DisposeIndepOscillatorsModel
    PUBLIC :: ThermalEquilibriumBathConditions, ZeroKelvinBathConditions
    PUBLIC :: EnergyOfTheBath, GetDistorsionForce, GetDissipatedPower
 
@@ -96,8 +96,7 @@ CONTAINS
       LOGICAL :: FileIsPresent
       REAL, DIMENSION(:), ALLOCATABLE :: RdFreq, RdSpectralDens
       TYPE(SplineType) :: SpectralDensitySpline
-      REAL, DIMENSION(124) :: Coord
-      REAL :: Value, D0
+      REAL :: D0
 #if defined(VERBOSE_OUTPUT)
       INTEGER :: SpectralDensityUnit
 #endif
@@ -243,6 +242,103 @@ CONTAINS
 
 !===============================================================================================================
 
+!*******************************************************************************
+!                       SetupOhmicIndepOscillatorsModel
+!*******************************************************************************
+!>  This subroutine can be used to setup the parameters of the oscillator bath
+!>  set the frequency and couplings for an ohmic spectral density with given gamma
+!> 
+!> @param    
+!*******************************************************************************
+   SUBROUTINE SetupOhmicIndepOscillatorsModel( Bath, N, SetBathType, OhmicGamma, Mass, CutOffFreq )
+      IMPLICIT NONE
+      TYPE(BathData)             :: Bath
+      INTEGER, INTENT(IN)        :: N
+      INTEGER, INTENT(IN)        :: SetBathType
+      REAL, INTENT(IN)           :: OhmicGamma
+      REAL, INTENT(IN)           :: Mass
+      REAL, INTENT(IN)           :: CutOffFreq
+
+      REAL :: SpectralDens, D0
+      INTEGER :: iBath
+#if defined(VERBOSE_OUTPUT)
+      INTEGER :: SpectralDensityUnit
+#endif
+
+      ! If data already setup give a warning and deallocate memory
+      CALL WARN( Bath%BathIsSetup, "IndependentOscillatorsModel.SetupOhmicIndepOscillatorsModel: overwriting bath data" )
+      IF (Bath%BathIsSetup) CALL DisposeIndepOscillatorsModel( Bath )
+
+      ! Store number of bath degrees of freedom
+      Bath%BathSize = N
+      ! Set the type of bath
+      Bath%BathType = SetBathType
+      ! Set the mass of the oscillators
+      Bath%OscillatorsMass = Mass
+
+      ! Allocate memory
+      ALLOCATE( Bath%Frequencies(Bath%BathSize), Bath%Couplings(Bath%BathSize) )
+
+      IF ( Bath%BathType == CHAIN_BATH ) THEN
+
+            CALL AbortWithError( "SetupOhmicIndepOscillatorsModel: chain bath not implemented" )
+
+      ELSE IF ( Bath%BathType == STANDARD_BATH ) THEN
+
+            ! Set cutoff frequency and frequency spacing
+            Bath%CutOff = CutOffFreq
+            Bath%DeltaOmega = Bath%CutOff / real( Bath%BathSize)
+
+            ! initialize distortion constant
+            Bath%DistorsionForce = 0.0
+
+            ! Compute frequencies and couplings 
+            D0 = 0.0
+            DO iBath = 1,  Bath%BathSize
+               Bath%Frequencies(iBath) = iBath * Bath%DeltaOmega
+               SpectralDens = Bath%OscillatorsMass * OhmicGamma * Bath%Frequencies(iBath)
+               Bath%Couplings(iBath) = SQRT( 2.0 * Bath%OscillatorsMass * Bath%Frequencies(iBath) * Bath%DeltaOmega *      & 
+                    SpectralDens / MyConsts_PI )
+               ! Compute force constant of the distorsion
+               Bath%DistorsionForce = Bath%DistorsionForce + Bath%Couplings(iBath)**2 / &
+                                                                          ( Bath%OscillatorsMass * Bath%Frequencies(iBath)**2 ) 
+               D0 = D0 + Bath%Couplings(iBath)**2
+            ENDDO
+            D0 = sqrt(D0)
+
+      ENDIF
+
+      ! Module is setup
+      Bath%BathIsSetup = .TRUE.
+
+#if defined(VERBOSE_OUTPUT)
+      SpectralDensityUnit = LookForFreeUnit()
+      OPEN( FILE="ReadSpectralDensity.dat", UNIT=SpectralDensityUnit )
+      WRITE(SpectralDensityUnit, "(A,1F15.6)") "# Ohmic Spectral Density with gamma = ", OhmicGamma
+
+      IF ( Bath%BathType == CHAIN_BATH ) THEN
+         WRITE(SpectralDensityUnit, "(A,/)") "# Bath in linear chain form "
+      ELSE IF ( Bath%BathType == STANDARD_BATH ) THEN
+         WRITE(SpectralDensityUnit, "(A,/)") "# Bath in normal form "
+      END IF
+
+      DO iBath = 1, Bath%BathSize
+         WRITE(SpectralDensityUnit,"(2F20.12)") Bath%Frequencies(iBath), Bath%Couplings(iBath) 
+      END DO
+      WRITE(SpectralDensityUnit,"(/)") 
+#endif
+
+#if defined(VERBOSE_OUTPUT)
+      WRITE(*,*) " Independent oscillator model potential has been setup"
+      WRITE(*,*) " ... (details) ... "
+      WRITE(*,*) " Distorsion frequency coefficient (atomic units): ", Bath%DistorsionForce
+      WRITE(*,*) " D0 (atomic units): ", D0
+      WRITE(*,*) " Oscillators mass (atomic units): ", Bath%OscillatorsMass
+#endif
+
+   END SUBROUTINE SetupOhmicIndepOscillatorsModel
+
+
 
 !*******************************************************************************
 !                     BathPotentialAndForces
@@ -331,6 +427,104 @@ CONTAINS
 
 !===============================================================================================================
 
+!*******************************************************************************
+!               NormalBathOfRings_ThermalConditions
+!*******************************************************************************
+!> Initial conditions for a bath of ring polymers, corresponding to a bath in 
+!> normal form. The coordinates are sampled from the classical thermal distribution
+!> at given T.
+!>
+!> @param Bath            Bath data type 
+!> @param Q               In output, random initial coordinates of the bath
+!> @param V               In output, random initial velocities of the bath
+!> @param BeadsFrequency  Frequency of the interbeads harmonic potential
+!> @param Temperature     Temperature of the classical distribution 
+!*******************************************************************************  
+   SUBROUTINE BathOfRingsThermalConditions( Bath, NBeads, BeadsFrequency, Temperature, Q, V )
+      IMPLICIT NONE
+      TYPE(BathData), INTENT(IN)                         :: Bath
+      INTEGER, INTENT(IN)                                :: NBeads
+      REAL, INTENT(IN)                                   :: BeadsFrequency, Temperature
+      REAL, DIMENSION(NBeads*Bath%BathSize), INTENT(OUT) :: Q, V 
+
+      REAL, DIMENSION(NBeads,NBeads)               :: RingPotentialMatrix, RingNormalModes
+      REAL, DIMENSION(NBeads)                      :: RingEigenvalues
+      REAL, DIMENSION(Bath%BathSize,Bath%BathSize) :: BathPotentialMatrix, BathNormalModes
+      REAL, DIMENSION(Bath%BathSize)               :: BathEigenvalues
+
+      REAL, DIMENSION(NBeads*Bath%BathSize) :: NormalQ, NormalV 
+      INTEGER :: iBath, iBead, kCoord, jBath, jBead
+      REAL    :: SigmaV
+
+      ! Setup bath potential matrix
+      BathPotentialMatrix(:,:) = 0.0
+      IF ( Bath%BathType == CHAIN_BATH ) THEN
+         ! Set potential matrix
+         DO iBath = 1, Bath%BathSize-1
+            BathPotentialMatrix(iBath,iBath+1) = - Bath%Couplings(iBath+1)
+            BathPotentialMatrix(iBath+1,iBath) = - Bath%Couplings(iBath+1)
+            BathPotentialMatrix(iBath,iBath)   =   Bath%OscillatorsMass * Bath%Frequencies(iBath)**2
+         END DO
+         BathPotentialMatrix(Bath%BathSize,Bath%BathSize) = Bath%OscillatorsMass * Bath%Frequencies(Bath%BathSize)**2
+         ! Diagonalize
+         CALL TheOneWithDiagonalization(BathPotentialMatrix, BathNormalModes, BathEigenvalues)
+
+      ELSE IF ( Bath%BathType == STANDARD_BATH ) THEN
+         ! Set potential matrix and its trivial diagonalization
+         BathNormalModes(:,:) = 0.0
+         DO iBath = 1, Bath%BathSize
+            BathEigenvalues(iBath) = Bath%OscillatorsMass *Bath%Frequencies(iBath)**2
+            BathPotentialMatrix(iBath,iBath) = Bath%OscillatorsMass *Bath%Frequencies(iBath)**2
+            BathNormalModes(iBath,iBath) = 1.0
+         END DO
+      END IF
+
+      ! Setup ring potential matrix
+      RingPotentialMatrix(:,:) = 0.0
+      DO iBead = 1, NBeads-1
+         RingPotentialMatrix(iBead,iBead)   = 2.0 * Bath%OscillatorsMass * BeadsFrequency**2
+         RingPotentialMatrix(iBead+1,iBead) = - Bath%OscillatorsMass * BeadsFrequency**2
+         RingPotentialMatrix(iBead,iBead+1) = - Bath%OscillatorsMass * BeadsFrequency**2
+      END DO
+      RingPotentialMatrix(NBeads,NBeads) = 2.0 * BeadsFrequency
+      RingPotentialMatrix(1,NBeads) = - Bath%OscillatorsMass * BeadsFrequency**2
+      RingPotentialMatrix(NBeads,1) = - Bath%OscillatorsMass * BeadsFrequency**2
+
+      ! Diagonalize ring potential
+      CALL TheOneWithDiagonalization(RingPotentialMatrix, RingNormalModes, RingEigenvalues)
+
+      ! Set sigma of the maxwell boltzmann distribution
+      SigmaV = sqrt( Temperature / Bath%OscillatorsMass )
+
+      ! Define random coordinates and velocities in the normal modes representation
+      kCoord = 0
+      DO iBath = 1, Bath%BathSize
+         DO iBead = 1, NBeads
+            kCoord = kCoord + 1
+            NormalQ(kCoord) = GaussianRandomNr( 1.0 ) * SigmaV / SQRT( BathEigenvalues(iBath) + RingEigenvalues(iBead) )
+            NormalV(kCoord) = GaussianRandomNr( 1.0 ) * SigmaV            
+         END DO
+      END DO
+
+      ! Transform bath to original representation
+      kCoord = 0
+      DO iBath = 1, Bath%BathSize
+         DO iBead = 1, NBeads
+            kCoord = kCoord + 1
+            Q(kCoord) = 0.0
+            V(kCoord) = 0.0
+            DO jBath = 1, Bath%BathSize
+               DO jBead = 1, NBeads
+                  Q(kCoord) = Q(kCoord) + BathNormalModes(jBath,iBath) * RingNormalModes(jBead,iBead) * NormalQ(--)
+                  V(kCoord) = V(kCoord) + BathNormalModes(jBath,iBath) * RingNormalModes(jBead,iBead) * NormalV(--)
+               END DO
+            END DO
+         END DO
+      END DO
+
+   END SUBROUTINE
+
+!===============================================================================================================
 
 !*******************************************************************************
 !               ThermalEquilibriumBathConditions

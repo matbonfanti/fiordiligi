@@ -16,7 +16,7 @@ LOGNAME = jk6_v3.log
 FC = ifort      
 
 # Debugging options ( yes or no )
-DEBUG = no 
+DEBUG = no
 
 # Optimization level
 OPTLEVEL = 3

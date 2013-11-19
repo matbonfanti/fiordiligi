@@ -40,6 +40,9 @@ MODULE PolymerVibrationalRelax
    PUBLIC :: PolymerVibrationalRelax_ReadInput, PolymerVibrationalRelax_Initialize, &
              PolymerVibrationalRelax_Run, PolymerVibrationalRelax_Dispose
 
+   REAL, PARAMETER    :: TimeBetweenSnaps  = 10*MyConsts_fs2AU      !< Nr of initial snapshots to randomize initial conditions
+   INTEGER, PARAMETER :: NrOfInitSnapshots = 500        !< Time between each initial snapshot
+
    !> Nr of dimension of the system + bath 
    INTEGER :: NDim
    !> Nr of dimension of the system
@@ -76,6 +79,7 @@ MODULE PolymerVibrationalRelax
    ! Time evolution dataset
    TYPE(Evolution) :: MolecularDynamics     !< Propagate in micro/canonical ensamble to extract results
    TYPE(Evolution) :: Equilibration         !< Propagate in canonical ensamble to generate initial conditions of the bath
+   TYPE(Evolution) :: InitialConditions     !< Propagate in microcanonical ensamble to generate initial conditions
 
    ! Averages computed during propagation
    REAL, DIMENSION(:), ALLOCATABLE      :: AverageEBath       !< Average energy of the bath vs time
@@ -262,6 +266,13 @@ MODULE PolymerVibrationalRelax
       END IF
       CALL SetupThermostat( Equilibration, EquilGamma, Temperature*NBeads, LangevinSwitchOn )
 
+      ! Set variables for EOM integration of the system only in the microcanonical ensamble 
+      IF ( MorsePotential ) THEN
+         CALL EvolutionSetup( InitialConditions, 4, MassVector(1:4), TimeStep )
+      ELSE
+         CALL EvolutionSetup( InitialConditions, 1, MassVector(1:1), TimeStep )
+      END IF
+
       DEALLOCATE( LangevinSwitchOn, SystemMasses )
 
       ! ALLOCATE AND INITIALIZE DATA WITH THE AVERAGES OVER THE SET OF TRAJECTORIES
@@ -282,7 +293,7 @@ MODULE PolymerVibrationalRelax
          ALLOCATE( AverageCoord(NDim,0:NrOfPrintSteps) )
          AverageCoord(1:NDim,0:NrOfPrintSteps) = 0.0
 
-         ALLOCATE(  EquilibAveTvsTime( NrEquilibrationSteps/PrintStepInterval + 1 ) )
+         ALLOCATE(  EquilibAveTvsTime( NrEquilibrationSteps/PrintStepInterval  ) )
          EquilibAveTvsTime(:) = 0.0
       END IF
 
@@ -328,8 +339,14 @@ MODULE PolymerVibrationalRelax
       !> Centroid of positions and velocities
       REAL, DIMENSION(NDim) :: CentroidX, CentroidV
 
+      REAL, DIMENSION(NrOfInitSnapshots,NSystem*2) :: CHInitConditions
+      INTEGER  ::  NTimeStepEachSnap, NInit
+
       REAL :: KSys2, KBath2
       REAL, DIMENSION(0:NrOfPrintSteps) :: VirialAverage, VirialAverage2
+
+      VirialAverage(:) = 0.0
+      VirialAverage2(:) = 0.0
 
       AvEnergyOutputUnit = LookForFreeUnit()
       OPEN( FILE="AverageEnergy.dat", UNIT=AvEnergyOutputUnit )
@@ -365,6 +382,45 @@ MODULE PolymerVibrationalRelax
          SigmaX = sqrt( Temperature / MassVector(1) ) / HarmonicFreq
          SigmaV = sqrt( Temperature / MassVector(1) )
       END IF
+
+      A(:) = 0.0
+      IF ( MorsePotential ) THEN
+         X(1) = 0.0
+         VSys = MorseV( X(1:1), A(1:1) )
+         V(1) = sqrt( 2.0 * (InitEnergy-VSys) / MassH )
+      ELSE
+         X(1:2) = 0.0
+         X(3) = HZEquilibrium 
+         X(4) = C1Puckering  
+         VSys = VHFourDimensional( X(1:4), A(1:4) )
+         V(1) = 0.0
+         V(2) = 0.0
+         V(3) = + sqrt( 2.0 * (InitEnergy-VSys) / MassH ) * 0.958234410548192
+         V(4) = - sqrt( 2.0 * (InitEnergy-VSys) / MassC ) * 0.285983940880181 
+      END IF
+      A(:) = A(:) / MassVector(:)
+
+      ! Define when to store the dynamics snapshot
+      NTimeStepEachSnap = INT( TimeBetweenSnaps / TimeStep )
+
+      ! Cycle over the nr of snapshot to store
+      DO iTraj = 1, NrOfInitSnapshots
+
+         ! Propagate the 4D traj in the microcanonical ensamble
+         DO iStep = 1, NTimeStepEachSnap
+            ! Propagate for one timestep with Velocity-Verlet
+            IF ( MorsePotential ) THEN
+               CALL EOM_VelocityVerlet( InitialConditions, X(1:1), V(1:1), A(1:1), MorseV, PotEnergy )
+            ELSE
+               CALL EOM_VelocityVerlet( InitialConditions, X(1:4), V(1:4), A(1:4), VHFourDimensional, PotEnergy )
+            END IF
+         END DO
+
+         ! Store snapshot
+         CHInitConditions( iTraj, 1:NSystem )           = X(1:NSystem)
+         CHInitConditions( iTraj, NSystem+1:2*NSystem ) = V(1:NSystem)
+      END DO
+
 
       !run NrTrajs number of trajectories
       DO iTraj = 1,NrTrajs
@@ -456,7 +512,7 @@ MODULE PolymerVibrationalRelax
                ExitCheck = .TRUE.
                DO iBead = 1, NBeads
                   IF ( MorsePotential ) THEN
-                     VSys = MorseV( X((iBead-1)*NDim+1), Dummy(1) )
+                     VSys = MorseV( X((iBead-1)*NDim+1:(iBead-1)*NDim+1), Dummy(1:1) )
                   ELSE 
                      VSys = VHFourDimensional( X((iBead-1)*NDim+1:(iBead-1)*NDim+4), Dummy(1:4) )
                   END IF
@@ -476,7 +532,7 @@ MODULE PolymerVibrationalRelax
          ! change system velocities to fix the initial energy of the system
          DO iBead = 1, NBeads
             IF ( MorsePotential ) THEN
-               VSys = MorseV( X((iBead-1)*NDim+1), Dummy(1) )
+               VSys = MorseV( X((iBead-1)*NDim+1:(iBead-1)*NDim+1), Dummy(1:1) )
             ELSE 
                VSys = VHFourDimensional( X((iBead-1)*NDim+1:(iBead-1)*NDim+4), Dummy(1:4) )
             END IF
@@ -489,6 +545,12 @@ MODULE PolymerVibrationalRelax
                V((iBead-1)*NDim+3) = + sqrt( 2.0 * AvailKin / MassH ) * 0.958234410548192
                V((iBead-1)*NDim+4) = - sqrt( 2.0 * AvailKin / MassC ) * 0.285983940880181 
             END IF
+         END DO
+
+         NInit = CEILING( UniformRandomNr(0.0, real(NrOfInitSnapshots) ) )
+         DO iBead = 1, NBeads
+            X((iBead-1)*NDim+1:(iBead-1)*NDim+NSystem) = CHInitConditions( NInit, 1:NSystem )
+            V((iBead-1)*NDim+1:(iBead-1)*NDim+NSystem) = CHInitConditions( NInit, NSystem+1:NSystem*2 )
          END DO
 
          !*************************************************************
@@ -517,6 +579,8 @@ MODULE PolymerVibrationalRelax
          CentroidV = CentroidCoord( V )
          IF ( PrintType >= FULL )  AverageCoord(1:NDim,0) = AverageCoord(1:NDim,0) + CentroidX(:)
 
+         VirialAverage(0) = VirialAverage(0) + KSys2 + VSys
+         VirialAverage2(0) = VirialAverage2(0) + KBath2 + VSys
 !          DissipatedPower(:) = DissipatedPower(:) - DissipativeTermIntegral( X )
 
          ! PRINT INITIAL CONDITIONS of THE TRAJECTORY
@@ -563,8 +627,6 @@ MODULE PolymerVibrationalRelax
          PotEnergy = VibrRelaxPotential( X, A )
          A(:) = A(:) / MassVector(:)
 
-         VirialAverage(:) = 0.0
-         VirialAverage2(:) = 0.0
 
          ! cycle over nstep velocity verlet iterations
          DO iStep = 1,NrOfSteps
@@ -590,13 +652,13 @@ MODULE PolymerVibrationalRelax
 
 
                ! Update averages over time
-               AverageESys(kStep)            = AverageESys(kStep)  + KSys !+ VSys
-               AverageEBath(kStep)           = AverageEBath(kStep) + KBath !+ VBath
+               AverageESys(kStep)            = AverageESys(kStep)  + KSys + VSys
+               AverageEBath(kStep)           = AverageEBath(kStep) + KBath + VBath
                AverageECoup(kStep)           = AverageECoup(kStep) + Ecoup
 
 !                WRITE(777,"(1000F20.5)") kStep*1.0, KSys, KSys2
-               VirialAverage(kStep) = VirialAverage(kStep) + KSys2 !+ VSys
-               VirialAverage2(kStep) = VirialAverage2(kStep) + KBath2 !+ VSys
+               VirialAverage(kStep) = VirialAverage(kStep) + KSys2 + VSys
+               VirialAverage2(kStep) = VirialAverage2(kStep) + KBath2 + Vsys
 
                CentroidX = CentroidCoord( X )
                CentroidV = CentroidCoord( V )
@@ -654,11 +716,11 @@ MODULE PolymerVibrationalRelax
 
       DO iStep = 1, NrOfPrintSteps
          WRITE(999,"(F14.8,3F14.8)") TimeStep*real(PrintStepInterval*iStep)/MyConsts_fs2AU, &
-                 VirialAverage(iStep)*MyConsts_Hartree2eV,   AverageESys(iStep )*MyConsts_Hartree2eV
+                 VirialAverage(iStep)*MyConsts_Hartree2eV!,   AverageESys(iStep )*MyConsts_Hartree2eV
       END DO
       DO iStep = 1, NrOfPrintSteps
          WRITE(998,"(F14.8,3F14.8)") TimeStep*real(PrintStepInterval*iStep)/MyConsts_fs2AU, &
-                 VirialAverage2(iStep)*MyConsts_Hartree2eV,   AverageEBath(iStep )*MyConsts_Hartree2eV
+                 VirialAverage2(iStep)*MyConsts_Hartree2eV!,   AverageEBath(iStep )*MyConsts_Hartree2eV
       END DO
 
       ! Print average temperature over time during equilibration
@@ -833,8 +895,8 @@ MODULE PolymerVibrationalRelax
 
    REAL FUNCTION MorseV( Positions, Forces ) RESULT(V) 
       IMPLICIT NONE
-      REAL, DIMENSION(1), TARGET, INTENT(IN)  :: Positions
-      REAL, DIMENSION(1), TARGET, INTENT(OUT) :: Forces 
+      REAL, DIMENSION(:), TARGET, INTENT(IN)  :: Positions
+      REAL, DIMENSION(:), TARGET, INTENT(OUT) :: Forces 
 
       V = MorseDe * ( exp(-2.0*MorseAlpha*Positions(1)) - 2.0 * exp(-MorseAlpha*Positions(1)) )  
       Forces(1) = 2.0 * MorseAlpha * MorseDe * (  exp(-2.0*MorseAlpha*Positions(1)) - exp(-MorseAlpha*Positions(1)) )  
@@ -919,45 +981,69 @@ MODULE PolymerVibrationalRelax
 
 !*************************************************************************************************
    
-   SUBROUTINE Virial( KSys, KBath )
+   SUBROUTINE Virial( KSys, KSys2 )
       IMPLICIT NONE
-      REAL, INTENT(OUT)      :: KSys, KBath
-      REAL, DIMENSION(NDim)  :: SngForce
+      REAL, INTENT(OUT)      :: KSys, KSys2
+      REAL, DIMENSION(NDim*NBeads)  :: SngForce
       INTEGER :: iBead, iCoord
       REAL :: V
 
       REAL, DIMENSION(NBath)   :: ForceQCoord
       REAL                     :: ForceCoupCoord, CouplingFunc
+      REAL, DIMENSION(NDim)    :: CentroidX, CentroidF
 
       KSys = 0.0
-      KBath = 0.0
+      KSys2 = 0.0
 
-      ! System-bath potential for each bead
-      DO iBead = 1, NBeads 
-         ! Compute potential and force for a single bead
-         CALL  SingleBeadPotential( X((iBead-1)*NDim+1:iBead*NDim), SngForce, V )
+!       ! System-bath potential for each bead
+!       DO iBead = 1, NBeads
+!          ! Compute potential and force for a single bead
+!          CALL  SingleBeadPotential( X((iBead-1)*NDim+1:iBead*NDim), SngForce((iBead-1)*NDim+1:iBead*NDim), V )
+!       END DO
 
-!          ForceCoupCoord = 0.0
-!          ForceQCoord(:) = 0.0
-!          IF ( MorsePotential ) THEN
-!             CouplingFunc = X((iBead-1)*NDim+1) 
-!          ELSE 
-!             CouplingFunc = X((iBead-1)*NDim+4) - C1Puckering
-!          END IF
-!       CALL BathPotentialAndForces( Bath, CouplingFunc, X((iBead-1)*NDim+NSystem+1:iBead*NDim), V, ForceCoupCoord, ForceQCoord(:)) 
-!             KSys  = KSys  -0.5 *  CouplingFunc * ForceCoupCoord
+      V = VibrRelaxPotential( X, SngForce )
 
-         ! Compute virial for the current bead, divided between the system and the bath
-         KSys  = KSys  -0.5 * ( X((iBead-1)*NDim+3) - HZEquilibrium ) * SngForce(3)
-         KSys  = KSys  -0.5 * ( X((iBead-1)*NDim+4) - C1Puckering ) * SngForce(4)
-         DO iCoord = NSystem+1, NDim
-            KBath  = KBath  -0.5 *  X((iBead-1)*NDim+iCoord) * SngForce(iCoord)
-         END DO
+      CentroidX = CentroidCoord( X )
+      CentroidF = CentroidCoord( SngForce )
+
+      KSys = 0.0
+      DO iCoord = 1, NSystem
+         KSys  = KSys  -0.5 * CentroidX(iCoord) * CentroidF(iCoord)
       END DO
 
-      ! Normalize for nr of beads
-      KSys = KSys / NBeads
-      KBath = KBath / NBeads
+      KSys2 = 0.0
+      DO iBead = 1, NBeads
+         DO iCoord = 1, NSystem
+            KSys2  = KSys2  -0.5 * X((iBead-1)*NDim+iCoord) * SngForce((iBead-1)*NDim+iCoord)
+         END DO
+      END DO
+      KSys2 = KSys2 / real(NBeads)
+
+!          IF ( MorsePotential ) THEN
+! !             DO iCoord = 1, NSystem
+! !                KSys  = KSys  -0.5 *  X((iBead-1)*NDim+iCoord) * SngForce(iCoord)
+! !             END DO
+! !             DO iCoord = NSystem+1, NDim
+! !                KBath  = KBath  -0.5 *  X((iBead-1)*NDim+iCoord) * SngForce(iCoord)
+! !             END DO
+!             DO iCoord = 1, NSystem
+!                KSys  = KSys  -0.5 *  X((iBead-1)*NDim+iCoord) * SngForce(iCoord)
+!             END DO
+! 
+!          ELSE
+!             ! Compute virial for the current bead, divided between the system and the bath
+!             KSys  = KSys  -0.5 * ( X((iBead-1)*NDim+3) - HZEquilibrium ) * SngForce(3)
+!             KSys  = KSys  -0.5 * ( X((iBead-1)*NDim+4) - C1Puckering ) * SngForce(4)
+!             DO iCoord = NSystem+1, NDim
+!                KBath  = KBath  -0.5 *  X((iBead-1)*NDim+iCoord) * SngForce(iCoord)
+!             END DO
+!          END IF
+! 
+!       END DO
+! 
+!       ! Normalize for nr of beads
+!       KSys = KSys / NBeads
+!       KBath = KBath / NBeads
 
    END SUBROUTINE Virial
 
@@ -990,7 +1076,7 @@ MODULE PolymerVibrationalRelax
       VSys = 0.0
       DO iBead = 1, NBeads
          IF ( MorsePotential ) THEN
-            VSys = VSys + MorseV( X((iBead-1)*NDim+1), Dummy(1) )
+            VSys = VSys + MorseV( X((iBead-1)*NDim+1:(iBead-1)*NDim+1), Dummy(1:1) )
          ELSE 
             VSys = VSys + VHFourDimensional( X((iBead-1)*NDim+1:(iBead-1)*NDim+4), Dummy(1:4) )
          END IF
@@ -1040,6 +1126,7 @@ MODULE PolymerVibrationalRelax
       END IF
 
    END SUBROUTINE IstantaneousEnergies
+
 
 !*************************************************************************************************
 
