@@ -313,7 +313,7 @@ ${OBJDIR}/RandomNumberGenerator.o  : ${SRCDIR}/RandomNumberGenerator.f90 ${COMMO
 ${OBJDIR}/ClassicalEqMotion.o  : ${SRCDIR}/ClassicalEqMotion.f90 ${OBJDIR}/RandomNumberGenerator.o ${COMMONDEP}
 
 # Module containing the definitions of the independent oscillator model
-${OBJDIR}/IndependentOscillatorsModel.o  : ${SRCDIR}/IndependentOscillatorsModel.f90 ${OBJDIR}/MyConsts.o ${OBJDIR}/PotentialModule.o \
+${OBJDIR}/IndependentOscillatorsModel.o  : ${SRCDIR}/IndependentOscillatorsModel.f90 ${OBJDIR}/MyLinearAlgebra.o ${OBJDIR}/PotentialModule.o \
                                            ${OBJDIR}/RandomNumberGenerator.o ${OBJDIR}/SplineInterpolator.o ${COMMONDEP}
 
 # Module containing the spline interpolation subroutines
