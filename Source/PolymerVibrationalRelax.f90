@@ -41,7 +41,7 @@ MODULE PolymerVibrationalRelax
              PolymerVibrationalRelax_Run, PolymerVibrationalRelax_Dispose
 
    REAL, PARAMETER    :: TimeBetweenSnaps  = 10*MyConsts_fs2AU      !< Nr of initial snapshots to randomize initial conditions
-   INTEGER, PARAMETER :: NrOfInitSnapshots = 1000                   !< Time between each initial snapshot
+   INTEGER, PARAMETER :: NrOfInitSnapshots = 100                   !< Time between each initial snapshot
 
    !> Nr of dimension of the system + bath 
    INTEGER :: NDim
@@ -81,7 +81,6 @@ MODULE PolymerVibrationalRelax
    REAL, DIMENSION(:), ALLOCATABLE      :: AverageECoup       !< Average coupling energy vs time
    REAL, DIMENSION(:), ALLOCATABLE      :: AverageESys        !< Average energy of the system vs time
    REAL, DIMENSION(:,:), ALLOCATABLE    :: AverageCoord       !< Average i-th coordinate vs time
-   REAL, DIMENSION(:), ALLOCATABLE      :: EquilibAveTvsTime  !< Average temperature at time T during equilibration
 
    CONTAINS
 
@@ -517,11 +516,10 @@ MODULE PolymerVibrationalRelax
       AverageEBath(:)           = AverageEBath(:)   / real(NrTrajs)
       AverageECoup(:)           = AverageECoup(:)   / real(NrTrajs)
       IF ( PrintType >= FULL )   AverageCoord(1:NDim,:) = AverageCoord(1:NDim,:) / real(NrTrajs) 
-      IF ( PrintType >= FULL )   EquilibAveTvsTime(:)   = EquilibAveTvsTime(:) / real(NrTrajs) 
 
-      AverageKin(:,:) = AverageKin(:,:) / real(NrTrajs)
+      AverageKin(0:NrOfPrintSteps,1:4) = AverageKin(0:NrOfPrintSteps,1:4) / real(NrTrajs)
 
-      DO iStep = 1, NrOfPrintSteps
+      DO iStep = 0, NrOfPrintSteps
          WRITE(900, "(F14.8,4F14.8)") TimeStep*real(PrintStepInterval*iStep)/MyConsts_fs2AU, &
                AverageKin(iStep,1:4)*MyConsts_Hartree2eV
       END DO
@@ -596,48 +594,52 @@ MODULE PolymerVibrationalRelax
 
    SUBROUTINE MicrocanonicalSamplingOfTheSystem( InitConditions )
       IMPLICIT NONE
-      REAL, DIMENSION(NrOfInitSnapshots,NSystem*2), INTENT(OUT) :: InitConditions
+      REAL, DIMENSION(:,:), INTENT(OUT) :: InitConditions
 
       INTEGER :: NTimeStepEachSnap, iTraj, iStep
       REAL :: PotEnergy
-      REAL, DIMENSION(NSystem) :: A, X, V 
+      REAL, DIMENSION(10) :: Accel, Pos, Vel
 
-      A(:) = 0.0
+      CALL ERROR( SIZE(InitConditions,2) /= NSystem*2, "MicrocanonicalSamplingOfTheSystem: wrong nr of dimensions"  ) 
+
+      Accel(:) = 0.0
       IF ( MorsePotential ) THEN
-         X(1) = 0.0
-         PotEnergy = MorseV( X(1:1), A(1:1) )
-         V(1) = sqrt( 2.0 * (InitEnergy-PotEnergy) / MassVector(1) )
+         Pos(1) = 0.0
+         PotEnergy = MorseV( Pos(1:1), Accel(1:1) )
+         Vel(1) = sqrt( 2.0 * (InitEnergy-PotEnergy) / MassVector(1) )
       ELSE
-         X(1:2) = 0.0
-         X(3) = HZEquilibrium 
-         X(4) = C1Puckering  
-         PotEnergy = VHFourDimensional( X(1:4), A(1:4) )
-         V(1) = 0.0
-         V(2) = 0.0
-         V(3) = + sqrt( 2.0 * (InitEnergy-PotEnergy) / MassVector(3) ) * 0.958234410548192
-         V(4) = - sqrt( 2.0 * (InitEnergy-PotEnergy) / MassVector(4) ) * 0.285983940880181 
+         Pos(1:2) = 0.0
+         Pos(3) = HZEquilibrium 
+         Pos(4) = C1Puckering  
+         PotEnergy = VHFourDimensional( Pos(1:4), Accel(1:4) )
+         Vel(1) = 0.0
+         Vel(2) = 0.0
+         Vel(3) = + sqrt( 2.0 * (InitEnergy-PotEnergy) / MassVector(3) ) * 0.958234410548192
+         Vel(4) = - sqrt( 2.0 * (InitEnergy-PotEnergy) / MassVector(4) ) * 0.285983940880181 
       END IF
-      A(:) = A(:) / MassVector(1:NSystem)
+      DO iStep = 1, NSystem
+         Accel(iStep) = Accel(iStep) / MassVector(iStep)
+      END DO
 
       ! Define when to store the dynamics snapshot
       NTimeStepEachSnap = INT( TimeBetweenSnaps / TimeStep )
 
       ! Cycle over the nr of snapshot to store
-      DO iTraj = 1, NrOfInitSnapshots
+      DO iTraj = 1, SIZE(InitConditions,1)
 
          ! Propagate the 4D traj in the microcanonical ensamble
          DO iStep = 1, NTimeStepEachSnap
             ! Propagate for one timestep with Velocity-Verlet
             IF ( MorsePotential ) THEN
-               CALL EOM_VelocityVerlet( InitialConditions, X(1:1), V(1:1), A(1:1), MorseV, PotEnergy )
+               CALL EOM_VelocityVerlet( InitialConditions, Pos(1:1), Vel(1:1), Accel(1:1), MorseV, PotEnergy )
             ELSE
-               CALL EOM_VelocityVerlet( InitialConditions, X(1:4), V(1:4), A(1:4), VHFourDimensional, PotEnergy )
+               CALL EOM_VelocityVerlet( InitialConditions, Pos(1:4), Vel(1:4), Accel(1:4), VHFourDimensional, PotEnergy )
             END IF
          END DO
 
          ! Store snapshot
-         InitConditions( iTraj, 1:NSystem )           = X(1:NSystem)
-         InitConditions( iTraj, NSystem+1:2*NSystem ) = V(1:NSystem)
+         InitConditions( iTraj, 1:NSystem )           = Pos(1:NSystem)
+         InitConditions( iTraj, NSystem+1:2*NSystem ) = Vel(1:NSystem)
       END DO
 
    END SUBROUTINE MicrocanonicalSamplingOfTheSystem
