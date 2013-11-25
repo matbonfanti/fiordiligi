@@ -55,8 +55,8 @@ MODULE VibrationalRelax
    INTEGER :: PrintStepInterval         !< Nr of time steps between each printing of propagation info ( = NrOfSteps / NrOfPrintSteps )
 
    ! Time evolution dataset
-   TYPE(Evolution) :: MolecularDynamics     !< Propagate in micro/macrocanonical ensamble to extract results
-   TYPE(Evolution) :: InitialConditions     !< Propagate in microcanonical ensamble to generate initial conditions
+   TYPE(Evolution),SAVE :: MolecularDynamics     !< Propagate in micro/macrocanonical ensamble to extract results
+   TYPE(Evolution),SAVE :: InitialConditions     !< Propagate in microcanonical ensamble to generate initial conditions
 
    ! Averages computed during propagation
    REAL, DIMENSION(:), ALLOCATABLE      :: AverageEBath       !< Average energy of the bath vs time

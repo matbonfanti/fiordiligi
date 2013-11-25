@@ -202,7 +202,7 @@ PROGRAM JK6_v3
          WRITE(*,"(/,A)") " * Analysis of the potential energy surfaces "
    END SELECT
 
-   IF ( .NOT. HARMONICMODEL .AND. .NOT. RPMD_EQUILIBRIUM ) THEN
+   IF ( (RunType /= HARMONICMODEL) .AND. (RunType /= RPMD_EQUILIBRIUM) ) THEN
       IF ( Collinear )  WRITE(*,"(/,A)") " * The atom is fixed in the collinear geometry "
       WRITE(*,898) MassH / MyConsts_Uma2Au, MassC / MyConsts_Uma2Au
    END IF

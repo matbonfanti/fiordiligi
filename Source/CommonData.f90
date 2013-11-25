@@ -124,9 +124,9 @@ MODULE CommonData
 
    ! PROPAGATORS (Data type with evolution information )
 
-   TYPE(Evolution) :: Equilibration         !< Propagate in macrocanonical ensamble at given T to generate init conditions
-   TYPE(Evolution) :: MolecularDynamics     !< Propagate in micro/macrocanonical ensamble to extract results
-   TYPE(Evolution) :: InitialConditions     !< Propagate in microcanonical ensamble to generate initial conditions
+   TYPE(Evolution),SAVE :: Equilibration         !< Propagate in macrocanonical ensamble at given T to generate init conditions
+   TYPE(Evolution),SAVE :: MolecularDynamics     !< Propagate in micro/macrocanonical ensamble to extract results
+   TYPE(Evolution),SAVE :: InitialConditions     !< Propagate in microcanonical ensamble to generate initial conditions
 
    ! ISTANTANEOUS PROPERTIES
 

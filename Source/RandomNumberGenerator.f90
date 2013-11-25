@@ -138,9 +138,11 @@ CONTAINS
       IMPLICIT NONE
 !       INTEGER(K4B), INTENT(IN) :: Seed
       INTEGER, INTENT(IN) :: Seed
+      INTEGER, DIMENSION(10) :: SeedVec
       REAL :: Temp
 
-      CALL RANDOM_SEED( put= (/ Seed /) )
+      SeedVec = Seed
+      CALL RANDOM_SEED( put= SeedVec )
 
    END SUBROUTINE SetSeed
 

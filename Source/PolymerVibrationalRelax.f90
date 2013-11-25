@@ -73,8 +73,8 @@ MODULE PolymerVibrationalRelax
    INTEGER :: PrintStepInterval         !< Nr of time steps between each printing of propagation info ( = NrOfSteps / NrOfPrintSteps )
 
    ! Time evolution dataset
-   TYPE(Evolution) :: MolecularDynamics     !< Propagate in micro/canonical ensamble to extract results
-   TYPE(Evolution) :: InitialConditions     !< Propagate in microcanonical ensamble to generate initial conditions
+   TYPE(Evolution),SAVE :: MolecularDynamics     !< Propagate in micro/canonical ensamble to extract results
+   TYPE(Evolution),SAVE :: InitialConditions     !< Propagate in microcanonical ensamble to generate initial conditions
 
    ! Averages computed during propagation
    REAL, DIMENSION(:), ALLOCATABLE      :: AverageEBath       !< Average energy of the bath vs time
@@ -294,11 +294,9 @@ MODULE PolymerVibrationalRelax
 
       REAL, DIMENSION(NBath,NBeads) :: InitQBath, InitVBath
 
-      REAL :: KSys2, KBath2
-      REAL, DIMENSION(0:NrOfPrintSteps) :: VirialAverage, VirialAverage2
-
-      VirialAverage(:) = 0.0
-      VirialAverage2(:) = 0.0
+      REAL :: K1, K2, K3, K4
+      REAL, DIMENSION(0:NrOfPrintSteps,4)    :: AverageKin
+      AverageKin(:,:) = 0.0
 
       AvEnergyOutputUnit = LookForFreeUnit()
       OPEN( FILE="AverageEnergy.dat", UNIT=AvEnergyOutputUnit )
@@ -377,7 +375,7 @@ MODULE PolymerVibrationalRelax
 
          ! Energy of the system, Coupling energy and energy of the bath
          CALL IstantaneousEnergies( KSys, VSys, Ecoup, VBath, KBath )
-         CALL Virial( KSys2, KBath2 )
+         CALL KineticEnergies( K1, K2, K3, K4 )
 
          ! PRINT INITIAL CONDITIONS of THE BATH and THE SYSTEM
          WRITE(*,600)  (KSys+VSys)*MyConsts_Hartree2eV, KinEnergy*MyConsts_Hartree2eV, 2.0*KinEnergy/MyConsts_K2AU, &
@@ -391,10 +389,10 @@ MODULE PolymerVibrationalRelax
          CentroidV = CentroidCoord( V )
          IF ( PrintType >= FULL )  AverageCoord(1:NDim,0) = AverageCoord(1:NDim,0) + CentroidX(:)
 
-         VirialAverage(0) = VirialAverage(0) + KSys2 + VSys
-         VirialAverage2(0) = VirialAverage2(0) + KBath2 + VSys
-!          DissipatedPower(:) = DissipatedPower(:) - DissipativeTermIntegral( X )
-
+         AverageKin(0,1) = AverageKin(0,1) + K1 + VSys
+         AverageKin(0,2) = AverageKin(0,2) + K2 + VSys
+         AverageKin(0,3) = AverageKin(0,3) + K3 + VSys
+         AverageKin(0,4) = AverageKin(0,4) + K4 + VSys
 
         ! Open unit for massive output, with detailed info on trajectories
          IF ( PrintType == DEBUG ) THEN
@@ -450,24 +448,19 @@ MODULE PolymerVibrationalRelax
                kStep = kStep+1
                IF ( kStep > NrOfPrintSteps ) CYCLE 
 
-!                ! for atomistic model of the bath, move the slab so that C2-C3-C4 plane has z=0
-!                IF ( BathType == SLAB_POTENTIAL ) THEN 
-!                   X(3:NDim) = X(3:NDim)  - (X(5)+X(6)+X(7))/3.0
-!                ENDIF
-
                ! Energy of the system
                CALL IstantaneousEnergies( KSys, VSys, Ecoup, VBath, KBath )
-               CALL Virial( KSys2, KBath2 )
-
+               CALL KineticEnergies( K1, K2, K3, K4 )
 
                ! Update averages over time
                AverageESys(kStep)            = AverageESys(kStep)  + KSys + VSys
                AverageEBath(kStep)           = AverageEBath(kStep) + KBath + VBath
                AverageECoup(kStep)           = AverageECoup(kStep) + Ecoup
 
-!                WRITE(777,"(1000F20.5)") kStep*1.0, KSys, KSys2
-               VirialAverage(kStep) = VirialAverage(kStep) + KSys2 + VSys
-               VirialAverage2(kStep) = VirialAverage2(kStep) + KBath2 + Vsys
+               AverageKin(kStep,1) = AverageKin(kStep,1) + K1 + VSys
+               AverageKin(kStep,2) = AverageKin(kStep,2) + K2 + VSys
+               AverageKin(kStep,3) = AverageKin(kStep,3) + K3 + VSys
+               AverageKin(kStep,4) = AverageKin(kStep,4) + K4 + VSys
 
                CentroidX = CentroidCoord( X )
                CentroidV = CentroidCoord( V )
@@ -525,16 +518,12 @@ MODULE PolymerVibrationalRelax
       AverageECoup(:)           = AverageECoup(:)   / real(NrTrajs)
       IF ( PrintType >= FULL )   AverageCoord(1:NDim,:) = AverageCoord(1:NDim,:) / real(NrTrajs) 
       IF ( PrintType >= FULL )   EquilibAveTvsTime(:)   = EquilibAveTvsTime(:) / real(NrTrajs) 
-      VirialAverage = VirialAverage  / real(NrTrajs)
-      VirialAverage2 = VirialAverage2  / real(NrTrajs)
+
+      AverageKin(:,:) = AverageKin(:,:) / real(NrTrajs)
 
       DO iStep = 1, NrOfPrintSteps
-         WRITE(999,"(F14.8,3F14.8)") TimeStep*real(PrintStepInterval*iStep)/MyConsts_fs2AU, &
-                 VirialAverage(iStep)*MyConsts_Hartree2eV!,   AverageESys(iStep )*MyConsts_Hartree2eV
-      END DO
-      DO iStep = 1, NrOfPrintSteps
-         WRITE(998,"(F14.8,3F14.8)") TimeStep*real(PrintStepInterval*iStep)/MyConsts_fs2AU, &
-                 VirialAverage2(iStep)*MyConsts_Hartree2eV!,   AverageEBath(iStep )*MyConsts_Hartree2eV
+         WRITE(900, "(F14.8,4F14.8)") TimeStep*real(PrintStepInterval*iStep)/MyConsts_fs2AU, &
+               AverageKin(iStep,1:4)*MyConsts_Hartree2eV
       END DO
 
       ! PRINT average energy of the system, of the coupling, of the bath
@@ -849,71 +838,57 @@ MODULE PolymerVibrationalRelax
 
 !*************************************************************************************************
    
-   SUBROUTINE Virial( KSys, KSys2 )
+   SUBROUTINE KineticEnergies( K1, K2, K3, K4 )
       IMPLICIT NONE
-      REAL, INTENT(OUT)      :: KSys, KSys2
+      REAL, INTENT(OUT)             :: K1, K2, K3, K4
       REAL, DIMENSION(NDim*NBeads)  :: SngForce
-      INTEGER :: iBead, iCoord
-      REAL :: V
+      REAL, DIMENSION(NDim)         :: CentroidX, CentroidF, CentroidV, SingleF
+      INTEGER                       :: iCoord, iBead
+      REAL :: Pot
 
-      REAL, DIMENSION(NBath)   :: ForceQCoord
-      REAL                     :: ForceCoupCoord, CouplingFunc
-      REAL, DIMENSION(NDim)    :: CentroidX, CentroidF
+      SngForce(:) = 0.0
+      ! System-bath potential for each bead
+      DO iBead = 1, NBeads
+         ! Compute potential and force for a single bead
+         CALL  SingleBeadPotential( X((iBead-1)*NDim+1:iBead*NDim), SngForce((iBead-1)*NDim+1:iBead*NDim), Pot )
+      END DO
 
-      KSys = 0.0
-      KSys2 = 0.0
-
-!       ! System-bath potential for each bead
-!       DO iBead = 1, NBeads
-!          ! Compute potential and force for a single bead
-!          CALL  SingleBeadPotential( X((iBead-1)*NDim+1:iBead*NDim), SngForce((iBead-1)*NDim+1:iBead*NDim), V )
-!       END DO
-
-      V = VibrRelaxPotential( X, SngForce )
-
+      ! Compute centroids
       CentroidX = CentroidCoord( X )
       CentroidF = CentroidCoord( SngForce )
+      CentroidV = CentroidCoord( V )
 
-      KSys = 0.0
+      ! First definition: kinetic energy of the centroid
+      K1 = 0.0
       DO iCoord = 1, NSystem
-         KSys  = KSys  -0.5 * CentroidX(iCoord) * CentroidF(iCoord)
+         K1 = K1 + 0.5 * MassVector(iCoord) * CentroidV(iCoord)**2
       END DO
 
-      KSys2 = 0.0
+      ! Second definition: centroid of kinetic energies
+      K2 = 0.0
       DO iBead = 1, NBeads
          DO iCoord = 1, NSystem
-            KSys2  = KSys2  -0.5 * X((iBead-1)*NDim+iCoord) * SngForce((iBead-1)*NDim+iCoord)
+            K2  = K2  + 0.5 * MassVector(iCoord) * V((iBead-1)*NDim+iCoord)**2
          END DO
       END DO
-      KSys2 = KSys2 / real(NBeads)
+      K2 = K2 / real(NBeads)
 
-!          IF ( MorsePotential ) THEN
-! !             DO iCoord = 1, NSystem
-! !                KSys  = KSys  -0.5 *  X((iBead-1)*NDim+iCoord) * SngForce(iCoord)
-! !             END DO
-! !             DO iCoord = NSystem+1, NDim
-! !                KBath  = KBath  -0.5 *  X((iBead-1)*NDim+iCoord) * SngForce(iCoord)
-! !             END DO
-!             DO iCoord = 1, NSystem
-!                KSys  = KSys  -0.5 *  X((iBead-1)*NDim+iCoord) * SngForce(iCoord)
-!             END DO
-! 
-!          ELSE
-!             ! Compute virial for the current bead, divided between the system and the bath
-!             KSys  = KSys  -0.5 * ( X((iBead-1)*NDim+3) - HZEquilibrium ) * SngForce(3)
-!             KSys  = KSys  -0.5 * ( X((iBead-1)*NDim+4) - C1Puckering ) * SngForce(4)
-!             DO iCoord = NSystem+1, NDim
-!                KBath  = KBath  -0.5 *  X((iBead-1)*NDim+iCoord) * SngForce(iCoord)
-!             END DO
-!          END IF
-! 
-!       END DO
-! 
-!       ! Normalize for nr of beads
-!       KSys = KSys / NBeads
-!       KBath = KBath / NBeads
+      ! Fourth definition: virial of the centroids (virial as correlation product)
+      K3 = 0.0
+      DO iCoord = 1, NSystem
+         K3  = K3  -0.5 * CentroidX(iCoord) * CentroidF(iCoord)
+      END DO
 
-   END SUBROUTINE Virial
+      ! Third definition: centroid of the virial product (virial as average)
+      K4 = 0.0
+      DO iBead = 1, NBeads
+         DO iCoord = 1, NSystem
+            K4  = K4  -0.5 * X((iBead-1)*NDim+iCoord) * SngForce((iBead-1)*NDim+iCoord)
+         END DO
+      END DO
+      K4 = K4 / real(NBeads)
+
+   END SUBROUTINE KineticEnergies
 
    SUBROUTINE IstantaneousEnergies( KSys, VSys, Ecoup, VBath, KBath )
       IMPLICIT NONE

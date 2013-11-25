@@ -74,8 +74,8 @@ MODULE PolymerEquilibriumOscillator
    INTEGER :: PrintStepInterval         !< Nr of time steps between each printing of propagation info ( = NrOfSteps / NrOfPrintSteps )
 
    ! Time evolution dataset
-   TYPE(Evolution) :: MolecularDynamics     !< Propagate in micro/canonical ensamble to extract results
-   TYPE(Evolution) :: Equilibration         !< Propagate in canonical ensamble to generate initial conditions of the bath
+   TYPE(Evolution),SAVE :: MolecularDynamics     !< Propagate in micro/canonical ensamble to extract results
+   TYPE(Evolution),SAVE :: Equilibration         !< Propagate in canonical ensamble to generate initial conditions of the bath
 
    ! Averages computed during propagation
    REAL, DIMENSION(:), ALLOCATABLE      :: PositionCorrelation    !< Position correlation function

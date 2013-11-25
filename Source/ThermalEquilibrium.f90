@@ -56,8 +56,8 @@ MODULE ThermalEquilibrium
    INTEGER :: NrEquilibSteps       !< Nr of time step of the equilibration
 
    ! Time evolution dataset
-   TYPE(Evolution) :: Equilibration         !< Propagate in macrocanonical ensamble at given T to generate init conditions
-   TYPE(Evolution) :: MolecularDynamics     !< Propagate in micro/macrocanonical ensamble to extract results
+   TYPE(Evolution),SAVE :: Equilibration         !< Propagate in macrocanonical ensamble at given T to generate init conditions
+   TYPE(Evolution),SAVE :: MolecularDynamics     !< Propagate in micro/macrocanonical ensamble to extract results
 
    ! Averages and other output data
    REAL     :: dOmega                                      !< Frequency spacing of fourier transformed data

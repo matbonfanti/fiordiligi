@@ -72,8 +72,8 @@ MODULE SharedData
    REAL           :: BathCutOffFreq            !< cutoff frequency of the bath
    CHARACTER(100) :: SpectralDensityFile       !< spectral density file name
    CHARACTER(100) :: SpectralDensityFile2      !< spectral density file name
-   TYPE(BathData) :: Bath                      !< derived datatype to define a single bath
-   TYPE(BathData), DIMENSION(2) :: DblBath     !< derived datatype to define a double chain bath
+   TYPE(BathData), SAVE :: Bath                      !< derived datatype to define a single bath
+   TYPE(BathData), DIMENSION(2), SAVE :: DblBath     !< derived datatype to define a double chain bath
    LOGICAL        :: ZPECorrection             !< ZeroPointEnergy correction in the initial conditions of the bath (at 0 K)
    REAL           :: OhmicGamma                !< Gamma of an ohmic spectral density of the bath
 
