@@ -913,18 +913,21 @@ MODULE PolymerVibrationalRelax
 
       ! Compute kinetic energy as the kinetic energy of the centroid
       KSys = 0.0
-      DO iCoord = 1, NSystem
-         KSys = KSys + 0.5 * MassVector(iCoord) * CentroidV(iCoord)**2
-      END DO
-
+!       DO iCoord = 1, NSystem
+!          KSys = KSys + 0.5 * MassVector(iCoord) * CentroidV(iCoord)**2
+!       END DO
+! 
       ! Energy of the system - average of the potential energies of the system replicas
       VSys = 0.0
       DO iBead = 1, NBeads
          IF ( MorsePotential ) THEN
+            CouplingFunc = X((iBead-1)*NDim+1)
             VSys = VSys + MorseV( X((iBead-1)*NDim+1:(iBead-1)*NDim+1), Dummy(1:1) )
-         ELSE 
+         ELSE
+            CouplingFunc = X((iBead-1)*NDim+4) - C1Puckering 
             VSys = VSys + VHFourDimensional( X((iBead-1)*NDim+1:(iBead-1)*NDim+4), Dummy(1:4) )
          END IF
+         VSys = VSys + 0.5 * GetDistorsionForce( Bath ) * CouplingFunc**2
       END DO
       VSys = VSys / NBeads 
       

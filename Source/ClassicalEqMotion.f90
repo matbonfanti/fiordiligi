@@ -20,6 +20,7 @@
 !>  \par Updates
 !>  \arg 8 Novembre 2013: thermoswitch is now an optional argument of the
 !>                        SetupThermostat subroutine (default: TRUE for all entries)
+!>  \arg 28 November 2013: ring polymer propagation implemented
 !
 !>  \todo         
 !>                 
@@ -53,6 +54,7 @@ MODULE ClassicalEqMotion
          LOGICAL, DIMENSION(:), POINTER :: ThermoSwitch  !< Vector to set the thermostat on or off for the dof
          LOGICAL :: HasThermostat = .FALSE.              !< Thermostat data has been setup
          LOGICAL :: IsSetup = .FALSE.                    !< Evolution data has been setup
+         LOGICAL :: HasRingPolymer = .FALSE.             !< Ring polymer propagation has been setup
       END TYPE Evolution
 
    CONTAINS
@@ -161,6 +163,63 @@ MODULE ClassicalEqMotion
       
    END SUBROUTINE SetupThermostat
    
+!*******************************************************************************
+!> Setup data for ring polymer progation, store them in the Evolution datatype.
+!>
+!> @param EvolData     Evolution data type to setup
+!> @param 
+!> @param 
+!*******************************************************************************
+   SUBROUTINE SetupRingPolymer( EvolData  )
+      IMPLICIT NONE
+
+      TYPE( Evolution ), INTENT(INOUT)            :: EvolData
+
+      ! error if trying to setup thermostat of a non-setup evolution type
+      CALL ERROR( .NOT. EvolData%IsSetup, "ClassicalEqMotion.SetupRingPolymer: evolution data not setup" )
+      ! warn user if overwriting previously setup data
+      CALL WARN( EvolData%HasRingPolymer, "ClassicalEqMotion.SetupRingPolymer: overwriting ring polymer data" ) 
+
+
+      ! error if the thermostat switch has wrong dimension
+      IF ( PRESENT(ThermoSwitch) )  CALL ERROR( size(ThermoSwitch) /= EvolData%NDoF , &
+                                          "ClassicalEqMotion.SetupRingPolymer: thermostat switch mismatch" )
+
+      ! Store gamma value
+      EvolData%Gamma = Gamma
+      ! Set coefficient for velocity integration (in Vel-Verlet) with Langevin friction
+      EvolData%FrictionCoeff_HalfDt = 1.0 - 0.5 * Gamma * EvolData%dt
+      
+      ! Store the Thermostat switch array
+      ALLOCATE( EvolData%ThermoSwitch(EvolData%NDoF) )
+      IF ( PRESENT(ThermoSwitch) ) THEN
+         EvolData%ThermoSwitch(:) = ThermoSwitch(:)
+      ELSE
+         EvolData%ThermoSwitch(:) = .TRUE.
+      END IF
+
+      ! Set standard deviations of the thermal noise
+      IF ( .NOT. EvolData%HasThermostat ) &
+                 ALLOCATE( EvolData%ThermalNoise( EvolData%NDoF ), EvolData%ThermalNoise2( EvolData%NDoF ) )
+      EvolData%ThermalNoise(:) = 0.0
+      EvolData%ThermalNoise2(:) = 0.0
+      DO iDoF = 1, EvolData%NDoF
+         IF ( EvolData%ThermoSwitch(iDoF) ) THEN
+            EvolData%ThermalNoise(iDoF) = sqrt( 2.0*Temperature*EvolData%Mass(iDoF)*Gamma/EvolData%dt )
+            EvolData%ThermalNoise2(iDoF) = sqrt( 2.0*Temperature*Gamma/EvolData%Mass(iDoF) )
+         END IF
+      END DO
+
+      ! Themostat data is now setup
+      EvolData%HasThermostat = .TRUE.
+
+#if defined(VERBOSE_OUTPUT)
+      WRITE(*,"(/,A,1F8.3,A,1F8.3)") "Thermostat is setup with Gamma = ",Gamma," and Temperature = ", Temperature
+      WRITE(*,*) " Langevin DoFs: ", EvolData%ThermoSwitch(:)
+#endif
+      
+   END SUBROUTINE SetupRingPolymer
+
 !*******************************************************************************
 !> Dispose thermostat data.
 !>

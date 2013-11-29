@@ -515,9 +515,9 @@ CONTAINS
                DO jBath = 1, Bath%BathSize
                   DO jBead = 1, NBeads
                      Q(iBath,iBead) = Q(iBath,iBead) + &
-                                           BathNormalModes(jBath,iBath) * RingNormalModes(jBead,iBead) * NormalQ(jBath,jBead)
+                                           BathNormalModes(iBath,jBath) * RingNormalModes(iBead,jBead) * NormalQ(jBath,jBead)
                      V(iBath,iBead) = V(iBath,iBead) + &
-                                           BathNormalModes(jBath,iBath) * RingNormalModes(jBead,iBead) * NormalV(jBath,jBead)
+                                           BathNormalModes(iBath,jBath) * RingNormalModes(iBead,jBead) * NormalV(jBath,jBead)
                   END DO
                END DO
             END DO
@@ -529,8 +529,8 @@ CONTAINS
                Q(iBath,iBead) = 0.0
                V(iBath,iBead) = 0.0
                DO jBead = 1, NBeads
-                  Q(iBath,iBead) = Q(iBath,iBead) + RingNormalModes(jBead,iBead) * NormalQ(iBath,jBead)
-                  V(iBath,iBead) = V(iBath,iBead) + RingNormalModes(jBead,iBead) * NormalV(iBath,jBead)
+                  Q(iBath,iBead) = Q(iBath,iBead) + RingNormalModes(iBead,jBead) * NormalQ(iBath,jBead)
+                  V(iBath,iBead) = V(iBath,iBead) + RingNormalModes(iBead,jBead) * NormalV(iBath,jBead)
                END DO
             END DO
          END DO

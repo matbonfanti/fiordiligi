@@ -28,6 +28,7 @@ PROGRAM JK6_v3
    USE ErrorTrap
    USE SharedData
    USE InputField
+   USE UnitConversion
    USE VibrationalRelax
    USE PolymerVibrationalRelax
    USE PolymerEquilibriumOscillator
@@ -47,6 +48,8 @@ PROGRAM JK6_v3
 
    ! Derived type to handle input data
    TYPE(InputFile) :: InputData
+   ! Units of input data, defined from the input file
+   INTEGER     :: InputLength, InputEnergy, InputMass, InputTime, InputTemp, InputFreq
 
 
    PRINT "(/,     '                    ==============================')"
@@ -78,15 +81,26 @@ PROGRAM JK6_v3
    !         INPUT SECTION 
    !*************************************************************
 
-   !       ***** NOTE: units of input data ******
-   !            energy      - electronVolt
-   !            time        - femtosecond
-   !            distance    - Angstrom
-   !            temperature - Kelvin
-   !            frequency   - cm-1
-
    ! Open and read from input file the input parameters of the calculation
    CALL OpenFile( InputData, InputFileName )
+
+   ! read input units ( or set them to default value )
+
+   !      ***** DEFAULT VALUES ******
+   !      distance    - Angstrom
+   !      energy      - electronVolt
+   !      mass        - AMU
+   !      time        - femtosecond
+   !      temperature - Kelvin
+   !      frequency   - cm-1
+
+   CALL SetFieldFromInput( InputData, "InputLength", InputLength,  1 )
+   CALL SetFieldFromInput( InputData, "InputEnergy", InputEnergy,  3 )
+   CALL SetFieldFromInput( InputData, "InputMass",   InputMass,    8 )
+   CALL SetFieldFromInput( InputData, "InputTime",   InputTime,   13 )
+   CALL SetFieldFromInput( InputData, "InputTemp",   InputTemp,   16 )
+   CALL SetFieldFromInput( InputData, "InputFreq",   InputFreq,   18 )
+   CALL Initialize_UnitConversion( InputUnits, InputLength, InputEnergy, InputMass, 11, InputTime, InputTemp, InputFreq )
 
    ! Define the kind of simulation to do
    CALL SetFieldFromInput( InputData, "RunType", RunType, 1 )
@@ -102,16 +116,17 @@ PROGRAM JK6_v3
 
    ! Hydrogen and carbon masses
    CALL SetFieldFromInput( InputData, "MassH", MassH )
-   MassH = MassH * MyConsts_Uma2Au
+   MassH = MassH * MassConversion(InputUnits, InternalUnits)
    CALL SetFieldFromInput( InputData, "MassC", MassC )
-   MassC = MassC * MyConsts_Uma2Au
+   MassC = MassC * MassConversion(InputUnits, InternalUnits)
 
    ! SET THE BATH-REPRESENTATION DEPENDENT VARIABLES 
 
    IF ( BathType == SLAB_POTENTIAL ) THEN
       ! Langevin relaxation at the border of the slab
-      CALL SetFieldFromInput( InputData, "DynamicsGamma",  DynamicsGamma, 0.0 ) 
-      DynamicsGamma = DynamicsGamma / MyConsts_fs2AU
+      CALL SetFieldFromInput( InputData, "RelaxAtBorders",  DynamicsGamma, 0.0 ) 
+      IF ( DynamicsGamma /= 0 ) &
+         DynamicsGamma = 1. / ( DynamicsGamma * TimeConversion(InputUnits, InternalUnits) )
       ! Nr of carbon atoms in the slab
       CALL SetFieldFromInput( InputData, "NCarbon",  NCarbon, 121 ) 
 
@@ -120,37 +135,38 @@ PROGRAM JK6_v3
       DynamicsGamma = 0.0
       ! Mass of the bath oscillator
       CALL SetFieldFromInput( InputData, "MassBath", MassBath )
-      MassBath = MassBath * MyConsts_Uma2Au
+      MassBath = MassBath * MassConversion(InputUnits, InternalUnits)
       ! Nr of bath degrees of freedom
       CALL SetFieldFromInput( InputData, "NBath",  NBath ) 
       ! Read ohmic spectral density, when zero read spectral density from file
-      CALL SetFieldFromInput( InputData, "OhmicGamma", OhmicGamma, 0.0 )
-      OhmicGamma = OhmicGamma / MyConsts_fs2AU
-      IF ( OhmicGamma == 0.0 ) THEN
+      CALL SetFieldFromInput( InputData, "OhmicRelaxT", OhmicGamma, 0.0 )
+      IF ( OhmicGamma /= 0 ) THEN
+         OhmicGamma = 1. / ( OhmicGamma * TimeConversion(InputUnits, InternalUnits) )
+         ! For an ohmic SD, cutoff freq is compulsory
+         CALL SetFieldFromInput( InputData, "BathCutOffFreq", BathCutOffFreq )
+      ELSE IF ( OhmicGamma == 0.0 ) THEN
          ! Read file with spectral density
          CALL SetFieldFromInput( InputData, "SpectralDensityFile", SpectralDensityFile )
          ! Read cutoff frequency of the bath, if BathCutOffFreq is not present, it is set to zero
          CALL SetFieldFromInput( InputData, "BathCutOffFreq", BathCutOffFreq, 0.0 )
-      ELSE
-         ! For an ohmic SD, cutoff freq is compulsory
-         CALL SetFieldFromInput( InputData, "BathCutOffFreq", BathCutOffFreq )
       END IF
-      BathCutOffFreq = BathCutOffFreq * MyConsts_cmmin1toAU
+      BathCutOffFreq = BathCutOffFreq * FreqConversion(InputUnits, InternalUnits) 
       ! Quasi-classical correction of the initial conditions of the bath (ZPE), relevant only for 0K
       CALL SetFieldFromInput( InputData, "ZPECorrection", ZPECorrection, .FALSE. )
 
    ELSE IF ( BathType == CHAIN_BATH ) THEN
       ! Langevin relaxation at the end of the chain
-      CALL SetFieldFromInput( InputData, "DynamicsGamma",  DynamicsGamma, 0.0 ) 
-      DynamicsGamma = DynamicsGamma / MyConsts_fs2AU
+      CALL SetFieldFromInput( InputData, "RelaxAtChainEnd",  DynamicsGamma, 0.0 ) 
+      IF ( DynamicsGamma /= 0 ) &
+         DynamicsGamma = 1. / ( DynamicsGamma * TimeConversion(InputUnits, InternalUnits) )
       ! Mass of the bath oscillator
       CALL SetFieldFromInput( InputData, "MassBath", MassBath )
-      MassBath = MassBath * MyConsts_Uma2Au
+      MassBath = MassBath * MassConversion(InputUnits, InternalUnits)
       ! Nr of bath degrees of freedom
       CALL SetFieldFromInput( InputData, "NBath",  NBath )
       ! Read cutoff frequency of the bath, if BathCutOffFreq is not present, it is set to zero
       CALL SetFieldFromInput( InputData, "BathCutOffFreq", BathCutOffFreq, 0.0 )
-      BathCutOffFreq = BathCutOffFreq * MyConsts_cmmin1toAU
+      BathCutOffFreq = BathCutOffFreq * FreqConversion(InputUnits, InternalUnits) 
       ! Read file with normal modes freq and couplings
       CALL SetFieldFromInput( InputData, "SpectralDensityFile", SpectralDensityFile )
       ! Quasi-classical correction of the initial conditions of the bath (ZPE), relevant only for 0K
@@ -158,24 +174,26 @@ PROGRAM JK6_v3
 
    ELSE IF ( BathType == DOUBLE_CHAIN ) THEN
       ! Langevin relaxation at the end of the chain
-      CALL SetFieldFromInput( InputData, "DynamicsGamma",  DynamicsGamma, 0.0 ) 
-      DynamicsGamma = DynamicsGamma / MyConsts_fs2AU
+      CALL SetFieldFromInput( InputData, "RelaxAtChainEnd",  DynamicsGamma, 0.0 ) 
+      IF ( DynamicsGamma /= 0 ) &
+         DynamicsGamma = 1. / ( DynamicsGamma * TimeConversion(InputUnits, InternalUnits) )
       ! Mass of the bath oscillator
       CALL SetFieldFromInput( InputData, "MassBath", MassBath )
-      MassBath = MassBath * MyConsts_Uma2Au
+      MassBath = MassBath * MassConversion(InputUnits, InternalUnits)
       ! Nr of bath degrees of freedom
       CALL SetFieldFromInput( InputData, "NBath",  NBath )
       ! Read cutoff frequency of the bath, if BathCutOffFreq is not present, it is set to zero
       CALL SetFieldFromInput( InputData, "BathCutOffFreq", BathCutOffFreq, 0.0 )
-      BathCutOffFreq = BathCutOffFreq * MyConsts_cmmin1toAU
+      BathCutOffFreq = BathCutOffFreq * FreqConversion(InputUnits, InternalUnits) 
       ! Read file with normal modes freq and couplings
       CALL SetFieldFromInput( InputData, "SpectralDensityFile", SpectralDensityFile )
       CALL SetFieldFromInput( InputData, "SpectralDensityFile2", SpectralDensityFile2 )
 
    ELSE IF ( BathType == LANGEVIN_DYN ) THEN
       ! Langevin relaxation of the system (at the carbon atom)
-      CALL SetFieldFromInput( InputData, "DynamicsGamma",  DynamicsGamma, 0.0 ) 
-      DynamicsGamma = DynamicsGamma / MyConsts_fs2AU
+      CALL SetFieldFromInput( InputData, "RelaxAtCarbon",  DynamicsGamma, 0.0 ) 
+      IF ( DynamicsGamma /= 0 ) &
+         DynamicsGamma = 1. / ( DynamicsGamma * TimeConversion(InputUnits, InternalUnits) )
 
    END IF
 
@@ -204,27 +222,36 @@ PROGRAM JK6_v3
 
    IF ( (RunType /= HARMONICMODEL) .AND. (RunType /= RPMD_EQUILIBRIUM) ) THEN
       IF ( Collinear )  WRITE(*,"(/,A)") " * The atom is fixed in the collinear geometry "
-      WRITE(*,898) MassH / MyConsts_Uma2Au, MassC / MyConsts_Uma2Au
+      WRITE(*,898) MassH*MassConversion(InternalUnits, InputUnits), MassUnit(InputUnits), &
+                   MassC*MassConversion(InternalUnits, InputUnits), MassUnit(InputUnits)
    END IF
 
    ! Write info about the bath representation
    SELECT CASE( BathType )
       CASE( SLAB_POTENTIAL )
-         WRITE(*,899) NCarbon, DynamicsGamma*MyConsts_fs2AU
+         WRITE(*,899) NCarbon, 1.0/DynamicsGamma*TimeConversion(InternalUnits, InputUnits), TimeUnit(InputUnits)
       CASE( NORMAL_BATH ) 
          IF ( OhmicGamma == 0.0 ) THEN
-            WRITE(*,900) NBath, MassBath/MyConsts_Uma2Au, BathCutOffFreq/MyConsts_cmmin1toAU, trim(adjustl(SpectralDensityFile))
+            WRITE(*,900) NBath, MassBath*MassConversion(InternalUnits, InputUnits), MassUnit(InputUnits), &
+                         BathCutOffFreq*FreqConversion(InternalUnits, InputUnits), FreqUnit(InputUnits),  &
+                         trim(adjustl(SpectralDensityFile))
          ELSE
-            WRITE(*,910) NBath, MassBath/MyConsts_Uma2Au, BathCutOffFreq/MyConsts_cmmin1toAU, OhmicGamma*MyConsts_fs2AU
+            WRITE(*,910) NBath, MassBath*MassConversion(InternalUnits, InputUnits), MassUnit(InputUnits), &
+                         BathCutOffFreq*FreqConversion(InternalUnits, InputUnits), FreqUnit(InputUnits),  &
+                         1.0/OhmicGamma*TimeConversion(InternalUnits, InputUnits), TimeUnit(InputUnits)
          END IF
       CASE( CHAIN_BATH )
-         WRITE(*,901) NBath, MassBath/MyConsts_Uma2Au, BathCutOffFreq/MyConsts_cmmin1toAU, &
-                      DynamicsGamma*MyConsts_fs2AU, trim(adjustl(SpectralDensityFile))
+         WRITE(*,901) NBath, MassBath*MassConversion(InternalUnits, InputUnits), MassUnit(InputUnits),   &
+                      BathCutOffFreq*FreqConversion(InternalUnits, InputUnits), FreqUnit(InputUnits),    &
+                      1.0/DynamicsGamma*TimeConversion(InternalUnits, InputUnits), TimeUnit(InputUnits), &
+                      trim(adjustl(SpectralDensityFile))
       CASE( DOUBLE_CHAIN )
-         WRITE(*,903) NBath, MassBath/MyConsts_Uma2Au, BathCutOffFreq/MyConsts_cmmin1toAU, &
-                      DynamicsGamma*MyConsts_fs2AU, trim(adjustl(SpectralDensityFile)), trim(adjustl(SpectralDensityFile2))
+         WRITE(*,903) NBath, MassBath*MassConversion(InternalUnits, InputUnits), MassUnit(InputUnits),   &
+                      BathCutOffFreq*FreqConversion(InternalUnits, InputUnits), FreqUnit(InputUnits),    &
+                      1.0/DynamicsGamma*TimeConversion(InternalUnits, InputUnits), TimeUnit(InputUnits), &
+                      trim(adjustl(SpectralDensityFile)), trim(adjustl(SpectralDensityFile2))
       CASE( LANGEVIN_DYN )
-         WRITE(*,902) DynamicsGamma*MyConsts_fs2AU
+         WRITE(*,902) 1.0/DynamicsGamma*TimeConversion(InternalUnits, InputUnits), TimeUnit(InputUnits)
    END SELECT
 
    ! Write info about the kind of output
@@ -237,35 +264,40 @@ PROGRAM JK6_v3
          WRITE(*,"(A)") " * Detailed information on each trajectory will be printed "
    END SELECT
 
-   898 FORMAT(" * Mass of the H atom (UMA):                    ",F10.4,/,&
-              " * Mass of the C atoms (UMA):                   ",F10.4,/ )
+   898 FORMAT(" * Mass of the H atom:                          ",F10.4,1X,A,/,&
+              " * Mass of the C atom:                          ",F10.4,1X,A,/ )
 
    899 FORMAT(" * Bath is a slab of C atoms (force field potential) ", /,&
               " * Nr of Carbon atoms:                          ",I10,  /,&
-              " * Langevin friction at the edges (1/fs):       ",F10.4,/)
+              " * Langevin relax time at the edges:            ",F10.4,1X,A,/)
+
    900 FORMAT(" * Bath is a set of independent HO coupled to the system ",/,&
               " * Nr of bath oscillators:                      ",I10,  /,& 
-              " * Mass of the bath oscillator (UMA):           ",F10.4,/,& 
-              " * Cutoff frequency of the bath (1/cm):         ",F10.1,/,& 
+              " * Mass of the bath oscillator:                 ",F10.4,1X,A,/,& 
+              " * Cutoff frequency of the bath:                ",F10.1,1X,A,/,& 
               " * File with the spectral density:  "            ,A22,/ )
+
    910 FORMAT(" * Bath is a set of independent HO coupled to the system, ohmic SD ",/,&
               " * Nr of bath oscillators:                      ",I10,  /,& 
-              " * Mass of the bath oscillator (UMA):           ",F10.4,/,& 
-              " * Cutoff frequency of the bath (1/cm):         ",F10.1,/,& 
-              " * Gamma of the spectral density (1/fs):        ",F10.4,/ )
+              " * Mass of the bath oscillator:                 ",F10.4,1X,A,/,& 
+              " * Cutoff frequency of the bath:                ",F10.1,1X,A,/,& 
+              " * Relaxation time of the ohmic SD              ",F10.4,1X,A,/ )
+
    901 FORMAT(" * Bath is is a linear chain of harmonic oscillators ", /,&
               " * Nr of bath oscillators:                      ",I10,  /,& 
-              " * Mass of the bath oscillator (UMA):           ",F10.4,/,& 
-              " * Cutoff frequency of the bath (1/cm):         ",F10.1,/,& 
-              " * Langevin friction at the end (1/fs):         ",F10.4,/,&
+              " * Mass of the bath oscillator:                 ",F10.4,1X,A,/,& 
+              " * Cutoff frequency of the bath:                ",F10.1,1X,A,/,& 
+              " * Langevin relax time at the end of the chain: ",F10.4,1X,A,/,&
               " * File with the spectral density:  "            ,A22,  / )
+
    902 FORMAT(" * Bath is effectively represented by Langevin dynamics ", /,&
-              " * Langevin friction coefficient (1/fs):        ",F10.4,/ )
+              " * Relaxation time of Langevin dynamics:        ",F10.4,1X,A,/ )
+
    903 FORMAT(" * Bath is double linear chain of harmonic oscillators ", /,&
               " * Nr of bath oscillators per chain:            ",I10,  /,& 
-              " * Mass of the bath oscillator (UMA):           ",F10.4,/,& 
-              " * Cutoff freq of the low freq chain (1/cm):    ",F10.1,/,& 
-              " * Langevin friction at the end (1/fs):         ",F10.4,/,&
+              " * Mass of the bath oscillator:                 ",F10.4,1X,A,/,& 
+              " * Cutoff freq of the low freq chain:           ",F10.1,1X,A,/,& 
+              " * Langevin relax time at the end of the chain: ",F10.4,1X,A,/,&
               " * File with the first SD:  ",                    A30,  /,&
               " * File with the second SD: ",                    A30,  / )
 
@@ -291,10 +323,10 @@ PROGRAM JK6_v3
    END IF
    
    IF  ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
-      PRINT "(/,A,F10.6,/)"," * Bath distorsion force constant:              ", GetDistorsionForce( Bath ) 
+      PRINT "(/,A,F10.6,/)"," * Bath distorsion force constant:              ", GetDistorsionForce( Bath ), " au"
    ELSE IF ( BathType == DOUBLE_CHAIN ) THEN
-      PRINT "(/,A,F10.6)"," * Bath 1 distorsion force constant:              ", GetDistorsionForce( DblBath(1) ) 
-      PRINT "(A,F10.6,/)"," * Bath 2 distorsion force constant:              ", GetDistorsionForce( DblBath(2) ) 
+      PRINT "(/,A,F10.6)"," * Bath 1 distorsion force constant:              ", GetDistorsionForce( DblBath(1) ), " au"
+      PRINT "(A,F10.6,/)"," * Bath 2 distorsion force constant:              ", GetDistorsionForce( DblBath(2) ), " au"
    END IF
 
    !*************************************************************

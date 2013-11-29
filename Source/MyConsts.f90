@@ -241,6 +241,7 @@ SUBROUTINE RemoveDups1D_r( InputArray, NrOfNonRepeated )
    END DO Outer
 
    ! Store in InputArray the non repeated elements
+   CALL Sort( TmpArray(1:NrOfNonRepeated) )
    InputArray(1:NrOfNonRepeated) = TmpArray(1:NrOfNonRepeated)
 
 END SUBROUTINE RemoveDups1D_r
@@ -268,6 +269,70 @@ SUBROUTINE RemoveDups2D_r( InputArray, NrOfNonRepeated )
    InputArray(1:NrOfNonRepeated,:) = TmpArray(1:NrOfNonRepeated,:)
 
 END SUBROUTINE RemoveDups2D_r
+
+! ! --------------------------------------------------------------------
+! ! INTEGER FUNCTION  FindMinimum():
+! !    This function returns the location of the minimum in the section
+! ! between Start and End.
+! ! --------------------------------------------------------------------
+! 
+!    INTEGER FUNCTION  FindMinimum(x, Start, End)
+!       IMPLICIT  NONE
+!       REAL, DIMENSION(1:), INTENT(IN) :: x
+!       INTEGER, INTENT(IN)             :: Start, End
+!       INTEGER                         :: Minimum
+!       INTEGER                         :: Location
+!       INTEGER                         :: i
+! 
+!       Minimum  = x(Start)               ! assume the first is the min
+!       Location = Start                  ! record its position
+!       DO i = Start+1, End               ! start with next elements
+!          IF (x(i) < Minimum) THEN       !   if x(i) less than the min?
+!             Minimum  = x(i)             !      Yes, a new minimum found
+!             Location = i                !      record its position
+!          END IF
+!       END DO
+!       FindMinimum = Location            ! return the position
+!    END FUNCTION  FindMinimum
+
+! ! --------------------------------------------------------------------
+! ! SUBROUTINE  Swap():
+! !    This subroutine swaps the values of its two formal arguments.
+! ! --------------------------------------------------------------------
+! 
+!    SUBROUTINE  Swap(a, b)
+!       IMPLICIT  NONE
+!       REAL, INTENT(INOUT) :: a, b
+! 
+!       Temp = a
+!       a    = b
+!       b    = Temp
+!    END SUBROUTINE  Swap
+
+! --------------------------------------------------------------------
+! SUBROUTINE  Sort():
+!    This subroutine receives an array x() and sorts it into ascending
+! order.
+! --------------------------------------------------------------------
+   SUBROUTINE  Sort(x)
+      IMPLICIT  NONE
+      REAL, DIMENSION(:), INTENT(INOUT) :: x
+      INTEGER    :: i,  Location
+      REAL       :: Temp
+      LOGICAL, DIMENSION(:), ALLOCATABLE :: Mask
+
+      ALLOCATE(Mask(SIZE(x)))
+      Mask = .TRUE.
+      DO i = 1, SIZE(x)-1                  ! except for the last
+         Location = MINLOC( x, 1, Mask )    ! find min from this to last
+         Temp = x(i)
+         x(i) = x(Location)
+         x(Location) = Temp
+         Mask(i) = .FALSE.
+      END DO
+      DEALLOCATE(Mask)
+
+   END SUBROUTINE  Sort
 
 END MODULE MyConsts
 

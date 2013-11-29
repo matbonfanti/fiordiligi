@@ -300,6 +300,9 @@ ${OBJDIR}/InputField.o       : ${SRCDIR}/InputField.f90 ${COMMONDEP}
 # Module containing the common data (v2)
 ${OBJDIR}/CommonData.o       : ${SRCDIR}/CommonData.f90 ${COMMONDEP}
 
+# Input and output unit conversion
+${OBJDIR}/UnitConversion.o : ${SRCDIR}/UnitConversion.f90 ${COMMONDEP}
+
 # Module containing the common data (v3)
 ${OBJDIR}/SharedData.o       : ${SRCDIR}/SharedData.f90 ${OBJDIR}/IndependentOscillatorsModel.o ${COMMONDEP}
 
@@ -324,5 +327,4 @@ ${OBJDIR}/PrintTools.o : ${SRCDIR}/PrintTools.f90 ${COMMONDEP}
 
 # Derivatives with finite difference methods
 ${OBJDIR}/DifferenceDerivatives.o : ${SRCDIR}/DifferenceDerivatives.f90 ${COMMONDEP}
-
 

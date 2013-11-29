@@ -22,8 +22,10 @@
 MODULE PolymerEquilibriumOscillator
    USE MyConsts
    USE ErrorTrap
+   USE MyLinearAlgebra
    USE SharedData
    USE InputField
+   USE UnitConversion
    USE ClassicalEqMotion
    USE RandomNumberGenerator
 
@@ -34,9 +36,6 @@ MODULE PolymerEquilibriumOscillator
 
    PUBLIC :: PolymerEquilibriumOscillator_ReadInput, PolymerEquilibriumOscillator_Initialize, &
              PolymerEquilibriumOscillator_Run, PolymerEquilibriumOscillator_Dispose
-
-   ! Input is in atomic units
-   LOGICAL :: AtomicUnits
 
    ! Nr of dimensions of the system
    INTEGER :: NDim
@@ -82,7 +81,6 @@ MODULE PolymerEquilibriumOscillator
    REAL, DIMENSION(:,:), ALLOCATABLE    :: AverageCoord           !< Average i-th coordinate vs time
    REAL, DIMENSION(:), ALLOCATABLE      :: KineticAverage         !< Average of the kinetic energy of the system
    REAL, DIMENSION(:), ALLOCATABLE      :: PotentialAverage       !< Average of the potential energy of the system
-   REAL, DIMENSION(:), ALLOCATABLE      :: AverageVirial          !< Average kinetic energy via virial theorem
    REAL, DIMENSION(:), ALLOCATABLE      :: EquilibAveTvsTime      !< Average temperature at time T during equilibration
 
    CONTAINS
@@ -97,9 +95,6 @@ MODULE PolymerEquilibriumOscillator
       IMPLICIT NONE
       TYPE(InputFile), INTENT(INOUT) :: InputData
 
-      ! Nr of replicas of the system for the ring polymer dynamics
-      CALL SetFieldFromInput( InputData, "AtomicUnits", AtomicUnits, .FALSE. )
-
       ! PARAMETERS FOR THE SYSTEM DEFINITION 
 
       ! Nr of replicas of the system for the ring polymer dynamics
@@ -107,15 +102,16 @@ MODULE PolymerEquilibriumOscillator
 
       ! Mass of the system ( in amu )
       CALL SetFieldFromInput( InputData, "MassSystem", MassSystem )
-      IF ( .NOT. AtomicUnits ) MassSystem = MassSystem * MyConsts_Uma2Au
+      MassSystem = MassSystem * MassConversion(InputUnits, InternalUnits)
 
       ! Potential is a morse function?
       CALL SetFieldFromInput( InputData, "MorsePotential", MorsePotential )
 
       IF ( MorsePotential ) THEN
          CALL SetFieldFromInput( InputData, "MorseAlpha", MorseAlpha )
+         MorseAlpha = MorseAlpha / LengthConversion(InputUnits, InternalUnits)
          CALL SetFieldFromInput( InputData, "MorseDe", MorseDe )
-         IF ( .NOT. AtomicUnits ) MorseDe = MorseDe / MyConsts_Hartree2eV
+         MorseDe = MorseDe * EnergyConversion(InputUnits, InternalUnits)
          HarmonicFreq = SQRT( 2.0 * MorseAlpha**2 * MorseDe / MassSystem )
       ELSE
          ! Parameters for the system potential ( in a.u. )
@@ -129,29 +125,6 @@ MODULE PolymerEquilibriumOscillator
          END IF
       END IF
 
-      ! READ THE VARIABLES TO SET THE EQUILIBRATION CONDITIONS
-
-      ! Temperature of the bath
-      CALL SetFieldFromInput( InputData, "Temperature", Temperature, 1.0 )
-      IF ( .NOT. AtomicUnits ) Temperature = Temperature * MyConsts_K2AU
-
-      ! Frequency and force constant of the harmonic force between the beads
-      BeadsFrequency = NBeads * Temperature
-      BeadsForceConst = ( NBeads * Temperature )**2
-
-      ! Set gamma of the equilibration Langevin dynamics
-      CALL SetFieldFromInput( InputData, "EquilGamma", EquilGamma)
-      IF ( .NOT. AtomicUnits ) EquilGamma = EquilGamma / MyConsts_fs2AU
-
-      ! Set the time step of the equilibration
-      CALL SetFieldFromInput( InputData, "EquilTStep",  EquilTStep, TimeStep/MyConsts_fs2AU )
-      IF ( .NOT. AtomicUnits ) EquilTStep = EquilTStep * MyConsts_fs2AU
-
-      ! Set nr of steps of the equilibration
-      CALL SetFieldFromInput( InputData, "EquilibrationTime", EquilibrationTime, 10.0*(1.0/EquilGamma)/MyConsts_fs2AU )
-      IF ( .NOT. AtomicUnits ) EquilibrationTime = EquilibrationTime * MyConsts_fs2AU
-      NrEquilibrationSteps = CEILING( EquilibrationTime / EquilTStep )
-
       ! READ THE VARIABLES FOR THE PROPAGATION 
 
       ! Nr of the trajectories of the simulation
@@ -159,7 +132,7 @@ MODULE PolymerEquilibriumOscillator
 
       ! Timestep of the propagation
       CALL SetFieldFromInput( InputData, "TimeStep", TimeStep )
-      IF ( .NOT. AtomicUnits ) TimeStep = TimeStep * MyConsts_fs2AU
+      TimeStep = TimeStep * TimeConversion(InputUnits, InternalUnits) 
 
       ! Nr of steps of the propagation
       CALL SetFieldFromInput( InputData, "NrOfSteps", NrOfSteps )
@@ -169,13 +142,36 @@ MODULE PolymerEquilibriumOscillator
       ! Accordingly set the interval between each printing step
       NrOfPrintSteps = CEILING( real(NrOfSteps) / real(PrintStepInterval) )
 
+      ! READ THE VARIABLES TO SET THE EQUILIBRATION CONDITIONS
 
-      WRITE(*, 902) NBeads, BeadsFrequency/MyConsts_cmmin1toAU
+      ! Temperature of the bath
+      CALL SetFieldFromInput( InputData, "Temperature", Temperature, 1.0 )
+      Temperature = Temperature * TemperatureConversion(InputUnits, InternalUnits)
+
+      ! Frequency and force constant of the harmonic force between the beads
+      BeadsFrequency = NBeads * Temperature
+      BeadsForceConst = ( NBeads * Temperature )**2
+
+      ! Set gamma of the equilibration Langevin dynamics
+      CALL SetFieldFromInput( InputData, "EquilRelaxTime", EquilGamma)
+      EquilGamma = 1. / ( EquilGamma * TimeConversion(InputUnits, InternalUnits) )
+
+      ! Set the time step of the equilibration
+      CALL SetFieldFromInput( InputData, "EquilTStep", EquilTStep, TimeStep*TimeConversion(InternalUnits,InputUnits) )
+      EquilTStep = EquilTStep * TimeConversion(InputUnits, InternalUnits)
+
+      ! Set nr of steps of the equilibration
+      CALL SetFieldFromInput( InputData, "EquilibrationTime", EquilibrationTime, &
+                                                                  10.0/EquilGamma*TimeConversion(InternalUnits,InputUnits) )
+      EquilibrationTime = EquilibrationTime * TimeConversion(InputUnits, InternalUnits)
+      NrEquilibrationSteps = CEILING( EquilibrationTime / EquilTStep )
+
+!       WRITE(*, 902) NBeads, BeadsFrequency/MyConsts_cmmin1toAU
 
 !       WRITE(*, 903) InitEnergy*MyConsts_Hartree2eV, (InitEnergy-MinimumEnergy)*MyConsts_Hartree2eV, &
 !                     NrOfInitSnapshots, TimeBetweenSnaps/MyConsts_fs2AU
 
-      WRITE(*, 904) NrTrajs, TimeStep/MyConsts_fs2AU, NrOfSteps, NrOfPrintSteps
+!       WRITE(*, 904) NrTrajs, TimeStep/MyConsts_fs2AU, NrOfSteps, NrOfPrintSteps
 
 !       WRITE(*, 905) Temperature/MyConsts_K2AU, NrOfSnapshots, EquilTStep/MyConsts_fs2AU,  &
 !                     EquilGamma*MyConsts_fs2AU, EquilibrTimeBetweenSnap
@@ -243,9 +239,6 @@ MODULE PolymerEquilibriumOscillator
       ALLOCATE( KineticAverage(0:NrOfPrintSteps),  PotentialAverage(0:NrOfPrintSteps) )
       KineticAverage(:)  = 0.0
       PotentialAverage(:)  = 0.0
-      ! Allocate memory to compute the average kinetic energy as centroid of the virial of the forces
-      ALLOCATE( AverageVirial(0:NrOfPrintSteps) )
-      AverageVirial(:) = 0.0
 
       ! Average coordinates over time and power spectrum of the auto-correlation function
       IF ( PrintType >= FULL ) THEN
@@ -279,8 +272,9 @@ MODULE PolymerEquilibriumOscillator
       REAL    :: TempAverage, TempVariance
       !> Energy averages
       REAL    :: TotEnergy, PotEnergy, KinEnergy, IstTemperature
-      !> Variance of position and velocity for initial guess of the coordinate
-      REAL    :: SigmaX, SigmaV
+      !> Initial energies of the bath
+      REAL     ::  TrajKinAverage, TrajKinVariance, TrajPotAverage, TrajPotVariance
+      REAL     ::  TotalKinAverage, TotalKinVariance, TotalPotAverage, TotalPotVariance
       !> Initial coordinates for the autocorrelation function
       REAL, DIMENSION(NDim*NBeads) :: X0
       !> Counters
@@ -288,27 +282,34 @@ MODULE PolymerEquilibriumOscillator
       !> Output file name
       CHARACTER(100) :: OutFileName
 
+      REAL :: K1, K2, K3, K4
+      REAL, DIMENSION(0:NrOfPrintSteps,4)    :: AverageKin
+      AverageKin(:,:) = 0.0
+
       PosCorrelationUnit = LookForFreeUnit()
       OPEN( FILE="PositionCorrelation.dat", UNIT=PosCorrelationUnit )
-      WRITE(PosCorrelationUnit, "(A,I6,A,/)") "# X(0)X(t) correlation vs time (fs | au) - ", NrTrajs, " trajectories "
-
+      WRITE(PosCorrelationUnit, "(3A,I6,A,/)") "# <X(0)X(t)> vs time (", TimeUnit(InputUnits), &
+                                                                                  " | au) - ", NrTrajs, " trajectories "
       EnergyOutputUnit = LookForFreeUnit()
       OPEN( FILE="EnergyAverages.dat", UNIT=EnergyOutputUnit )
-      WRITE(EnergyOutputUnit, "(A,I6,A,/)") "# Energy  vs time (au) | EKIN - EV - ETOT - ", NrTrajs, " trajectories "
-
+      WRITE(EnergyOutputUnit, "(5A,I6,A,/)") "# Ekin, Epot, ETot vs time (", trim(TimeUnit(InputUnits)), ",", &
+                                                             trim(EnergyUnit(InputUnits)), ") - ", NrTrajs, " trajectories "
       IF ( PrintType >= FULL ) THEN
          AvCoordOutputUnit = LookForFreeUnit()
          OPEN( FILE="AverageCoords.dat", UNIT=AvCoordOutputUnit )
-         WRITE(AvCoordOutputUnit, "(A,I6,A,/)") "# average coordinate vs time (fs | Ang) - ", NrTrajs, " trajectories "
+         WRITE(AvCoordOutputUnit, "(5A,I6,A,/)") "# Coordinate vs time (", trim(TimeUnit(InputUnits)), ",", &
+                                                             trim(LengthUnit(InputUnits)), ") - ", NrTrajs, " trajectories "
          InitTUnit = LookForFreeUnit()
          OPEN( FILE="EquilibrationFinalT.dat", UNIT=InitTUnit )
-         WRITE(InitTUnit, "(A,I6,A,/)") "# average T over all the trajectories vs Time (K | fs )", NrTrajs, " trajectories "
+         WRITE(InitTUnit, "(5A,I6,A,/)") "# <Temperature> vs time (", trim(TimeUnit(InputUnits)), ",", &
+                                                             trim(TemperUnit(InputUnits)), ") - ", NrTrajs, " trajectories "
       ENDIF
 
       IF ( PrintType == DEBUG ) THEN
          TEquilUnit = LookForFreeUnit()
          OPEN( FILE="EquilibrationTemp.dat", UNIT=TEquilUnit )
-         WRITE(TEquilUnit, "(A,I6,A,/)") "# ", NrTrajs, " temperature average and variance for each equilibration (fs | K)"
+         WRITE(TEquilUnit, "(5A,/)") "# ", NrTrajs, " Temperature for each equilibration (", &
+                                                            trim(TimeUnit(InputUnits)), ",", trim(TemperUnit(InputUnits)), ")"
       END IF
 
       PRINT "(2/,A)",    "***************************************************"
@@ -317,8 +318,11 @@ MODULE PolymerEquilibriumOscillator
 
       PRINT "(A,I5,A)"," Running ", NrTrajs, " trajectories ... "
 
-      SigmaX = sqrt( Temperature / MassSystem ) / HarmonicFreq
-      SigmaV = sqrt( Temperature / MassSystem )
+      ! Initialize averages of the bath initial state
+      TotalKinAverage  = 0.0
+      TotalKinVariance = 0.0
+      TotalPotAverage  = 0.0
+      TotalPotVariance = 0.0
 
       !run NrTrajs number of trajectories
       DO iTraj = 1,NrTrajs
@@ -329,12 +333,11 @@ MODULE PolymerEquilibriumOscillator
          ! INITIALIZATION OF THE COORDINATES AND MOMENTA OF THE SYSTEM
          !*************************************************************
 
-         ! set reasonable initial conditions for the equilibration
-         ! The position and velocity variance is estimated via a harmonic approximation of the potential
-         V(:) = GaussianRandomNr( 1.0 ) * SigmaV
-         X(:) = GaussianRandomNr( 1.0 ) * SigmaX
+         ! set reasonable initial conditions for the equilibration via a normal mode calculations of the ring polymer
+         CALL InitialConditionsForNormalModes( X, V ) 
 
-         PRINT "(/,A,F6.1)"," Equilibrating the initial conditions at Tp = ", NBeads*Temperature/MyConsts_K2AU
+         PRINT "(/,A,F6.1)"," Equilibrating the initial conditions at Tp = ", &
+                             NBeads*Temperature*TemperatureConversion(InternalUnits,InputUnits)
 
          ! Compute starting potential and forces
          A(:) = 0.0
@@ -350,27 +353,14 @@ MODULE PolymerEquilibriumOscillator
          ! Long equilibration step before starting the initial condition sampling
          DO iStep = 1, NrEquilibrationSteps 
 
-            ! PROPAGATION for ONE TIME STEP - if first step, previous acceleration are not available, use VV
-!             IF ( iTraj == 1 ) THEN
-!                ! Store initial accelerations
-!                APre(:) = A(:)
-!                ! Propagate for one timestep with Velocity-Verlet and langevin thermostat
-!                CALL EOM_VelocityVerlet( Equilibration, X, V, A, Potential, PotEnergy )
-!             ELSE
-!                ! Propagate for one timestep with Beeman's method and langevin thermostat
-!                CALL EOM_Beeman( Equilibration, X, V, A, APre, Potential, PotEnergy )
-!             END IF
+            ! PROPAGATION for ONE TIME STEP
             CALL EOM_LangevinSecondOrder( Equilibration, X, V, A, Potential, PotEnergy )
 
             IF ( PrintType >= FULL ) THEN
                ! compute kinetic energy and total energy
                KinEnergy = EOM_KineticEnergy(Equilibration, V )
                TotEnergy = PotEnergy + KinEnergy
-               IF ( AtomicUnits ) THEN 
-                  IstTemperature = 2.0*KinEnergy/(NDim*NBeads)
-               ELSE
-                  IstTemperature = 2.0*KinEnergy/(MyConsts_K2AU*NDim*NBeads)
-               END IF
+               IstTemperature = 2.0*KinEnergy/(NDim*NBeads) 
 
                ! store temperature average and variance
                TempAverage = TempAverage + IstTemperature
@@ -388,13 +378,9 @@ MODULE PolymerEquilibriumOscillator
                IF ( PrintType == DEBUG ) THEN              ! write debug output
                   ! Temperature profile during equilibration
                   IF ( iStep == 1 )  WRITE(TEquilUnit,*) " " 
-                  IF ( AtomicUnits ) THEN
-                     WRITE(TEquilUnit,851)  real(iStep)*EquilTStep, &
-                                                               TempAverage/iStep, sqrt((TempVariance/iStep)-(TempAverage/iStep)**2)
-                  ELSE 
-                     WRITE(TEquilUnit,851)  real(iStep)*EquilTStep/MyConsts_fs2AU, &
-                                                               TempAverage/iStep, sqrt((TempVariance/iStep)-(TempAverage/iStep)**2)
-                  END IF
+                  WRITE(TEquilUnit,851)  real(iStep)*EquilTStep * TimeConversion(InternalUnits,InputUnits), &
+                        TempAverage/iStep*TemperatureConversion(InternalUnits,InputUnits), &
+                        sqrt((TempVariance/iStep)-(TempAverage/iStep)**2)*TemperatureConversion(InternalUnits,InputUnits)
                END IF
                851 FORMAT( F20.5, 2F20.6 )
             END IF
@@ -405,8 +391,27 @@ MODULE PolymerEquilibriumOscillator
          ! INFORMATION ON INITIAL CONDITIONS, INITIALIZATION, OTHER...
          !*************************************************************
 
+         ! compute initial kinetic energy for this traj
+         KinEnergy = EOM_KineticEnergy(Equilibration, V )
+         PotEnergy = Potential( X, A )
+         ! Shift potential energy with respect to the bottom of the well
+         IF ( MorsePotential )   PotEnergy = PotEnergy + MorseDe*NBeads
+
+         ! Increment averages of Kin and Pot for the single traj
+         TrajKinAverage  = KinEnergy/(NDim*NBeads)
+         TrajKinVariance = (KinEnergy/(NDim*NBeads))**2
+         TrajPotAverage  = PotEnergy/(NDim*NBeads)
+         TrajPotVariance = (PotEnergy/(NDim*NBeads))**2
+
+         ! PRINT INITIAL CONDITIONS of THE BATH and THE SYSTEM
+         WRITE(*,600)  KinEnergy/(NDim*NBeads)*EnergyConversion(InternalUnits,InputUnits), &
+                       2.0*KinEnergy/(NDim*NBeads)*TemperatureConversion(InternalUnits,InputUnits), &
+                       PotEnergy/(NDim*NBeads)*EnergyConversion(InternalUnits,InputUnits), &
+                       2.0*PotEnergy/(NDim*NBeads)*TemperatureConversion(InternalUnits,InputUnits)
+
          ! Energy of the system, Coupling energy and energy of the bath
          CALL IstantaneousEnergies( KinEnergy, PotEnergy )
+         CALL KineticEnergies( K1, K2, K3, K4 )
 
          ! Store starting values of the averages
          KineticAverage(0)    = KineticAverage(0)  + KinEnergy
@@ -416,14 +421,14 @@ MODULE PolymerEquilibriumOscillator
          X0 = X
          ! Compute position correlation function
          PositionCorrelation(0) = PositionCorrelation(0) + CorrelationFunction( X, X0 )
-         ! Compute virial of the force 
-         AverageVirial(0) = AverageVirial(0) + Virial(X)
+
+         AverageKin(0,1) = AverageKin(0,1) + K1 + PotEnergy
+         AverageKin(0,2) = AverageKin(0,2) + K2 + PotEnergy
+         AverageKin(0,3) = AverageKin(0,3) + K3 + PotEnergy
+         AverageKin(0,4) = AverageKin(0,4) + K4 + PotEnergy
 
          ! Compute average coordinates
          IF ( PrintType >= FULL )  AverageCoord(1,0) = AverageCoord(1,0) + CentroidCoord( X )
-
-!          ! PRINT INITIAL CONDITIONS of THE TRAJECTORY
-!          WRITE(*,600)  (KSys+VSys)*MyConsts_Hartree2eV, KBath*MyConsts_Hartree2eV, IstTemperature
 
         ! Open unit for massive output, with detailed info on trajectories
          IF ( PrintType == DEBUG ) THEN
@@ -440,13 +445,13 @@ MODULE PolymerEquilibriumOscillator
             OPEN( Unit=DebugUnitVel, File=OutFileName )
 
             ! Write initial values
-            WRITE( DebugUnitEn, "(/,A)" ) "# TRAJECTORY ENERGY: time / fs | Ekin, Epot, Etot / Eh "
+            WRITE( DebugUnitEn, "(/,A)" ) "# TRAJECTORY ENERGY: time / au | Ekin, Epot, Etot / Eh "
             WRITE(DebugUnitEn,800) 0.0,  KinEnergy, PotEnergy, KinEnergy+PotEnergy
 
-            WRITE( DebugUnitCoord, "(/,A)" ) "# TRAJECTORY COORD: time / fs | X(1) X(2) ... X(N) / bohr "
+            WRITE( DebugUnitCoord, "(/,A)" ) "# TRAJECTORY COORD: time / au | X(1) X(2) ... X(N) / bohr "
             WRITE(DebugUnitCoord,800) 0.0, X(:)
 
-            WRITE( DebugUnitVel, "(/,A)" ) "# TRAJECTORY VELOCITIES: time / fs | V(1) V(2) ... V(N) / au "
+            WRITE( DebugUnitVel, "(/,A)" ) "# TRAJECTORY VELOCITIES: time / au | V(1) V(2) ... V(N) / au "
             WRITE(DebugUnitVel,800) 0.0, V(:)
 
           ENDIF
@@ -487,8 +492,11 @@ MODULE PolymerEquilibriumOscillator
 
                ! Compute position correlation function
                PositionCorrelation(kStep) = PositionCorrelation(kStep) + CorrelationFunction( X, X0 )
-               ! Compute virial of the force 
-               AverageVirial(kStep) = AverageVirial(kStep) + Virial(X)
+
+               AverageKin(kStep,1) = AverageKin(kStep,1) + K1 + PotEnergy
+               AverageKin(kStep,2) = AverageKin(kStep,2) + K2 + PotEnergy
+               AverageKin(kStep,3) = AverageKin(kStep,3) + K3 + PotEnergy
+               AverageKin(kStep,4) = AverageKin(kStep,4) + K4 + PotEnergy
 
                IF ( PrintType >= FULL )   AverageCoord(1,kStep) = AverageCoord(1,kStep) + CentroidCoord( X )
 
@@ -499,14 +507,25 @@ MODULE PolymerEquilibriumOscillator
                   WRITE(DebugUnitVel,800) TimeStep*real(iStep), V(:)
                END IF
 
+               ! compute initial kinetic energy for this traj
+               KinEnergy = EOM_KineticEnergy(MolecularDynamics, V )
+               PotEnergy = Potential( X, A )
+               ! Shift potential energy with respect to the bottom of the well
+               IF ( MorsePotential )   PotEnergy = PotEnergy + MorseDe*NBeads
+
+               WRITE(66,*) kStep, KinEnergy
+
+               ! Increment averages of Kin and Pot for the single traj
+               TrajKinAverage  = TrajKinAverage + KinEnergy/(NDim*NBeads)
+               TrajKinVariance = TrajKinVariance + (KinEnergy/(NDim*NBeads))**2
+               TrajPotAverage  = TrajPotAverage + PotEnergy/(NDim*NBeads)
+               TrajPotVariance = TrajPotVariance + (PotEnergy/(NDim*NBeads))**2
+
             END IF 
 
          END DO
 
          PRINT "(A)", " Time propagation completed! "
-
-!          ! Print log information about the final condition of the trajectory
-!          WRITE(*,601)  (KSys+VSys)*MyConsts_Hartree2eV, KBath*MyConsts_Hartree2eV, IstTemperature
 
          IF ( PrintType == DEBUG ) THEN
                CLOSE( Unit=DebugUnitEn )
@@ -514,9 +533,36 @@ MODULE PolymerEquilibriumOscillator
                CLOSE( Unit=DebugUnitVel )
          ENDIF
 
+         TrajKinAverage  = TrajKinAverage / real(NrOfPrintSteps+1)
+         TrajKinVariance = SQRT( TrajKinVariance / real(NrOfPrintSteps+1) - TrajKinAverage**2 )
+         TrajPotAverage  = TrajPotAverage / real(NrOfPrintSteps+1)
+         TrajPotVariance = SQRT( TrajPotVariance / real(NrOfPrintSteps+1) - TrajPotAverage**2 )
+
+         ! PRINT AVERAGES FOR THE TRAJ
+         WRITE(*,700)  TrajKinAverage*EnergyConversion(InternalUnits,InputUnits), &
+                       2.0*TrajKinAverage*TemperatureConversion(InternalUnits,InputUnits), &
+                       TrajPotAverage*EnergyConversion(InternalUnits,InputUnits), &
+                       2.0*TrajPotAverage*TemperatureConversion(InternalUnits,InputUnits)
+
       END DO
       
       PRINT "(A)"," Done! "
+
+      TotalKinAverage = TotalKinAverage / real(NrTrajs) 
+      TotalKinVariance = SQRT( TotalKinVariance/real(NrTrajs) - TotalKinAverage**2 )
+      PRINT*, " --------------------------------------------------- " 
+      PRINT*, " Average T : ",2.*TotalKinAverage/MyConsts_K2AU, &
+                          " St dev : ", 2.*TotalKinAverage/MyConsts_K2AU
+      PRINT*, " --------------------------------------------------- " 
+      PRINT*, " " 
+
+      TotalPotAverage = TotalPotAverage / real(NrTrajs) 
+      TotalPotVariance = SQRT( TotalPotVariance/real(NrTrajs) - TotalPotAverage**2 )
+      PRINT*, " --------------------------------------------------- " 
+      PRINT*, " Average V : ",2.*TotalPotAverage/MyConsts_K2AU, &
+                         " St dev : ", 2.*TotalPotVariance/MyConsts_K2AU
+      PRINT*, " --------------------------------------------------- " 
+      PRINT*, " " 
 
       !*************************************************************
       !         OUTPUT OF THE RELEVANT AVERAGES 
@@ -526,14 +572,21 @@ MODULE PolymerEquilibriumOscillator
       PositionCorrelation(:) = PositionCorrelation(:)   /  real(NrTrajs)
       KineticAverage(:)      = KineticAverage(:)        / real(NrTrajs)
       PotentialAverage(:)    = PotentialAverage(:)      / real(NrTrajs)
-      AverageVirial(:)       = - AverageVirial(:) * 0.5 / real(NrTrajs)
 
       IF ( PrintType >= FULL )   AverageCoord(1:NDim,:) = AverageCoord(1:NDim,:) / real(NrTrajs) 
       IF ( PrintType >= FULL )   EquilibAveTvsTime(:)   = EquilibAveTvsTime(:) / real(NrTrajs) 
 
+      AverageKin(0:NrOfPrintSteps,1:4) = AverageKin(0:NrOfPrintSteps,1:4) / real(NrTrajs)
+
+      DO iStep = 0, NrOfPrintSteps
+         WRITE(900, "(F14.8,4F14.8)") TimeStep*real(PrintStepInterval*iStep)/MyConsts_fs2AU, &
+               AverageKin(iStep,1:4)*MyConsts_Hartree2eV
+      END DO
+
       ! Print average temperature over time during equilibration
       DO iStep = 0, size(EquilibAveTvsTime)-1
-          WRITE(InitTUnit,"(2F20.8)") EquilTStep*real(PrintStepInterval*iStep)/MyConsts_fs2AU, EquilibAveTvsTime(iStep+1)
+          WRITE(InitTUnit,"(2F20.8)") EquilTStep*real(PrintStepInterval*iStep)/MyConsts_fs2AU, &
+                  EquilibAveTvsTime(iStep+1)*TemperatureConversion(InternalUnits,InputUnits)
       END DO
 
       ! Print the position autocorrelation function
@@ -544,8 +597,7 @@ MODULE PolymerEquilibriumOscillator
       ! PRINT average energy of the system, of the coupling, of the bath
       DO iStep = 0, NrOfPrintSteps
          WRITE(EnergyOutputUnit,"(F14.8,4F14.8)") TimeStep*real(PrintStepInterval*iStep)/MyConsts_fs2AU, &
-                                       AverageVirial(iStep)*MyConsts_Hartree2eV,  PotentialAverage(iStep)*MyConsts_Hartree2eV, &
-                                                                                       KineticAverage(iStep)*MyConsts_Hartree2eV
+                                        PotentialAverage(iStep)*MyConsts_Hartree2eV, KineticAverage(iStep)*MyConsts_Hartree2eV
       END DO
 
       IF ( PrintType >= FULL ) THEN
@@ -567,13 +619,15 @@ MODULE PolymerEquilibriumOscillator
  
       800 FORMAT(F12.5,1000F15.8)
       600 FORMAT (/, " Initial condition of the MD trajectory ",/   &
-                     " * Energy of the system (eV)        ",1F10.4,/    &
-                     " * Kinetic Energy of the bath (eV)  ",1F10.4,/    &
-                     " * Istantaneous temperature (K)     ",1F10.4,/ ) 
-      601 FORMAT (/, " Final condition of the MD trajectory ",/   &
-                     " * Energy of the system (eV)        ",1F10.4,/    &
-                     " * Kinetic Energy of the bath (eV)  ",1F10.4,/    &
-                     " * Istantaneous temperature (K)     ",1F10.4,/ ) 
+                     " * Kinetic Energy (incl. beads) (eV)    ",1F10.4,/    &
+                     " * Translational temperature (K)        ",1F10.4,/    &
+                     " * Potential Energy (incl. beads) (eV)  ",1F10.4,/    &
+                     " * Vibrational temperature (K)          ",1F10.4,/ ) 
+      700 FORMAT (/, " Avarages for the single MD trajectory ",/   &
+                     " * Kinetic Energy (incl. beads) (eV)    ",1F10.4,/    &
+                     " * Translational temperature (K)        ",1F10.4,/    &
+                     " * Potential Energy (incl. beads) (eV)  ",1F10.4,/    &
+                     " * Vibrational temperature (K)          ",1F10.4,/ ) 
 
    END SUBROUTINE PolymerEquilibriumOscillator_Run
 
@@ -623,44 +677,63 @@ MODULE PolymerEquilibriumOscillator
    END FUNCTION CorrelationFunction
 
 !*************************************************************************************************
-
-   REAL FUNCTION Virial( X )
-      IMPLICIT NONE
-      REAL, DIMENSION( NBeads ), INTENT(IN) :: X
-      REAL, DIMENSION( NBeads ) :: Forces
-      REAL :: V, ForceSystem
-      INTEGER :: iBead
    
-      ! Initialize forces and potential
-      V          = 0.0
-      Forces(:)  = 0.0
+   SUBROUTINE KineticEnergies( K1, K2, K3, K4 )
+      IMPLICIT NONE
+      REAL, INTENT(OUT)             :: K1, K2, K3, K4
+      REAL, DIMENSION(NDim*NBeads)  :: SngForce
+      REAL, DIMENSION(NDim)         :: CentroidX, CentroidF, CentroidV, SingleF
+      INTEGER                       :: iCoord, iBead
+      REAL :: Pot, ForceSystem
 
+      SngForce(:) = 0.0
       ! System potential for each bead
       DO iBead = 1, NBeads 
          ! Compute potential and forces of the system replicas
          IF ( MorsePotential ) THEN
-            V = V + MorseV( X(iBead), ForceSystem )
+            Pot = Pot + MorseV( X(iBead), ForceSystem )
          ELSE
-            V = V + OscillatorV( X(iBead), ForceSystem )
+            Pot = Pot + OscillatorV( X(iBead), ForceSystem )
          END IF
-         Forces(iBead) = Forces(iBead) + ForceSystem
+         SngForce(iBead) = SngForce(iBead) + ForceSystem
       END DO
 
-!       IF ( NBeads > 1 ) THEN
-!          ! Harmonic forces between beads
-!          CALL PolymerRingPotential( MassSystem, Coordinates, Potential, RingForces )
-!          Forces(:) = Forces(:) + RingForces(:)
-!       END IF
-      
-      Virial = 0.0
+      ! Compute centroids
+      CentroidX = CentroidCoord( X )
+      CentroidF = CentroidCoord( SngForce )
+      CentroidV = CentroidCoord( V )
+
+      ! First definition: kinetic energy of the centroid
+      K1 = 0.0
+      DO iCoord = 1, NDim
+         K1 = K1 + 0.5 * MassVector(iCoord) * CentroidV(iCoord)**2
+      END DO
+
+      ! Second definition: centroid of kinetic energies
+      K2 = 0.0
       DO iBead = 1, NBeads
-         Virial = Virial + X(iBead) * Forces(iBead)
+         DO iCoord = 1, NDim
+            K2  = K2  + 0.5 * MassVector(iCoord) * V((iBead-1)*NDim+iCoord)**2
+         END DO
       END DO
-      Virial = Virial / NBeads
+      K2 = K2 / real(NBeads)
 
-!       Virial = CentroidCoord( X ) * CentroidCoord( Forces )
+      ! Fourth definition: virial of the centroids (virial as correlation product)
+      K3 = 0.0
+      DO iCoord = 1, NDim
+         K3  = K3  -0.5 * CentroidX(iCoord) * CentroidF(iCoord)
+      END DO
 
-   END FUNCTION Virial
+      ! Third definition: centroid of the virial product (virial as average)
+      K4 = 0.0
+      DO iBead = 1, NBeads
+         DO iCoord = 1, NDim
+            K4  = K4  -0.5 * X((iBead-1)*NDim+iCoord) * SngForce((iBead-1)*NDim+iCoord)
+         END DO
+      END DO
+      K4 = K4 / real(NBeads)
+
+   END SUBROUTINE KineticEnergies
 
 !*************************************************************************************************
 
@@ -788,6 +861,77 @@ MODULE PolymerEquilibriumOscillator
       
  
    END SUBROUTINE IstantaneousEnergies
+
+
+!*************************************************************************************************
+
+   SUBROUTINE InitialConditionsForNormalModes( Pos, Vel )
+      IMPLICIT NONE
+      REAL, DIMENSION(NDim*NBeads), INTENT(OUT) :: Pos, Vel 
+
+      REAL, DIMENSION(NBeads,NBeads) :: RingPotentialMatrix, RingNormalModes
+      REAL, DIMENSION(NBeads)        :: RingEigenvalues
+      REAL, DIMENSION(NDim,NDim)     :: SysPotentialMatrix, SysNormalModes
+      REAL, DIMENSION(NDim)          :: SysEigenvalues
+
+      REAL, DIMENSION(NDim,NBeads) :: NormalQ, NormalV 
+      REAL, DIMENSION(NDim,NBeads) :: FinalQ,  FinalV 
+      INTEGER :: iSys, iBead, jSys, jBead
+      REAL    :: SigmaV
+
+      ! Setup system potential matrix
+      SysPotentialMatrix(1,1) = HarmonicFreq**2
+      SysNormalModes(1,1) = 1.0
+      SysEigenvalues(1) = SysPotentialMatrix(1,1)
+
+      ! Setup ring potential matrix
+      RingPotentialMatrix(:,:) = 0.0
+      DO iBead = 1, NBeads-1
+         RingPotentialMatrix(iBead,iBead)   = 2.0 * BeadsFrequency**2
+         RingPotentialMatrix(iBead+1,iBead) = - BeadsFrequency**2
+         RingPotentialMatrix(iBead,iBead+1) = - BeadsFrequency**2
+      END DO
+      RingPotentialMatrix(NBeads,NBeads) = 2.0 * BeadsFrequency**2
+      RingPotentialMatrix(1,NBeads) = - BeadsFrequency**2
+      RingPotentialMatrix(NBeads,1) = - BeadsFrequency**2
+
+      ! Diagonalize ring potential
+      CALL TheOneWithDiagonalization(RingPotentialMatrix, RingNormalModes, RingEigenvalues)
+
+      ! Set sigma of the maxwell boltzmann distribution
+      SigmaV = sqrt( NBeads*Temperature / MassSystem )
+
+      ! Define random coordinates and velocities in the normal modes representation
+      DO iBead = 1, NBeads
+         DO iSys = 1, NDim
+            NormalQ(iSys,iBead) = GaussianRandomNr( 1.0 ) * SigmaV / SQRT( SysEigenvalues(iSys) + RingEigenvalues(iBead) )
+            NormalV(iSys,iBead) = GaussianRandomNr( 1.0 ) * SigmaV            
+         END DO
+      END DO
+
+      ! Transform coordinates to original representation
+      DO iSys = 1, NDim
+         DO iBead = 1, NBeads
+            FinalQ(iSys,iBead) = 0.0
+            FinalV(iSys,iBead) = 0.0
+            DO jSys = 1, NDim
+               DO jBead = 1, NBeads
+                  FinalQ(iSys,iBead) = FinalQ(iSys,iBead) + &
+                                          SysNormalModes(iSys,jSys) * RingNormalModes(iBead,jBead) * NormalQ(jSys,jBead)
+                  FinalV(iSys,iBead) = FinalV(iSys,iBead) + &
+                                          SysNormalModes(iSys,jSys) * RingNormalModes(iBead,jBead) * NormalV(jSys,jBead)
+               END DO
+            END DO
+         END DO
+      END DO
+
+      ! Give back the initial conditions
+      DO iBead = 1, NBeads
+         Pos( (iBead-1)*NDim+1 : iBead*NDim ) = FinalQ(:,iBead)
+         Vel( (iBead-1)*NDim+1 : iBead*NDim ) = FinalV(:,iBead)
+      END DO
+
+   END SUBROUTINE InitialConditionsForNormalModes
 
 !*************************************************************************************************
 
