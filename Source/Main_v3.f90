@@ -229,7 +229,7 @@ PROGRAM JK6_v3
    ! Write info about the bath representation
    SELECT CASE( BathType )
       CASE( SLAB_POTENTIAL )
-         WRITE(*,899) NCarbon, 1.0/DynamicsGamma*TimeConversion(InternalUnits, InputUnits), TimeUnit(InputUnits)
+         WRITE(*,904) NCarbon, 1.0/DynamicsGamma*TimeConversion(InternalUnits, InputUnits), TimeUnit(InputUnits)
       CASE( NORMAL_BATH ) 
          IF ( OhmicGamma == 0.0 ) THEN
             WRITE(*,900) NBath, MassBath*MassConversion(InternalUnits, InputUnits), MassUnit(InputUnits), &
@@ -251,7 +251,11 @@ PROGRAM JK6_v3
                       1.0/DynamicsGamma*TimeConversion(InternalUnits, InputUnits), TimeUnit(InputUnits), &
                       trim(adjustl(SpectralDensityFile)), trim(adjustl(SpectralDensityFile2))
       CASE( LANGEVIN_DYN )
-         WRITE(*,902) 1.0/DynamicsGamma*TimeConversion(InternalUnits, InputUnits), TimeUnit(InputUnits)
+         IF (DynamicsGamma /= 0. ) THEN
+            WRITE(*,902) 1.0/DynamicsGamma*TimeConversion(InternalUnits, InputUnits), TimeUnit(InputUnits)
+         ELSE
+            WRITE(*,802) 
+         END IF
    END SELECT
 
    ! Write info about the kind of output
@@ -267,7 +271,7 @@ PROGRAM JK6_v3
    898 FORMAT(" * Mass of the H atom:                          ",F10.4,1X,A,/,&
               " * Mass of the C atom:                          ",F10.4,1X,A,/ )
 
-   899 FORMAT(" * Bath is a slab of C atoms (force field potential) ", /,&
+   904 FORMAT(" * Bath is a slab of C atoms (force field potential) ", /,&
               " * Nr of Carbon atoms:                          ",I10,  /,&
               " * Langevin relax time at the edges:            ",F10.4,1X,A,/)
 
@@ -292,6 +296,8 @@ PROGRAM JK6_v3
 
    902 FORMAT(" * Bath is effectively represented by Langevin dynamics ", /,&
               " * Relaxation time of Langevin dynamics:        ",F10.4,1X,A,/ )
+   802 FORMAT(" * Bath is effectively represented by Langevin dynamics ", /,&
+              " * Infinite relaxation time                             ", / )
 
    903 FORMAT(" * Bath is double linear chain of harmonic oscillators ", /,&
               " * Nr of bath oscillators per chain:            ",I10,  /,& 

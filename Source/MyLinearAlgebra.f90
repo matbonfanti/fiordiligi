@@ -55,6 +55,11 @@ MODULE MyLinearAlgebra
    
    IMPLICIT NONE
 
+   INTERFACE TheOneWithMatrixVectorProduct
+      MODULE PROCEDURE TheOneWithMatrixVectorProduct_REAL, TheOneWithMatrixVectorProduct_CMPLX
+   END INTERFACE 
+
+
 !********************************************************************************************************
    CONTAINS
 !********************************************************************************************************
@@ -374,16 +379,15 @@ MODULE MyLinearAlgebra
 !> \see http://en.wikipedia.org/wiki/Basic_Linear_Algebra_Subprograms
 !> \see http://www.netlib.org/blas/dgemv.f
 !>
-!> @param      Matrix      N x M  real array with a matrix.
-!> @param      Vector      M      real array with a vector.
+!> @param      Matrix      N x M  real/complex array with a matrix.
+!> @param      Vector      M      real/complex array with a vector.
 !> @returns    ProductV    N      array with the product Matrix * Vector.
 !*******************************************************************************
-   FUNCTION TheOneWithMatrixVectorProduct( Matrix, Vector ) RESULT( ProductV )
+   FUNCTION TheOneWithMatrixVectorProduct_REAL( Matrix, Vector ) RESULT( ProductV )
       IMPLICIT NONE
       REAL, DIMENSION(:,:), INTENT(IN) :: Matrix
       REAL, DIMENSION(:), INTENT(IN)   :: Vector
       REAL, DIMENSION(size(Matrix,1)) :: ProductV
-
 #if defined(WITH_LAPACK)
       INTEGER( SHORT_INTEGER_KIND )   :: N, M
 #endif
@@ -402,12 +406,10 @@ MODULE MyLinearAlgebra
       ! Check kind of real data
       IF ( KIND( Matrix(1,1) ) == SINGLE_PRECISION_KIND ) THEN
             ! use blas routine (single precision, general matrix, matrix vector product)
-!             CALL SGEMM ( 'N', 'N', N, 1, M, 1.0, Matrix, N, Vector, M, 0.0, ProductV, N )
              CALL SGEMV ( 'N', N, M, 1.0, Matrix, N, Vector, 1, 0.0, ProductV, 1 )
-            
+           
       ELSE IF ( KIND( Matrix(1,1) ) == DOUBLE_PRECISION_KIND ) THEN
             ! use blas routine (double precision, general matrix, matrix vector product )
-!             CALL DGEMM ( 'N', 'N', N, 1, M, 1.0, Matrix, N, Vector, M, 0.0, ProductV, N )
              CALL DGEMV ( 'N', N, M, 1.0, Matrix, N, Vector, 1, 0.0, ProductV, 1 )
       END IF
 #endif
@@ -420,7 +422,48 @@ MODULE MyLinearAlgebra
       END DO
 #endif
 
-   END FUNCTION TheOneWithMatrixVectorProduct
+   END FUNCTION TheOneWithMatrixVectorProduct_REAL
+
+   FUNCTION TheOneWithMatrixVectorProduct_CMPLX( Matrix, Vector ) RESULT( ProductV )
+      IMPLICIT NONE
+      COMPLEX, DIMENSION(:,:), INTENT(IN) :: Matrix
+      COMPLEX, DIMENSION(:), INTENT(IN)   :: Vector
+      COMPLEX, DIMENSION(size(Matrix,1)) :: ProductV
+#if defined(WITH_LAPACK)
+      INTEGER( SHORT_INTEGER_KIND )   :: N, M
+#endif
+#if !defined(WITH_LAPACK)
+      INTEGER                         :: i, j
+#endif
+      ! Check and define the dimension of the matrices
+      CALL ERROR( size(Matrix,2) /= SIZE(Vector) , &
+                       " TheOneWithMatrixVectorProduct: mismatch in matrix dimensions ")
+
+#if defined(WITH_LAPACK)
+      ! define dimensions
+      N = size( Matrix, 1 )
+      M = size( Matrix, 2 )
+
+      ! Check kind of real data
+      IF ( KIND( REAL(Matrix(1,1)) ) == SINGLE_PRECISION_KIND ) THEN
+            ! use blas routine (single precision, general matrix, matrix vector product)
+             CALL CGEMV ( 'N', N, M, 1.0, Matrix, N, Vector, 1, 0.0, ProductV, 1 )
+            
+      ELSE IF ( KIND( REAL(Matrix(1,1)) ) == DOUBLE_PRECISION_KIND ) THEN
+            ! use blas routine (double precision, general matrix, matrix vector product )
+             CALL ZGEMV ( 'N', N, M, 1.0, Matrix, N, Vector, 1, 0.0, ProductV, 1 )
+      END IF
+#endif
+#if !defined(WITH_LAPACK)
+      ProductV = CMPLX( 0.0, 0.0 )
+      DO j  = 1, size(Matrix,2)
+         DO i = 1, size(Matrix,1)
+               ProductV(i) = ProductV(i) + Matrix(i,j)*Vector(j)
+         END DO
+      END DO
+#endif
+
+   END FUNCTION TheOneWithMatrixVectorProduct_CMPLX
 
 !*******************************************************************************
 !          TheOneWithVectorDotVector

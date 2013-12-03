@@ -16,13 +16,16 @@ LOGNAME = jk6_v3.log
 FC = ifort      
 
 # Debugging options ( yes or no )
-DEBUG = no
+DEBUG = no 
 
 # Optimization level
 OPTLEVEL = 3
 
 # linking LAPACK and BLAS 
-LAPACK = no
+LAPACK = no 
+
+# linking FFTW 3.3
+FFTW3 = yes
 
 # Intel compiler version 
 # required only if FC=ifort and LAPACK=yes
@@ -43,7 +46,7 @@ LAPACK := $(strip ${LAPACK})
 INTELVERS := $(strip ${INTELVERS})
 LOGFILE := $(strip ${LOGFILE})
 LOGNAME := $(strip ${LOGNAME})
-
+FFTW3 := $(strip ${FFTW3})
 
 
 #----------------------------------------------------------------------------
@@ -66,6 +69,9 @@ ifeq (${FC},gfortran)
 
    # ATLAS Lapack and Blas flags
    LAPACKFLG =  -L/usr/lib/atlas/ -llapack -lf77blas -lcblas -latlas
+
+   # FFTW3 flags
+   FFTW3FLG = -I/usr/local/include/ -lfftw3
 
    # Data type
    DATAFLG =
@@ -97,6 +103,9 @@ ifeq (${FC},ifort)
       LAPACKFLG = -lmkl -lmkl_lapack -lguide -lpthread 
    endif
 
+   # FFTW3 flags
+   FFTW3FLG = -I/usr/local/include/ -lfftw3
+
    # Data type
    DATAFLG =
    ifeq (${REAL8},yes)
@@ -125,6 +134,11 @@ ifeq (${LAPACK}, yes)
    PPDEFINE += -DWITH_LAPACK
 endif
 
+# Preprocess using FFTW3 calls
+ifeq (${FFTW3}, yes)
+   PPDEFINE += -DWITH_FFTW3
+endif
+
 
 #----------------------------------------------------------------------------
 #              Setup linking and compilation flags
@@ -146,6 +160,11 @@ COMPILEFLG +=  ${DATAFLG}
 # If lapack, add the linking options
 ifeq (${LAPACK}, yes)
    LIBFLG += ${LAPACKFLG}
+endif
+
+# If FFTW3, add the linking options
+ifeq (${FFTW3}, yes)
+   LIBFLG += ${FFTW3FLG}
 endif
 
 
@@ -278,7 +297,7 @@ ${OBJDIR}/Harmonic1DModel.o : ${SRCDIR}/Harmonic1DModel.f90 ${OBJDIR}/SharedData
 
 # Program to simulate the correlation functions with ring polymer dynamics
 ${OBJDIR}/PolymerEquilibriumOscillator.o : ${SRCDIR}/PolymerEquilibriumOscillator.f90 ${OBJDIR}/SharedData.o ${OBJDIR}/InputField.o \
-                              ${OBJDIR}/ClassicalEqMotion.o ${OBJDIR}/RandomNumberGenerator.o ${COMMONDEP}
+                              ${OBJDIR}/ClassicalEqMotion.o ${OBJDIR}/RandomNumberGenerator.o ${OBJDIR}/UnitConversion.o ${COMMONDEP}
 
 # Program to simulate the correlation functions with ring polymer dynamics
 ${OBJDIR}/PolymerVibrationalRelax.o : ${SRCDIR}/PolymerVibrationalRelax.f90 ${OBJDIR}/SharedData.o ${OBJDIR}/InputField.o \
@@ -313,7 +332,7 @@ ${OBJDIR}/PotentialModule.o  : ${SRCDIR}/PotentialModule.f90 ${OBJDIR}/RandomNum
 ${OBJDIR}/RandomNumberGenerator.o  : ${SRCDIR}/RandomNumberGenerator.f90 ${COMMONDEP}
 
 # Module containing the integrator for the classical eq of motion
-${OBJDIR}/ClassicalEqMotion.o  : ${SRCDIR}/ClassicalEqMotion.f90 ${OBJDIR}/RandomNumberGenerator.o ${COMMONDEP}
+${OBJDIR}/ClassicalEqMotion.o  : ${SRCDIR}/ClassicalEqMotion.f90 ${OBJDIR}/RandomNumberGenerator.o ${OBJDIR}/FFTWrapper.o  ${COMMONDEP}
 
 # Module containing the definitions of the independent oscillator model
 ${OBJDIR}/IndependentOscillatorsModel.o  : ${SRCDIR}/IndependentOscillatorsModel.f90 ${OBJDIR}/MyLinearAlgebra.o ${OBJDIR}/PotentialModule.o \
@@ -328,3 +347,5 @@ ${OBJDIR}/PrintTools.o : ${SRCDIR}/PrintTools.f90 ${COMMONDEP}
 # Derivatives with finite difference methods
 ${OBJDIR}/DifferenceDerivatives.o : ${SRCDIR}/DifferenceDerivatives.f90 ${COMMONDEP}
 
+# Wrapper for FFTW 3.3
+${OBJDIR}/FFTWrapper.o :  ${SRCDIR}/FFTWrapper.f90 ${COMMONDEP}
