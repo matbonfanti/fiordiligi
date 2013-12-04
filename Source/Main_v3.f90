@@ -261,11 +261,11 @@ PROGRAM JK6_v3
    ! Write info about the kind of output
    SELECT CASE( PrintType )
       CASE( MINIMAL )
-         WRITE(*,"(A)") " * Minimal output will be written "
+         WRITE(*,"(A,/)") " * Minimal output will be written "
       CASE( FULL )
-         WRITE(*,"(A)") " * All the averages will be written to output files "
+         WRITE(*,"(A,/)") " * All the averages will be written to output files "
       CASE( DEBUG )
-         WRITE(*,"(A)") " * Detailed information on each trajectory will be printed "
+         WRITE(*,"(A,/)") " * Detailed information on each trajectory will be printed "
    END SELECT
 
    898 FORMAT(" * Mass of the H atom:                          ",F10.4,1X,A,/,&

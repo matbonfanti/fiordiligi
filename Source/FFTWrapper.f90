@@ -29,7 +29,7 @@
 #endif
 
 #if defined(WITH_DFT_MATRIX) 
-#error "FFTWrapper: DFT has been implemented but not tested yet "
+!#error "FFTWrapper: DFT has been implemented but not tested yet "
 #endif
 
 MODULE FFTWrapper
@@ -47,7 +47,7 @@ MODULE FFTWrapper
 #endif
 
    PRIVATE
-   PUBLIC ::  FFTComplexType, FFTHarfComplexType
+   PUBLIC ::  FFTComplexType, FFTHalfComplexType
    PUBLIC ::  SetupFFT, ExecuteFFT, DisposeFFT
 
    INTEGER, PARAMETER, PUBLIC :: DIRECT_FFT  = 0
@@ -67,19 +67,20 @@ MODULE FFTWrapper
       LOGICAL     :: isSetup
    END TYPE FFTComplexType
 
-   TYPE FFTHarfComplexType
+   TYPE FFTHalfComplexType
 #if defined(WITH_FFTW3)
       INTEGER(C_SIZE_T) :: NData
       REAL(C_DOUBLE), DIMENSION(:), POINTER :: In, Out
       TYPE(C_PTR) :: WorkIn, WorkOut
       TYPE(C_PTR) :: DirectPlan, InversePlan
+      REAL, DIMENSION(:), POINTER :: NormalizationDir, NormalizationInv
 #endif
 #if defined(WITH_DFT_MATRIX)
       INTEGER :: NData
       REAL, DIMENSION(:,:), POINTER :: DirectDFT, InverseDFT
 #endif
       LOGICAL     :: isSetup
-   END TYPE FFTHarfComplexType
+   END TYPE FFTHalfComplexType
 
    INTERFACE SetupFFT
       MODULE PROCEDURE SetupFFTComplex, SetupFFTHalfComplex
@@ -123,8 +124,8 @@ MODULE FFTWrapper
       i2pioverN = 2.0*MyConsts_PI*MyConsts_I / real(PlanData%NData)
       DO i = 0, PlanData%NData-1
          DO j = 0, PlanData%NData-1
-            PlanData%DirectDFT(i,j) = EXP( - i2pioverN * real(i*j) )
-            PlanData%InverseDFT(i,j) = EXP( i2pioverN * real(i*j) ) / real(PlanData%NData)
+            PlanData%DirectDFT(i+1,j+1) = EXP( - i2pioverN * real(i*j) )
+            PlanData%InverseDFT(i+1,j+1) = EXP( i2pioverN * real(i*j) ) / real(PlanData%NData)
          END DO
       END DO
 #endif
@@ -135,7 +136,7 @@ MODULE FFTWrapper
 
    SUBROUTINE SetupFFTHalfComplex( PlanData, N )
       IMPLICIT NONE
-      TYPE( FFTHarfComplexType ) :: PlanData
+      TYPE( FFTHalfComplexType ) :: PlanData
       INTEGER, INTENT(IN)        :: N
       INTEGER :: i, j
       REAL :: pi2overN
@@ -153,6 +154,17 @@ MODULE FFTWrapper
 
       PlanData%DirectPlan  = FFTW_PLAN_R2R_1D ( N, PlanData%In, PlanData%Out, FFTW_R2HC, FFTW_ESTIMATE)
       PlanData%InversePlan = FFTW_PLAN_R2R_1D ( N, PlanData%In, PlanData%Out, FFTW_HC2R, FFTW_ESTIMATE)
+
+      ALLOCATE( PlanData%NormalizationDir( N ), PlanData%NormalizationInv( N ) )
+      DO i = 0, N-1
+         IF ( i == 0 .OR. real(i) == real(N)/2.0 ) THEN
+            PlanData%NormalizationDir(i+1) = SQRT( 1.0 / real(N) )
+            PlanData%NormalizationInv(i+1) = SQRT( 1.0 / real(N) )
+         ELSE 
+            PlanData%NormalizationDir(i+1) = SQRT( 2.0 / real(N) ) 
+            PlanData%NormalizationInv(i+1) = SQRT( 1.0 / ( real(N) * 2.0 ) )
+         END IF
+      END DO
 #endif
 #if defined(WITH_DFT_MATRIX)
       ALLOCATE( PlanData%DirectDFT( PlanData%NData, PlanData%NData ), PlanData%InverseDFT( PlanData%NData, PlanData%NData ) )
@@ -160,17 +172,17 @@ MODULE FFTWrapper
       DO i = 0, PlanData%NData-1
          DO j = 0, PlanData%NData-1
             IF ( i == 0 ) THEN
-               PlanData%DirectDFT(i,j)  = 1.0
-               PlanData%InverseDFT(i,j) = 1.0 / real(PlanData%NData)
+               PlanData%DirectDFT(i+1,j+1)  = SQRT( 1.0 /  real(PlanData%NData) )
+               PlanData%InverseDFT(j+1,i+1) = SQRT( 1.0 /  real(PlanData%NData) )
             ELSE IF ( i > 0 .AND. real(i) < real(N)/2.0 ) THEN
-               PlanData%DirectDFT(i,j)  = COS( pi2overN * real(i*j) )
-               PlanData%InverseDFT(i,j) = COS( pi2overN * real(i*j) ) / real(PlanData%NData)
-            ELSE IF ( i == N/2 ) THEN
-               PlanData%DirectDFT(i,j)  = (-1.0)**j
-               PlanData%InverseDFT(i,j) = (-1.0)**j / real(PlanData%NData)
+               PlanData%DirectDFT(i+1,j+1)  = COS( pi2overN * real(i*j) ) * SQRT( 2.0 /  real(PlanData%NData) )
+               PlanData%InverseDFT(j+1,i+1) = COS( pi2overN * real(i*j) ) * SQRT( 2.0 /  real(PlanData%NData) )
+            ELSE IF ( real(i) == real(N)/2.0 ) THEN
+               PlanData%DirectDFT(i+1,j+1)  = (-1.0)**j * SQRT( 1.0 /  real(PlanData%NData) )
+               PlanData%InverseDFT(j+1,i+1) = (-1.0)**j * SQRT( 1.0 /  real(PlanData%NData) )
             ELSE IF ( i > N/2 .AND. i < N ) THEN
-               PlanData%DirectDFT(i,j)  = SIN( pi2overN * real(i*j) )
-               PlanData%InverseDFT(i,j) = SIN( pi2overN * real(i*j) ) / real(PlanData%NData)
+               PlanData%DirectDFT(i+1,j+1)  = SIN( pi2overN * real(i*j) ) * SQRT( 2.0 /  real(PlanData%NData) )
+               PlanData%InverseDFT(j+1,i+1) = SIN( pi2overN * real(i*j) ) * SQRT( 2.0 /  real(PlanData%NData) )
             END IF
          END DO
       END DO
@@ -213,7 +225,7 @@ MODULE FFTWrapper
 
    SUBROUTINE ExecuteFFTHalfComplex( PlanData, Vector, Direction )
       IMPLICIT NONE
-      TYPE( FFTHarfComplexType ), INTENT(INOUT) :: PlanData
+      TYPE( FFTHalfComplexType ), INTENT(INOUT) :: PlanData
       REAL, DIMENSION(:), INTENT(INOUT)         :: Vector
       INTEGER, INTENT(IN)                       :: Direction
 
@@ -221,13 +233,14 @@ MODULE FFTWrapper
       CALL ERROR( .NOT. PlanData%isSetup, " ExecuteFFTHalfComplex: PlanData is not set " )
 
 #if defined(WITH_FFTW3)
-      PlanData%In = Vector
       IF ( Direction == DIRECT_FFT ) THEN
+         PlanData%In = Vector
          CALL FFTW_EXECUTE_R2R( PlanData%DirectPlan,  PlanData%In, PlanData%Out)
-         Vector = PlanData%Out
+         Vector(:) = PlanData%Out(:) * PlanData%NormalizationDir(:)
       ELSE IF ( Direction == INVERSE_FFT ) THEN
+         PlanData%In = Vector * PlanData%NormalizationInv(:)
          CALL FFTW_EXECUTE_R2R( PlanData%InversePlan, PlanData%In, PlanData%Out)
-         Vector = PlanData%Out / real( PlanData%NData )
+         Vector(:) = PlanData%Out(:)
       END IF
 #endif
 #if defined(WITH_DFT_MATRIX)
@@ -261,7 +274,7 @@ MODULE FFTWrapper
 
    SUBROUTINE DisposeFFTHalfComplex( PlanData )
       IMPLICIT NONE
-      TYPE( FFTHarfComplexType ) :: PlanData
+      TYPE( FFTHalfComplexType ) :: PlanData
 
 #if defined(WITH_FFTW3)
       CALL FFTW_DESTROY_PLAN( PlanData%DirectPlan )

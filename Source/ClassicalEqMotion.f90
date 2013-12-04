@@ -48,7 +48,6 @@ MODULE ClassicalEqMotion
       !> for integration of the EoM, with or without Langevin thermostat and with or without Ring Polymer MD
       TYPE Evolution
          INTEGER   :: NDoF                               !< Nr of degrees of freedom
-         INTEGER   :: NBeads                             !< Nr of system replicas 
          REAL, DIMENSION(:), POINTER :: Mass             !< Vector with the masses of the system
          REAL  :: dt                                     !< Time step of integration
          REAL  :: Gamma                                  !< Integrated Langevin friction for one timestep
@@ -56,10 +55,16 @@ MODULE ClassicalEqMotion
          REAL, DIMENSION(:), POINTER :: ThermalNoise     !< Vector of the thermal noise sigma
          REAL, DIMENSION(:), POINTER :: ThermalNoise2     !< Vector of the thermal noise sigma
          LOGICAL, DIMENSION(:), POINTER :: ThermoSwitch  !< Vector to set the thermostat on or off for the dof
-         REAL  :: RPFreq
-         REAL, DIMENSION(:), POINTER :: NormModesFreq    !< Vector with the frequencies of the normal modes 
-         REAL, DIMENSION(:,:), POINTER :: NormModesPropag  !< Vector with the frequencies of the normal modes 
-         TYPE(FFTHarfComplexType) :: RingNormalModes     !< FFT transform to compute normal modes of the RP 
+
+         INTEGER :: NBeads                                 !< Nr of system replicas 
+         REAL  :: RPFreq                                   !< Frequency of the harmonic force between the beads
+         REAL, DIMENSION(:), POINTER :: NormModesFreq      !< Vector with the frequencies of the normal modes 
+         REAL, DIMENSION(:,:), POINTER :: NormModesPropag  !< Propagation coefficients of normal coordinates and velocities
+         TYPE(FFTHalfComplexType) :: RingNormalModes       !< FFT transform to compute normal modes of the RP 
+         REAL, DIMENSION(:), POINTER :: GammaLang          !< Friction coeffs of PILE
+         REAL, DIMENSION(:), POINTER :: AlphaLang          !< Set of coeffs for PILE integration
+         REAL, DIMENSION(:), POINTER :: BetaLang           !< Set of coeffs for PILE integration
+
          LOGICAL :: HasThermostat = .FALSE.              !< Thermostat data has been setup
          LOGICAL :: HasRingPolymer = .FALSE.             !< Ring polymer data has been setup
          LOGICAL :: IsSetup = .FALSE.                    !< Evolution data has been setup
@@ -166,6 +171,24 @@ MODULE ClassicalEqMotion
             EvolData%ThermalNoise2(iDoF) = sqrt( 2.0*Temperature*Gamma/EvolData%Mass(iDoF) )
          END IF
       END DO
+
+      ! Set arrays for PILE integration when setting thermostat for a ring polymer propagator
+      IF ( EvolData%HasRingPolymer ) THEN
+         IF ( .NOT. EvolData%HasThermostat )     ALLOCATE( EvolData%GammaLang(EvolData%NBeads), &
+                                                EvolData%AlphaLang(EvolData%NBeads), EvolData%BetaLang(EvolData%NBeads) )
+
+         ! Set friction parameters for the ring normal modes
+         EvolData%GammaLang(1) = Gamma
+         DO iDoF = 2, EvolData%NBeads
+            EvolData%GammaLang(iDoF) = 2.0 * EvolData%NormModesFreq(iDoF)
+         END DO
+
+         ! Set integration coefficients
+         DO iDoF = 1, EvolData%NBeads
+            EvolData%AlphaLang(iDoF) = EXP( - 0.5 * EvolData%dt * EvolData%GammaLang(iDoF) )
+            EvolData%BetaLang(iDoF)  = SQRT( (1.0 - EvolData%AlphaLang(iDoF)**2) * Temperature * EvolData%NBeads )
+         END DO
+      END IF
 
       ! Themostat data is now setup
       EvolData%HasThermostat = .TRUE.
@@ -599,8 +622,30 @@ MODULE ClassicalEqMotion
          DoPropagation = .TRUE.
       END IF
 
-      ! (1) HALF TIME STEP FOR THE VELOCITIES
       IF ( DoPropagation ) THEN
+      ! (1)  HALF TIME STEP FOR THERMOSTATTING THE SYSTEM (only when langevin dynamics)
+         IF ( EvolData%HasThermostat ) THEN
+            DO iDoF = 1, EvolData%NDoF
+
+               DO iBead = 1, EvolData%NBeads                        ! extract single bead positions and velocities
+                  BeadVAt0(iBead) = Vel( (iBead-1) * EvolData%NDoF + iDoF )
+               END DO
+               CALL ExecuteFFT( EvolData%RingNormalModes, BeadVAt0, DIRECT_FFT ) ! transform to normal modes coords
+
+               DO iBead = 1, EvolData%NBeads                                   ! evolve normal modes
+                  BeadVAtT(iBead) = BeadVAt0(iBead) * EvolData%AlphaLang(iBead) + &
+                                    GaussianRandomNr( 1.0 ) * EvolData%BetaLang(iBead) / SQRT( EvolData%Mass(iDoF) )
+               END DO
+
+               CALL ExecuteFFT( EvolData%RingNormalModes, BeadVAtT, INVERSE_FFT ) ! transform back to original coords
+               DO iBead = 1, EvolData%NBeads               ! copy single bead positions and velocities to input arrays
+                  Vel( (iBead-1) * EvolData%NDoF + iDoF ) = BeadVAtT(iBead)
+               END DO
+
+            END DO
+         END IF
+
+      ! (2) HALF TIME STEP FOR THE VELOCITIES
          DO iBead = 1, EvolData%NBeads
             iStart = (iBead-1) * EvolData%NDoF + 1
             iEnd   = iBead * EvolData%NDoF
@@ -608,7 +653,7 @@ MODULE ClassicalEqMotion
          END DO
       END IF
 
-      ! (2) EXACT PROPAGATION WITH THE INTERBEADS POTENTIAL
+      ! (3) EXACT PROPAGATION WITH THE INTERBEADS POTENTIAL
       DO iDoF = 1, EvolData%NDoF
 
          DO iBead = 1, EvolData%NBeads      ! extract single bead positions and velocities
@@ -646,7 +691,7 @@ MODULE ClassicalEqMotion
 
       END DO
 
-      ! (3) UPDATE FORCES
+      ! (4) UPDATE FORCES
       V = 0.0
       DO iBead = 1, EvolData%NBeads
          iStart = (iBead-1) * EvolData%NDoF + 1
@@ -656,13 +701,36 @@ MODULE ClassicalEqMotion
          V = V + VBead
       END DO
 
-      ! (4) HALF TIME STEP FOR THE VELOCITIES
       IF ( DoPropagation ) THEN
+      ! (5) HALF TIME STEP FOR THE VELOCITIES
          DO iBead = 1, EvolData%NBeads
             iStart = (iBead-1) * EvolData%NDoF + 1
             iEnd   = iBead * EvolData%NDoF
             Vel( iStart:iEnd ) = Vel( iStart:iEnd ) + 0.5*Acc( iStart:iEnd )*EvolData%dt
          END DO
+
+      ! (6)  HALF TIME STEP FOR THERMOSTATTING THE SYSTEM (only when langevin dynamics)
+         IF ( EvolData%HasThermostat ) THEN
+            DO iDoF = 1, EvolData%NDoF
+
+               DO iBead = 1, EvolData%NBeads                        ! extract single bead positions and velocities
+                  BeadVAt0(iBead) = Vel( (iBead-1) * EvolData%NDoF + iDoF )
+               END DO
+               CALL ExecuteFFT( EvolData%RingNormalModes, BeadVAt0, DIRECT_FFT ) ! transform to normal modes coords
+
+               DO iBead = 1, EvolData%NBeads                                   ! evolve normal modes
+                  BeadVAtT(iBead) = BeadVAt0(iBead) * EvolData%AlphaLang(iBead) + &
+                                    GaussianRandomNr( 1.0 ) * EvolData%BetaLang(iBead) / SQRT( EvolData%Mass(iDoF) )
+               END DO
+
+               CALL ExecuteFFT( EvolData%RingNormalModes, BeadVAtT, INVERSE_FFT ) ! transform back to original coords
+               DO iBead = 1, EvolData%NBeads               ! copy single bead positions and velocities to input arrays
+                  Vel( (iBead-1) * EvolData%NDoF + iDoF ) = BeadVAtT(iBead)
+               END DO
+
+            END DO
+         END IF
+
       END IF
 
    END SUBROUTINE EOM_RPMSymplectic

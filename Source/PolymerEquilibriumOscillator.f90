@@ -164,38 +164,59 @@ MODULE PolymerEquilibriumOscillator
       EquilibrationTime = EquilibrationTime * TimeConversion(InputUnits, InternalUnits)
       NrEquilibrationSteps = CEILING( EquilibrationTime / EquilTStep )
 
-!       WRITE(*, 902) NBeads, BeadsFrequency/MyConsts_cmmin1toAU
+      IF ( MorsePotential ) THEN
+         WRITE(*,800) MorseDe*EnergyConversion(InternalUnits,InputUnits), EnergyUnit(InputUnits),            &
+                      MorseAlpha/LengthConversion(InternalUnits,InputUnits), "1/"//LengthUnit(InputUnits),   &
+                      HarmonicFreq*FreqConversion(InternalUnits,InputUnits), FreqUnit(InputUnits),           &
+                      MassSystem*MassConversion(InternalUnits,InputUnits), MassUnit(InputUnits)
+      ELSE
+         WRITE(*,800) MorseDe*EnergyConversion(InternalUnits,InputUnits), EnergyUnit(InputUnits),             &
+                      Quadratic, "au", Cubic, "au", Quartic, "au",                                            &
+                      MassSystem*MassConversion(InternalUnits,InputUnits), MassUnit(InputUnits)
+      END IF
 
-!       WRITE(*, 903) InitEnergy*MyConsts_Hartree2eV, (InitEnergy-MinimumEnergy)*MyConsts_Hartree2eV, &
-!                     NrOfInitSnapshots, TimeBetweenSnaps/MyConsts_fs2AU
+      WRITE(*, 901) Temperature*TemperatureConversion(InternalUnits,InputUnits), TemperUnit(InputUnits),     &
+                    CEILING( HarmonicFreq / Temperature )
 
-!       WRITE(*, 904) NrTrajs, TimeStep/MyConsts_fs2AU, NrOfSteps, NrOfPrintSteps
+      WRITE(*, 902) NBeads, BeadsFrequency*FreqConversion(InternalUnits,InputUnits), FreqUnit(InputUnits), &
+                    2.*BeadsFrequency*SIN(MyConsts_PI/real(NBeads))*FreqConversion(InternalUnits,InputUnits), FreqUnit(InputUnits)
 
-!       WRITE(*, 905) Temperature/MyConsts_K2AU, NrOfSnapshots, EquilTStep/MyConsts_fs2AU,  &
-!                     EquilGamma*MyConsts_fs2AU, EquilibrTimeBetweenSnap
+      WRITE(*, 903) NrTrajs, TimeStep*TimeConversion(InternalUnits,InputUnits), TimeUnit(InputUnits), &
+                    NrOfSteps, NrOfPrintSteps
 
+      WRITE(*, 904) 1./EquilGamma*TimeConversion(InternalUnits,InputUnits), TimeUnit(InputUnits), &
+                    EquilTStep*TimeConversion(InternalUnits,InputUnits), TimeUnit(InputUnits), &
+                    EquilibrationTime*TimeConversion(InternalUnits,InputUnits), TimeUnit(InputUnits), NrEquilibrationSteps
 
-   902 FORMAT(" * Nr of replicas in the ring polymer dynamics: ", I10,/,   &
-              " * Frequency of the force between the beads     ", F10.4 )
+   800 FORMAT(" * Morse potential simulation                   ", /,   &
+              " * Depth of the well:                           ",F10.4,1X,A,/,&  
+              " * Length exponential parameter:                ",F10.4,1X,A,/,&
+              " * Harmonic frequency at the minimum:           ",F10.4,1X,A,/,&
+              " * Mass of the oscillator:                      ",F10.4,1X,A,/ )
+   801 FORMAT(" * Polynomial potential simulation              ", /,   &
+              " * Quadratic term:                              ",F10.4,1X,A,/,&
+              " * Cubic term:                                  ",F10.4,1X,A,/,&
+              " * Quartic term:                                ",F10.4,1X,A,/,&
+              " * Mass of the oscillator:                      ",F10.4,1X,A,/ )
 
-   903 FORMAT(" * Initial conditions of the atom-surface system ", /,&
-              " * Absolute initial energy (eV):                ",F10.4,/,& 
-              " *  - w.r.t. the bottom of the well (eV):       ",F10.4,/,& 
-              " * Nr of initial system snapshots:              ",I10,  /,& 
-              " * Time between snapshots (fs):                 ",F10.4,/ )
+   901 FORMAT(" * Temperature of the simulation:               ",F10.4,1X,A,/,&
+              " * Minimum nr of beads at this temperature:     ",I10,/ )
 
-   904 FORMAT(" * Dynamical simulation variables               ", /,&
-              " * Nr of trajectories:                          ",I10,  /,& 
-              " * Propagation time step (fs):                  ",F10.4,/,& 
-              " * Nr of time steps of each trajectory:         ",I10,  /,& 
-              " * Nr of print steps of each trajectory:        ",I10,  / )
+   902 FORMAT(" * Nr of replicas in the ring polymer dynamics: ", I10,       /,&
+              " * Frequency of the force between the beads:    ", F10.4,1X,A,/,&
+              " * Frequency of 2nd normal mode of the ring:    ", F10.4,1X,A,/ )
 
-   905 FORMAT(" * Bath equilibration variables                 ", /,&
-              " * Temperature of the surface:                  ",F10.4,/,&
-              " * Nr of initial bath snapshots:                ",I10,  /,& 
-              " * Equilibration time step (fs):                ",F10.4,/,& 
-              " * Gamma of the Langevin force (fs^-1):         ",F10.4,/,& 
-              " * Equilibration time between each snapshot:    ",F10.4,/ )
+   903 FORMAT(" * Dynamical simulation variables               ",           /,&
+              " * Nr of trajectories:                          ",I10,       /,& 
+              " * Propagation time step:                       ",F10.4,1X,A,/,& 
+              " * Nr of time steps of each trajectory:         ",I10,       /,& 
+              " * Nr of print steps of each trajectory:        ",I10,       / )
+
+   904 FORMAT(" * Bath equilibration variables                 ",           /,&
+              " * Relaxation time of the Langevin dynamics:    ",F10.4,1X,A,/,& 
+              " * Equilibration time step:                     ",F10.4,1X,A,/,& 
+              " * Equilibration total time:                    ",F10.4,1X,A,/,&
+              " * Nr of equilibration steps:                   ",I10,       / )
 
    END SUBROUTINE PolymerEquilibriumOscillator_ReadInput
 
@@ -213,17 +234,20 @@ MODULE PolymerEquilibriumOscillator
       ! Allocate memory and initialize vectors for trajectory, acceleration and masses
 
       NDim = 1
-      ALLOCATE( X(NDim*NBeads), V(NDim*NBeads), A(NDim*NBeads), APre(NDim*NBeads), MassVector(NDim*NBeads) )
+      ALLOCATE( X(NDim*NBeads), V(NDim*NBeads), A(NDim*NBeads), MassVector(NDim) )
       MassVector( : ) = MassSystem
 
       ! Set variables for EOM integration in the microcanonical ensamble
-      CALL EvolutionSetup( MolecularDynamics, NDim, MassVector(1:NDim), TimeStep )
+      CALL EvolutionSetup( MolecularDynamics, NDim, MassVector, TimeStep )
       ! Set ring polymer molecular dynamics parameter
       CALL SetupRingPolymer( MolecularDynamics, NBeads, BeadsFrequency ) 
 
       ! Set variables for EOM integration for the Bath in the canonical ensamble
-      CALL EvolutionSetup( Equilibration, NDim*NBeads, MassVector, EquilTStep )
-      CALL SetupThermostat( Equilibration, EquilGamma, Temperature*NBeads )
+      CALL EvolutionSetup( Equilibration, NDim, MassVector, EquilTStep )
+      ! Set ring polymer molecular dynamics parameter
+      CALL SetupRingPolymer( Equilibration, NBeads, BeadsFrequency ) 
+      ! Set thermostatting with PILE
+      CALL SetupThermostat( Equilibration, EquilGamma, Temperature )
 
       ! ALLOCATE AND INITIALIZE DATA WITH THE AVERAGES OVER THE SET OF TRAJECTORIES
 
@@ -336,13 +360,11 @@ MODULE PolymerEquilibriumOscillator
          ! set reasonable initial conditions for the equilibration via a normal mode calculations of the ring polymer
          CALL InitialConditionsForNormalModes( X, V ) 
 
-         PRINT "(/,A,F6.1)"," Equilibrating the initial conditions at Tp = ", &
+         PRINT "(/,A,F12.1)"," Equilibrating the initial conditions at Tp = ", &
                              NBeads*Temperature*TemperatureConversion(InternalUnits,InputUnits)
 
          ! Compute starting potential and forces
-         A(:) = 0.0
-         PotEnergy = Potential( X, A )
-         A(:) = A(:) / MassVector(:)
+         CALL EOM_RPMSymplectic( Equilibration, X, V, A,  SystemPotential, PotEnergy, .TRUE. )
 
          ! Initialize temperature average and variance
          TempAverage = 0.0
@@ -354,7 +376,7 @@ MODULE PolymerEquilibriumOscillator
          DO iStep = 1, NrEquilibrationSteps 
 
             ! PROPAGATION for ONE TIME STEP
-            CALL EOM_LangevinSecondOrder( Equilibration, X, V, A, Potential, PotEnergy )
+            CALL EOM_RPMSymplectic( Equilibration, X, V, A,  SystemPotential, PotEnergy )
 
             IF ( PrintType >= FULL ) THEN
                ! compute kinetic energy and total energy
@@ -393,7 +415,7 @@ MODULE PolymerEquilibriumOscillator
 
          ! compute initial kinetic energy for this traj
          KinEnergy = EOM_KineticEnergy(Equilibration, V )
-         PotEnergy = Potential( X, A )
+         CALL EOM_RPMSymplectic( Equilibration, X, V, A,  SystemPotential, PotEnergy, .TRUE. )
          ! Shift potential energy with respect to the bottom of the well
          IF ( MorsePotential )   PotEnergy = PotEnergy + MorseDe*NBeads
 
@@ -644,7 +666,7 @@ MODULE PolymerEquilibriumOscillator
       IMPLICIT NONE
 
       ! Deallocate memory 
-      DEALLOCATE( X, V, A, APre, MassVector )
+      DEALLOCATE( X, V, A, MassVector )
       DEALLOCATE( PositionCorrelation )
       IF ( PrintType >= FULL ) DEALLOCATE( AverageCoord )
 
