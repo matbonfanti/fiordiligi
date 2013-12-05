@@ -77,8 +77,6 @@ MODULE PolymerEquilibriumOscillator
    ! Averages computed during propagation
    REAL, DIMENSION(:), ALLOCATABLE      :: PositionCorrelation    !< Position correlation function
    REAL, DIMENSION(:,:), ALLOCATABLE    :: AverageCoord           !< Average i-th coordinate vs time
-   REAL, DIMENSION(:), ALLOCATABLE      :: KineticAverage         !< Average of the kinetic energy of the system
-   REAL, DIMENSION(:), ALLOCATABLE      :: PotentialAverage       !< Average of the potential energy of the system
    REAL, DIMENSION(:), ALLOCATABLE      :: EquilibAveTvsTime      !< Average temperature at time T during equilibration
 
    CONTAINS
@@ -259,10 +257,6 @@ MODULE PolymerEquilibriumOscillator
       ! Allocate and initialize the variables for the trajectory averages
       ALLOCATE( PositionCorrelation(0:NrOfPrintSteps) )
       PositionCorrelation(:)  = 0.0
-      ! Allocate memory to compute the average energies (computed as centroid of classical quantities)
-      ALLOCATE( KineticAverage(0:NrOfPrintSteps),  PotentialAverage(0:NrOfPrintSteps) )
-      KineticAverage(:)  = 0.0
-      PotentialAverage(:)  = 0.0
 
       ! Average coordinates over time and power spectrum of the auto-correlation function
       IF ( PrintType >= FULL ) THEN
@@ -306,9 +300,9 @@ MODULE PolymerEquilibriumOscillator
       !> Output file name
       CHARACTER(100) :: OutFileName
 
-      REAL :: K1, K2, K3, K4
-      REAL, DIMENSION(0:NrOfPrintSteps,4)    :: AverageKin
-      AverageKin(:,:) = 0.0
+      INTEGER, PARAMETER   :: NrOfEnergyAverages = 4
+      REAL, DIMENSION(NrOfEnergyAverages,0:NrOfPrintSteps)    :: AverageE
+      AverageE(:,:) = 0.0
 
       PosCorrelationUnit = LookForFreeUnit()
       OPEN( FILE="PositionCorrelation.dat", UNIT=PosCorrelationUnit )
@@ -316,7 +310,7 @@ MODULE PolymerEquilibriumOscillator
                                                                                   " | au) - ", NrTrajs, " trajectories "
       EnergyOutputUnit = LookForFreeUnit()
       OPEN( FILE="EnergyAverages.dat", UNIT=EnergyOutputUnit )
-      WRITE(EnergyOutputUnit, "(5A,I6,A,/)") "# Ekin, Epot, ETot vs time (", trim(TimeUnit(InputUnits)), ",", &
+      WRITE(EnergyOutputUnit, "(5A,I6,A,/)") "# Evir, Etherm, Ecentr, V vs time (", trim(TimeUnit(InputUnits)), ",", &
                                                              trim(EnergyUnit(InputUnits)), ") - ", NrTrajs, " trajectories "
       IF ( PrintType >= FULL ) THEN
          AvCoordOutputUnit = LookForFreeUnit()
@@ -431,23 +425,13 @@ MODULE PolymerEquilibriumOscillator
                        PotEnergy/(NDim*NBeads)*EnergyConversion(InternalUnits,InputUnits), &
                        2.0*PotEnergy/(NDim*NBeads)*TemperatureConversion(InternalUnits,InputUnits)
 
-         ! Energy of the system, Coupling energy and energy of the bath
-         CALL IstantaneousEnergies( KinEnergy, PotEnergy )
-         CALL KineticEnergies( K1, K2, K3, K4 )
-
-         ! Store starting values of the averages
-         KineticAverage(0)    = KineticAverage(0)  + KinEnergy
-         PotentialAverage(0)  = PotentialAverage(0) + PotEnergy
+         ! Compute and store expectation values of the energy
+         AverageE(:,0) = AverageE(:,0) + EnergyAverages( X, V, MassVector )
 
          ! Store initial coordinates
          X0 = X
          ! Compute position correlation function
          PositionCorrelation(0) = PositionCorrelation(0) + CorrelationFunction( X, X0 )
-
-         AverageKin(0,1) = AverageKin(0,1) + K1 + PotEnergy
-         AverageKin(0,2) = AverageKin(0,2) + K2 + PotEnergy
-         AverageKin(0,3) = AverageKin(0,3) + K3 + PotEnergy
-         AverageKin(0,4) = AverageKin(0,4) + K4 + PotEnergy
 
          ! Compute average coordinates
          IF ( PrintType >= FULL )  AverageCoord(1,0) = AverageCoord(1,0) + CentroidCoord( X )
@@ -514,21 +498,11 @@ MODULE PolymerEquilibriumOscillator
                TrajPotAverage  = TrajPotAverage + PotEnergy/(NDim*NBeads)
                TrajPotVariance = TrajPotVariance + (PotEnergy/(NDim*NBeads))**2
 
-               ! Energy of the system
-               CALL IstantaneousEnergies( KinEnergy, PotEnergy )
-               CALL KineticEnergies( K1, K2, K3, K4 )
-
-               ! Update averages over time
-               KineticAverage(kStep)    = KineticAverage(kStep)  + KinEnergy
-               PotentialAverage(kStep)  = PotentialAverage(kStep) + PotEnergy
+               ! Compute and store expectation values of the energy
+               AverageE(:,kStep) = AverageE(:,kStep) + EnergyAverages( X, V, MassVector ) 
 
                ! Compute position correlation function
                PositionCorrelation(kStep) = PositionCorrelation(kStep) + CorrelationFunction( X, X0 )
-
-               AverageKin(kStep,1) = AverageKin(kStep,1) + K1 + PotEnergy
-               AverageKin(kStep,2) = AverageKin(kStep,2) + K2 + PotEnergy
-               AverageKin(kStep,3) = AverageKin(kStep,3) + K3 + PotEnergy
-               AverageKin(kStep,4) = AverageKin(kStep,4) + K4 + PotEnergy
 
                IF ( PrintType >= FULL )   AverageCoord(1,kStep) = AverageCoord(1,kStep) + CentroidCoord( X )
 
@@ -595,18 +569,9 @@ MODULE PolymerEquilibriumOscillator
 
       ! Normalize averages 
       PositionCorrelation(:) = PositionCorrelation(:)   /  real(NrTrajs)
-      KineticAverage(:)      = KineticAverage(:)        / real(NrTrajs)
-      PotentialAverage(:)    = PotentialAverage(:)      / real(NrTrajs)
-
+      AverageE(:,0:NrOfPrintSteps) = AverageE(:,0:NrOfPrintSteps)  / real(NrTrajs)
       IF ( PrintType >= FULL )   AverageCoord(1:NDim,:) = AverageCoord(1:NDim,:) / real(NrTrajs) 
       IF ( PrintType >= FULL )   EquilibAveTvsTime(:)   = EquilibAveTvsTime(:) / real(NrTrajs) 
-
-      AverageKin(0:NrOfPrintSteps,1:4) = AverageKin(0:NrOfPrintSteps,1:4) / real(NrTrajs)
-
-      DO iStep = 0, NrOfPrintSteps
-         WRITE(900, "(F14.8,4F14.8)") TimeStep*real(PrintStepInterval*iStep)/MyConsts_fs2AU, &
-               AverageKin(iStep,1:4)*MyConsts_Hartree2eV
-      END DO
 
       ! Print average temperature over time during equilibration
       DO iStep = 0, size(EquilibAveTvsTime)-1
@@ -621,8 +586,8 @@ MODULE PolymerEquilibriumOscillator
 
       ! PRINT average energy of the system, of the coupling, of the bath
       DO iStep = 0, NrOfPrintSteps
-         WRITE(EnergyOutputUnit,"(F14.8,4F14.8)") TimeStep*real(PrintStepInterval*iStep)/MyConsts_fs2AU, &
-                                        PotentialAverage(iStep)*MyConsts_Hartree2eV, KineticAverage(iStep)*MyConsts_Hartree2eV
+         WRITE(EnergyOutputUnit,"(F14.8,100F14.8)") TimeStep*real(PrintStepInterval*iStep)/MyConsts_fs2AU,  &
+                              AverageE(:,iStep)*MyConsts_Hartree2eV
       END DO
 
       IF ( PrintType >= FULL ) THEN
@@ -676,6 +641,26 @@ MODULE PolymerEquilibriumOscillator
 
    END SUBROUTINE PolymerEquilibriumOscillator_Dispose
 
+! ********************************************************************************************************************
+
+   REAL FUNCTION SystemPotential( X, Force )
+      REAL, DIMENSION(:), TARGET, INTENT(IN)  :: X
+      REAL, DIMENSION(:), TARGET, INTENT(OUT) :: Force
+      
+      CALL ERROR( size( Force ) /= size( X ), "PolymerVibrationalRelax.SystemPotential: array dimension mismatch" )
+      CALL ERROR( size( X ) /= NDim, "PolymerVibrationalRelax.SystemPotential: wrong number of DoFs" )
+
+      ! Compute potential and forces of the system replicas
+      IF ( MorsePotential ) THEN
+         SystemPotential = MorseDe * ( 1.0 - exp(-MorseAlpha*X(1)) )**2  
+         Force(1) = 2.0 * MorseAlpha * MorseDe * (  exp(-2.0*MorseAlpha*X(1)) - exp(-MorseAlpha*X(1)) )  
+      ELSE
+         SystemPotential = Quadratic * X(1)**2 + Cubic * X(1)**3 + Quartic * X(1)**4
+         Force(1) = - 2.0 * Quadratic * X(1) - 3.0 * Cubic * X(1)**2 - 4.0 * Quartic * X(1)**3
+      END IF
+
+   END FUNCTION SystemPotential
+
 !*************************************************************************************************
 
    FUNCTION CentroidCoord( X )
@@ -703,205 +688,66 @@ MODULE PolymerEquilibriumOscillator
 
 !*************************************************************************************************
    
-   SUBROUTINE KineticEnergies( K1, K2, K3, K4 )
+   FUNCTION EnergyAverages( X, V, Mass ) 
       IMPLICIT NONE
-      REAL, INTENT(OUT)             :: K1, K2, K3, K4
+      REAL, DIMENSION(4) :: EnergyAverages
+      REAL, DIMENSION(NDim*NBeads), INTENT(IN) :: X, V
+      REAL, DIMENSION(NDim), INTENT(IN)        :: Mass
+      REAL                          :: PotEnergy
       REAL, DIMENSION(NDim*NBeads)  :: SngForce
-      REAL, DIMENSION(NDim)         :: CentroidX, CentroidF, CentroidV, SingleF
+      REAL, DIMENSION(NDim)         :: CentroidV
       INTEGER                       :: iCoord, iBead
-      REAL :: Pot, ForceSystem
 
-      SngForce(:) = 0.0
-      ! System potential for each bead
+      ! (4) POTENTIAL ENERGY    *****************************************************
+      ! System potential averaged over the beads, and force acting on each bead
+      PotEnergy = 0.0
       DO iBead = 1, NBeads 
-         ! Compute potential and forces of the system replicas
-         IF ( MorsePotential ) THEN
-            Pot = MorseV( X(iBead), ForceSystem )
-         ELSE
-            Pot = OscillatorV( X(iBead), ForceSystem )
-         END IF
-         SngForce(iBead) = SngForce(iBead) + ForceSystem
+         PotEnergy = PotEnergy + SystemPotential( X((iBead-1)*NDim+1:iBead*NDim), SngForce((iBead-1)*NDim+1:iBead*NDim) )
       END DO
+      EnergyAverages(4) = PotEnergy / real(NBeads)
 
-      ! Compute centroids
-      CentroidX = CentroidCoord( X )
-      CentroidF = CentroidCoord( SngForce )
-      CentroidV = CentroidCoord( V )
-
-      ! First definition: kinetic energy of the centroid
-      K1 = 0.0
-      DO iCoord = 1, NDim
-         K1 = K1 + 0.5 * MassVector(iCoord) * CentroidV(iCoord)**2
-      END DO
-
-      ! Second definition: centroid of kinetic energies
-      K2 = 0.0
+      ! (1) VIRIAL TOTAL ENERGY    **************************************************
+      ! centroid of the virial product (virial as average)
+      EnergyAverages(1) = 0.0
       DO iBead = 1, NBeads
          DO iCoord = 1, NDim
-            K2  = K2  + 0.5 * MassVector(iCoord) * V((iBead-1)*NDim+iCoord)**2
+            EnergyAverages(1) = EnergyAverages(1) - X((iBead-1)*NDim+iCoord) * SngForce((iBead-1)*NDim+iCoord)
          END DO
       END DO
-      K2 = K2 / real(NBeads)
+      EnergyAverages(1) = 0.5 * EnergyAverages(1) / real(NBeads)
+      ! add potential energy to get full energy
+      EnergyAverages(1) = EnergyAverages(1) + EnergyAverages(4)
 
-      ! Third definition: virial of the centroids (virial as correlation product)
-      K3 = 0.0
+      ! 2) THERMODYNAMICS TOTAL ENERGY
+      ! sum up energy of the ring oscillators and subtract it to average energy
+      EnergyAverages(2) = 0.0 
       DO iCoord = 1, NDim
-         K3  = K3  -0.5 * CentroidX(iCoord) * CentroidF(iCoord)
-      END DO
-
-      ! Fourth definition: centroid of the virial product (virial as average)
-      K4 = 0.0
-      DO iBead = 1, NBeads
-         DO iCoord = 1, NDim
-            K4  = K4  -0.5 * X((iBead-1)*NDim+iCoord) * SngForce((iBead-1)*NDim+iCoord)
-         END DO
-      END DO
-      K4 = K4 / real(NBeads)
-
-   END SUBROUTINE KineticEnergies
-
-!*************************************************************************************************
-
-   REAL FUNCTION Potential( Coordinates, Forces )
-      IMPLICIT NONE
-      REAL, DIMENSION(:), TARGET, INTENT(IN)  :: Coordinates
-      REAL, DIMENSION(:), TARGET, INTENT(OUT) :: Forces
-
-      INTEGER                  :: iBead
-      REAL                     :: ForceSystem
-      REAL, DIMENSION(NBeads)  :: RingForces
-
-      ! Check the number degrees of freedom
-      CALL ERROR( size( Forces ) /= size( Coordinates ), "PolymerVibrationalRelax.Potential: array dimension mismatch" )
-      CALL ERROR( size( Coordinates ) /= NDim*NBeads, "PolymerVibrationalRelax.Potential: wrong number of DoFs" )
-
-      ! Initialize forces and potential
-      Potential          = 0.0
-      Forces(:)          = 0.0
-
-      ! System potential for each bead
-      DO iBead = 1, NBeads 
-         ! Compute potential and forces of the system replicas
-         IF ( MorsePotential ) THEN
-            Potential = Potential+ MorseV( Coordinates(iBead), ForceSystem )
-         ELSE
-            Potential = Potential+ OscillatorV( Coordinates(iBead), ForceSystem )
+         IF ( NBeads == 2 ) THEN
+            EnergyAverages(2) = EnergyAverages(2) + Mass(iCoord) * ( X(NDim+iCoord) - X(iCoord) )**2 
+         ELSE IF ( NBeads > 2 ) THEN
+            DO iBead = 1, NBeads-1
+               EnergyAverages(2) = EnergyAverages(2) + Mass(iCoord) * ( X(iBead*NDim+iCoord) - X((iBead-1)*NDim+iCoord) )**2 
+            END DO
+            EnergyAverages(2) = EnergyAverages(2) + Mass(iCoord) * ( X(iCoord) - X((NBeads-1)*NDim+iCoord) )**2 
          END IF
-         Forces(iBead) = Forces(iBead) + ForceSystem
       END DO
+      EnergyAverages(2) = 0.5 * ( NBeads**2 * NDim * Temperature - BeadsForceConst * EnergyAverages(2) )
+      ! add potential energy to get full energy
+      EnergyAverages(2) = EnergyAverages(2) + EnergyAverages(4)
 
-      IF ( NBeads > 1 ) THEN
-         ! Harmonic forces between beads
-         CALL PolymerRingPotential( MassSystem, Coordinates, Potential, RingForces )
-         Forces(:) = Forces(:) + RingForces(:)
-      END IF
-      
-   END FUNCTION Potential
-
-! ********************************************************************************************************************
-
-   REAL FUNCTION SystemPotential( X, Force )
-      REAL, DIMENSION(:), TARGET, INTENT(IN)  :: X
-      REAL, DIMENSION(:), TARGET, INTENT(OUT) :: Force
-      
-      CALL ERROR( size( Force ) /= size( X ), "PolymerVibrationalRelax.SystemPotential: array dimension mismatch" )
-      CALL ERROR( size( X ) /= NDim, "PolymerVibrationalRelax.SystemPotential: wrong number of DoFs" )
-
-      ! Compute potential and forces of the system replicas
-      IF ( MorsePotential ) THEN
-         SystemPotential = MorseV( X(1), Force(1) )
-      ELSE
-         SystemPotential = OscillatorV( X(1), Force(1) )
-      END IF
-   END FUNCTION SystemPotential
-
-   REAL FUNCTION OscillatorV( X, dVdX )
-      IMPLICIT NONE
-      REAL, INTENT(IN)  :: X
-      REAL, INTENT(OUT), OPTIONAL :: dVdX 
-
-      OscillatorV = Quadratic * X**2 + Cubic * X**3 + Quartic * X**4
-      IF (PRESENT(dVdX) )  dVdX = - 2.0 * Quadratic * X - 3.0 * Cubic * X**2 - 4.0 * Quartic * X**3
-   END FUNCTION OscillatorV
-
-
-   REAL FUNCTION MorseV( Positions, Forces ) RESULT(V) 
-      IMPLICIT NONE
-      REAL, INTENT(IN)  :: Positions
-      REAL, INTENT(OUT), OPTIONAL  :: Forces 
-
-      V = MorseDe * ( exp(-2.0*MorseAlpha*Positions) - 2.0 * exp(-MorseAlpha*Positions) )  
-      IF (PRESENT(Forces) ) Forces = 2.0 * MorseAlpha * MorseDe * (  exp(-2.0*MorseAlpha*Positions) - exp(-MorseAlpha*Positions) )  
-
-   END FUNCTION MorseV
-
-! ********************************************************************************************************************
-
-   SUBROUTINE PolymerRingPotential( Mass, X, V, ForceOnX )
-      IMPLICIT NONE
-      REAL                               :: Mass
-      REAL, DIMENSION(:), INTENT(IN)     :: X
-      REAL, DIMENSION(:), INTENT(OUT)    :: ForceOnX
-      REAL, INTENT(INOUT)                :: V
-      INTEGER :: i, NRing
-
-      NRing = size(X)
-
-      IF ( NRing == 1 ) THEN
-         V = V
-         ForceOnX = 0.0
-      ELSE IF ( NRing == 2 ) THEN
-         V = V + 0.5 * Mass * BeadsForceConst * ( X(2) - X(1) )**2 
-         ForceOnX(1) = Mass * BeadsForceConst * ( X(2) - X(1) )  
-         ForceOnX(2) = Mass * BeadsForceConst * ( - X(2) + X(1) )  
-      ELSE
-         V = V + 0.5 * Mass * BeadsForceConst * ( X(2) - X(1) )**2 
-         ForceOnX(1) = - Mass * BeadsForceConst * ( - X(NRing) + X(1) * 2 - X(2) )  
-         DO i = 2, NRing-1
-            V = V + 0.5 * Mass * BeadsForceConst * ( X(i+1) - X(i) )**2 
-            ForceOnX(i) = - Mass * BeadsForceConst * ( - X(i-1) + X(i) * 2 - X(i+1) )  
-         END DO
-         V = V + 0.5 * Mass * BeadsForceConst * ( X(1) - X(NRing) )**2 
-         ForceOnX(NRing) = - Mass * BeadsForceConst * ( - X(NRing-1) + X(NRing) * 2 - X(1) )  
-      END IF
-
-   END SUBROUTINE PolymerRingPotential
-
-!*************************************************************************************************
-
-   SUBROUTINE IstantaneousEnergies( KEn, VEn )
-      IMPLICIT NONE
-      REAL, INTENT(OUT) :: KEn, VEn
-      REAL  :: CentroidV
-      INTEGER ::  iBead
-
-      ! Centroid of the velocities
+      ! 3) POTENTIAL PLUS KINETIC ENERGY OF THE CENTROID
+      ! Compute centroid of the velocity
       CentroidV = CentroidCoord( V )
-
-      ! Compute kinetic energy as the kinetic energy of the centroid
-      KEn =  0.5 * MassSystem * CentroidV**2
-
-!       ! Compute kinetic energy as average of the kinetic energy over the replicas
-!       KEn = 0.0
-!       DO iBead = 1, NBeads
-!             KEn = KEn + 0.5 * MassSystem * V( iBead )**2
-!       END DO
-!       KEn = KEn / NBeads 
-
-      ! Energy of the system - average of the potential energies of the system replicas
-      VEn = 0.0
-      DO iBead = 1, NBeads
-         IF ( MorsePotential ) THEN
-            VEn = VEn + MorseV( X(iBead) ) + MorseDe
-         ELSE
-            VEn = VEn + OscillatorV( X(iBead) )
-         END IF
+      EnergyAverages(3) = 0.0
+      DO iCoord = 1, NDim
+         EnergyAverages(3) = EnergyAverages(3) + MassVector(iCoord) * CentroidV(iCoord)**2
       END DO
-      VEn = VEn / NBeads 
-      
- 
-   END SUBROUTINE IstantaneousEnergies
+      EnergyAverages(3) =  0.5 * EnergyAverages(3)
+      ! add potential energy to get full energy
+      EnergyAverages(3) = EnergyAverages(3) + EnergyAverages(4)
 
+
+   END FUNCTION EnergyAverages
 
 !*************************************************************************************************
 
