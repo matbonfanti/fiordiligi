@@ -23,7 +23,12 @@
 !>  \arg 28 November 2013: ring polymer propagation implemented, with symplectic
 !>                         integrator
 !
-!>  \todo         
+!>  \todo   clean up the code: leave only 1 propagator for RPMD and 1 propagator for
+!>          normal MD, with or without langevin friction ( in case of RPMD, Parrinello
+!>          algorithm, in case of regular MD, stochastic integrated algorith - both have
+!>          Velocity Verlet as limit for gamma = 0 ) then rename subroutines for propagation
+!>          and clean the datatype with the only data that are necessary finally fix 
+!>          the setup subroutines including all the necessary checks and setup options
 !>                 
 !***************************************************************************************
 

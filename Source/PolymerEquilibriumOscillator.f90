@@ -22,6 +22,7 @@
 MODULE PolymerEquilibriumOscillator
 #include "preprocessoptions.cpp"
    USE MyLinearAlgebra
+   USE FFTWrapper
    USE SharedData
    USE InputField
    USE UnitConversion
@@ -754,12 +755,10 @@ MODULE PolymerEquilibriumOscillator
    SUBROUTINE InitialConditionsForNormalModes( Pos, Vel )
       IMPLICIT NONE
       REAL, DIMENSION(NDim*NBeads), INTENT(OUT) :: Pos, Vel 
-
-      REAL, DIMENSION(NBeads,NBeads) :: RingPotentialMatrix, RingNormalModes
+      TYPE(FFTHalfComplexType)       :: RingNormalModes     
       REAL, DIMENSION(NBeads)        :: RingEigenvalues
       REAL, DIMENSION(NDim,NDim)     :: SysPotentialMatrix, SysNormalModes
       REAL, DIMENSION(NDim)          :: SysEigenvalues
-
       REAL, DIMENSION(NDim,NBeads) :: NormalQ, NormalV 
       REAL, DIMENSION(NDim,NBeads) :: FinalQ,  FinalV 
       INTEGER :: iSys, iBead, jSys, jBead
@@ -770,19 +769,13 @@ MODULE PolymerEquilibriumOscillator
       SysNormalModes(1,1) = 1.0
       SysEigenvalues(1) = SysPotentialMatrix(1,1)
 
-      ! Setup ring potential matrix
-      RingPotentialMatrix(:,:) = 0.0
-      DO iBead = 1, NBeads-1
-         RingPotentialMatrix(iBead,iBead)   = 2.0 * BeadsFrequency**2
-         RingPotentialMatrix(iBead+1,iBead) = - BeadsFrequency**2
-         RingPotentialMatrix(iBead,iBead+1) = - BeadsFrequency**2
-      END DO
-      RingPotentialMatrix(NBeads,NBeads) = 2.0 * BeadsFrequency**2
-      RingPotentialMatrix(1,NBeads) = - BeadsFrequency**2
-      RingPotentialMatrix(NBeads,1) = - BeadsFrequency**2
+      ! Setup transform from ring normal modes to standard coordinates
+      CALL SetupFFT( RingNormalModes, NBeads ) 
 
-      ! Diagonalize ring potential
-      CALL TheOneWithDiagonalization(RingPotentialMatrix, RingNormalModes, RingEigenvalues)
+      ! Set eigenvalues of the bead
+      DO iBead = 1, NBeads
+         RingEigenvalues(iBead) = 2.0 * BeadsFrequency * SIN( MyConsts_PI * real(iBead-1) / real(NBeads) )
+      END DO
 
       ! Set sigma of the maxwell boltzmann distribution
       SigmaV = sqrt( NBeads*Temperature / MassSystem )
@@ -795,20 +788,16 @@ MODULE PolymerEquilibriumOscillator
          END DO
       END DO
 
-      ! Transform coordinates to original representation
+      ! Transform normal modes of the ring polymer to standard polymer coordinates
       DO iSys = 1, NDim
-         DO iBead = 1, NBeads
-            FinalQ(iSys,iBead) = 0.0
-            FinalV(iSys,iBead) = 0.0
-            DO jSys = 1, NDim
-               DO jBead = 1, NBeads
-                  FinalQ(iSys,iBead) = FinalQ(iSys,iBead) + &
-                                          SysNormalModes(iSys,jSys) * RingNormalModes(iBead,jBead) * NormalQ(jSys,jBead)
-                  FinalV(iSys,iBead) = FinalV(iSys,iBead) + &
-                                          SysNormalModes(iSys,jSys) * RingNormalModes(iBead,jBead) * NormalV(jSys,jBead)
-               END DO
-            END DO
-         END DO
+         CALL ExecuteFFT( RingNormalModes, NormalQ(iSys,:), INVERSE_FFT ) ! transform to normal modes coords
+         CALL ExecuteFFT( RingNormalModes, NormalV(iSys,:), INVERSE_FFT ) ! transform to normal modes coords
+      END DO
+
+      ! Transform system normal modes to original representation
+      DO iBead = 1, NBeads
+         FinalQ(:,iBead) = TheOneWithMatrixVectorProduct( SysNormalModes, NormalQ(:,iBead) )
+         FinalV(:,iBead) = TheOneWithMatrixVectorProduct( SysNormalModes, NormalV(:,iBead) )
       END DO
 
       ! Give back the initial conditions
@@ -816,6 +805,8 @@ MODULE PolymerEquilibriumOscillator
          Pos( (iBead-1)*NDim+1 : iBead*NDim ) = FinalQ(:,iBead)
          Vel( (iBead-1)*NDim+1 : iBead*NDim ) = FinalV(:,iBead)
       END DO
+
+      CALL DisposeFFT( RingNormalModes )
 
    END SUBROUTINE InitialConditionsForNormalModes
 
