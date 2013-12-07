@@ -13,11 +13,17 @@
 !>
 !***************************************************************************************
 !
-!>  \pre              
+!>  \par Updates
+!>  \arg 7 December 2013 : the subroutines UniformRandomNr and  GaussianRandomNr 
+!>       are now thread safe, and different initial seeds can be set by using 
+!>       different RNGInternalState variables and initializing them with different
+!>       calls of SetSeed. Thus the module is ready to be used for parallel applications
 !
+!>  \todo          ....
+!>                 
 !***************************************************************************************
 !
-!>   \remark     The function ran(...) is taken from  \n 
+!>   \remark     The function for uniform random number generation is taken from  \n 
 !>               (*) Press, Teukolsky, Vetterling, Flannery \n
 !>                   Numerical Recipes, the art of scientific computing, \n
 !>                   Pag. 1142 Vol. 2 (FORTRAN 90) \n
@@ -27,201 +33,240 @@
 !***************************************************************************************
 MODULE RandomNumberGenerator
    USE MyConsts
+   USE ErrorTrap
+   USE omp_lib
 
    IMPLICIT NONE
 
    PRIVATE
+   PUBLIC :: RNGInternalState
    PUBLIC :: SetSeed, UniformRandomNr, GaussianRandomNr
-   PUBLIC :: TestGaussianDistribution, TestGaussianDistribution2
-
+   PUBLIC :: TestGaussianDistribution, TestGaussianDistribution2, TestCorrelations
+   
    ! Integer type for the random number generation
-   INTEGER, PARAMETER :: K4B=selected_int_kind(9)
+   INTEGER, PARAMETER, PUBLIC :: K4B=selected_int_kind(9)
 
-   ! The seed of the pseudo-random series of number is stored internally in the module
-   INTEGER(K4B), SAVE :: StoredSeed
+   TYPE RNGInternalState
+      ! These variables define the internal state of the random number generator
+      REAL         :: am
+      INTEGER(K4B) :: ix, iy, k
+      INTEGER(K4B) :: seed
+      ! Since the gaussian random nr are generated in couples, the following variable
+      ! store the non used gaussian number for later calls of the subroutine
+      REAL         :: TempGaussian
+      LOGICAL      :: GaussianAvail = .FALSE.
+   END TYPE
+   
+ CONTAINS   
 
-   ! Since the gaussian random nr are generated in couples, the following variable
-   ! store the non used gaussian number for later calls of the subroutine
-   REAL, SAVE    :: TempGaussian
-   LOGICAL, SAVE :: GaussianAvail = .FALSE.
+!****************************************************************************
 
-CONTAINS   
-
-   SUBROUTINE TestGaussianDistribution( Average, Sigma, MaxN, Seed )
+! Set seed for random number generation and initialize the internal variables
+! of the RNGInternalState data type
+   
+   SUBROUTINE SetSeed( IntState, Seed )
       IMPLICIT NONE
-      REAL, INTENT(IN) :: Average, Sigma
-      INTEGER, INTENT(IN) :: MaxN
-!       INTEGER(K4B), INTENT(IN), OPTIONAL :: Seed
-      INTEGER, INTENT(IN), OPTIONAL :: Seed
+      TYPE( RNGInternalState), INTENT(INOUT) :: IntState
+      INTEGER, INTENT(IN)                    :: Seed
 
-      INTEGER :: PrintStep, iN
-      REAL :: Random1, Random2 
-      REAL :: AverageEst1 = 0.0, SigmaEst1 = 0.0
-      REAL :: AverageEst2 = 0.0, SigmaEst2 = 0.0
+      CALL ERROR( Seed > 0, " RandomNumberGenerator.SetSeed: negative seed required " )
 
-      ! In case initialize seed
-      IF ( Present( Seed ) )   CALL SetSeed( Seed )
-
-      ! Set the output steps
-      PrintStep = MaxN / 200
-
-      ! Print intestation of the table
-      WRITE(123,*) "# Nr of random numbers, error in Average value, error in Standard deviation "
-      WRITE(124,*) "# Nr of random numbers, error in Average value, error in Standard deviation "
-
-      AverageEst1 = 0.0
-      SigmaEst1 = 0.0
-      AverageEst2 = 0.0
-      SigmaEst2 = 0.0
-      ! Cycle over nr of number to generate
-      DO iN = 1, MaxN
-            ! Generate gaussian rnd number
-           Random1 = Average + GaussianRandomNr( Sigma )
-           Random2 = Average + GaussianRandomNr( Sigma )
-!             Random = Average + UniformRandomNr( -sqrt(3.)*Sigma, sqrt(3.)*Sigma )
-            ! increment sum and squared sum
-            AverageEst1 = AverageEst1 + Random1
-            SigmaEst1 = SigmaEst1 + Random1**2
-            AverageEst2 = AverageEst2 + Random2
-            SigmaEst2 = SigmaEst2 + Random2**2
-            ! IF it's a printing step, print average and st dev
-            IF ( mod( iN, PrintStep ) == 0 ) THEN
-               WRITE(123,*) iN, AverageEst1/iN-Average, sqrt(SigmaEst1/iN-(AverageEst1/iN)**2)-Sigma
-               WRITE(124,*) iN, AverageEst2/iN-Average, sqrt(SigmaEst2/iN-(AverageEst2/iN)**2)-Sigma
-            ENDIF
-      END DO
-
-      WRITE(123,*) " "
-      WRITE(123,*) "# Exact   ", Average, Sigma
-      WRITE(124,*) " "
-      WRITE(124,*) "# Exact   ", Average, Sigma
-
-   END SUBROUTINE TestGaussianDistribution
-
-
-   SUBROUTINE TestGaussianDistribution2( Sigma, MaxN, Seed )
-      IMPLICIT NONE
-      REAL, INTENT(IN) :: Sigma
-      INTEGER, INTENT(IN) :: MaxN
-      INTEGER, INTENT(IN), OPTIONAL :: Seed
-
-      INTEGER, DIMENSION(61) :: IntCounter
-      REAL    :: Random
-      INTEGER :: iN, RanIndex
-
-      WRITE(122,*) "# Interval of x, Nr of random numbers "
-
-      ! In case initialize seed
-      IF ( Present( Seed ) )   CALL SetSeed( Seed )
-
-      IntCounter(:) = 0
-
-      DO iN = 1, MaxN 
-
-         Random = GaussianRandomNr( Sigma )
-         RanIndex = CEILING( 30.0 + 10.*Random/Sigma )
-         IF ( RanIndex >= 1 .OR. RanIndex <= 61 ) THEN
-            IntCounter(RanIndex) =  IntCounter(RanIndex) + 1
-         END IF
-
-      END DO
-
-      DO iN = 1, 61
-         WRITE(122,*)  (real(iN-31)/10.)*Sigma, IntCounter(iN)
-      END DO
-
-   END SUBROUTINE TestGaussianDistribution2
-
-   !****************************************************************************
-
-   SUBROUTINE SetSeed( Seed )
-      IMPLICIT NONE
-!       INTEGER(K4B), INTENT(IN) :: Seed
-      INTEGER, INTENT(IN) :: Seed
-      INTEGER, DIMENSION(10) :: SeedVec
-      REAL :: Temp
-
-      SeedVec = Seed
-      CALL RANDOM_SEED( put= SeedVec )
-
+      ! Initialize seed
+      IntState%seed = INT( Seed, K4B )
+      
+      ! Initialize internal state of the RNG 
+      IntState%am   = 0.0
+      IntState%ix   = -1
+      IntState%iy   = -1
+      IntState%k    = 0
+      
+      ! Initialize variables to store gaussian random number
+      IntState%TempGaussian = 0.0
+      IntState%GaussianAvail = .FALSE.
+      
    END SUBROUTINE SetSeed
-
-   !****************************************************************************
-
-   REAL FUNCTION UniformRandomNr( X0, X1 )  RESULT( RandNr )
-      IMPLICIT NONE
-      REAL, INTENT(IN), OPTIONAL  :: X0, X1
-
-      CALL RANDOM_NUMBER( RandNr )  
-
-      IF ( PRESENT(X1) .AND. PRESENT(X0) ) THEN    ! both input values are present: generate nr in (X0, X1)
-            RandNr = X0 + RandNr * ( X1 - X0 )
-      ELSE IF ( PRESENT(X0) ) THEN    ! only x0: generate nr in (0, X0)
-            RandNr = RandNr * X0
-      ELSE IF ( PRESENT(X1) ) THEN    ! only x1: generate nr in (0, X1)
-            RandNr = RandNr * X1
-      END IF
+ 
   
-   END FUNCTION UniformRandomNr
+!****************************************************************************
 
-   !****************************************************************************
-
-   ! Generate random numbers distribuited according to a gaussian distribution
-   ! with standard deviation sigma ( Box-Muller algorithm ) 
-   REAL FUNCTION GaussianRandomNr( Sigma ) RESULT( RandNr )
+! The subroutine computes a preudo-random real number in the 0-1 interval
+! This subroutine has been adapted from Numerical Recipes for Fortran 90
+! to take into account the possibility of using the RNG for parallel 
+! applications (for details on the algorithm, see pag 1142 NR for FORTRAN)
+   
+   REAL FUNCTION UniformRandomNr( IntState ) RESULT(Ran)
       IMPLICIT NONE
-      REAL, INTENT(IN)   ::  Sigma    ! standard deviation of the gaussian distrib
-      REAL :: Theta, R, X, Y
+      TYPE( RNGInternalState ), INTENT(INOUT) :: IntState 
+      INTEGER(K4B), PARAMETER :: IA=16807, IM=2147483647, IQ=127773, IR=2836
 
-      IF ( .NOT. GaussianAvail ) THEN
+      if (IntState%seed <= 0 .or. IntState%iy < 0) then 
+         IntState%am = nearest(1.0,-1.0)/IM
+         IntState%iy = ior(ieor(888889999,abs(IntState%seed)),1)
+         IntState%ix = ieor(777755555,abs(IntState%seed))
+         IntState%seed = abs(IntState%seed)+1
+      end if
+      
+      IntState%ix = ieor(IntState%ix, ishft(IntState%ix,13))
+      IntState%ix = ieor(IntState%ix, ishft(IntState%ix,-17))
+      IntState%ix = ieor(IntState%ix, ishft(IntState%ix,5))
+      IntState%k=IntState%iy/IQ
+      IntState%iy=IA*(IntState%iy-IntState%k*IQ)-IR*IntState%k
+      if (IntState%iy < 0) IntState%iy=IntState%iy+IM
+      ran=IntState%am*ior(iand(IM,ieor(IntState%ix,IntState%iy)),1)
+
+   END FUNCTION UniformRandomNr
+   
+!****************************************************************************
+
+! Generate random numbers distribuited according to a gaussian distribution
+! with standard deviation sigma ( Box-Muller algorithm ) 
+
+   REAL FUNCTION GaussianRandomNr( IntState ) RESULT( RandNr )
+      IMPLICIT NONE
+      TYPE( RNGInternalState ), INTENT(INOUT) :: IntState 
+      REAL :: Theta, R
+
+      IF ( .NOT. IntState%GaussianAvail ) THEN
 
             ! Generate random number for 2D gaussian function
-            Theta = UniformRandomNr( 0., 2.*MyConsts_PI )
-            R     = SQRT( -2. * LOG( 1- UniformRandomNr() ) )
+            Theta = 2. * MyConsts_PI * UniformRandomNr(IntState)
+            R     = SQRT( -2. * LOG( 1- UniformRandomNr(IntState) ) )
 
-            ! TRansform in cartesian coordinate
-            X = R * sin( Theta )
-            Y = R * cos( Theta )
+            ! TRansform in cartesian coordinate, Return one number and store the other
+            RandNr = R * sin( Theta )
+            IntState%TempGaussian = R * cos( Theta )
+            IntState%GaussianAvail = .TRUE.
 
-            ! Return one number and store the other
-            RandNr = Sigma * X
-            TempGaussian = Sigma * Y
-            GaussianAvail = .TRUE.
+      ELSE IF ( IntState%GaussianAvail ) THEN
 
-      ELSE IF ( GaussianAvail ) THEN
-
-            RandNr = TempGaussian
-            GaussianAvail = .FALSE.
+            RandNr = IntState%TempGaussian
+            IntState%GaussianAvail = .FALSE.
 
       END IF
   
    END FUNCTION GaussianRandomNr
 
-!    !****************************************************************************
-! 
-!     ! taken from Numerical Recipes for Fortran (for details, see pag 1142)
-!    FUNCTION ran(idum)
-!       IMPLICIT NONE
-!       INTEGER(K4B), INTENT(INOUT) :: idum
-!       REAL :: ran
-!       INTEGER(K4B), PARAMETER :: IA=16807, IM=2147483647, IQ=127773, IR=2836
-!       REAL, SAVE :: am
-!       INTEGER(K4B), SAVE :: ix=-1, iy=-1, k
-! 
-!       if (idum <= 0 .or. iy < 0) then 
-!          am = nearest(1.0,-1.0)/IM
-!          iy = ior(ieor(888889999,abs(idum)),1)
-!          ix = ieor(777755555,abs(idum))
-!          idum = abs(idum)+1
-!       end if
-!       ix = ieor(ix, ishft(ix,13))
-!       ix = ieor(ix, ishft(ix,-17))
-!       ix = ieor(ix, ishft(ix,5))
-!       k=iy/IQ
-!       iy=IA*(iy-k*IQ)-IR*k
-!       if (iy < 0) iy=iy+IM
-!       ran=am*ior(iand(IM,ieor(ix,iy)),1)
-! 
-!    END FUNCTION ran
-  
+   
+   SUBROUTINE TestCorrelations( MaxN, NrThreads )
+      IMPLICIT NONE
+      INTEGER, INTENT(IN) :: MaxN, NrThreads
+      TYPE( RNGInternalState ), DIMENSION(NrThreads) :: RandomNrGen
+      INTEGER :: PrintStep
+      REAL :: Xcorr, Xmean, Random, Previous
+      INTEGER :: iN, iRNG, NTot
+      
+      ! Set the output steps
+      PrintStep = 1000
+      
+      ! Print intestation of the table
+      WRITE(125,*) "# Nr of random numbers, correlation between consecutive nr: <x_i x_i+1> - <x_i>**2 "
+
+      DO iRNG = 1, NrThreads
+         CALL SetSeed( RandomNrGen(iRNG), -iRNG )
+      END DO      
+      
+      ! Cycle over nr of number to generate
+      NTot = 0
+      XCorr = 0.0
+      Xmean = 0.0
+      DO iN = 1, MaxN
+         DO iRNG = 1, NrThreads
+
+            ! Generate uniform rnd number 
+            Previous = Random
+            Random = UniformRandomNr( RandomNrGen(iRNG) ) 
+            NTot = NTot + 1
+
+            ! increment sum and correlation product
+            IF ( NTot > 1 ) XCorr = XCorr + Previous * Random
+            Xmean = Xmean + Random
+            
+            ! IF it's a printing step, print average and st dev
+            IF ( mod( NTot, PrintStep ) == 0 ) THEN
+               WRITE(125,*) NTot, XCorr/(NTot-1) - (Xmean/NTot)**2
+            ENDIF
+         END DO
+      END DO
+
+   END SUBROUTINE TestCorrelations
+
+
+   SUBROUTINE TestGaussianDistribution( MaxN, NrThreads )
+      IMPLICIT NONE
+      INTEGER, INTENT(IN) :: MaxN, NrThreads
+      TYPE( RNGInternalState ), DIMENSION(NrThreads) :: RandomNrGen
+      REAL :: AverageEst, SigmaEst, Random
+      INTEGER :: NrOfThreads, CurrentThread, i, j, N
+      INTEGER :: NrOfStepEachPring, PrintStep
+
+      ! Print intestation of the table
+      WRITE(123,*) "# Nr of random numbers, error in Average value, error in Standard deviation "
+      
+      ! Set the output steps
+      NrOfStepEachPring = 10000
+      PrintStep = MaxN*NrThreads / NrOfStepEachPring
+
+      DO i = 1, NrThreads
+         CALL SetSeed( RandomNrGen(i), -i )
+      END DO
+
+      ! Initialize variables
+      AverageEst = 0.0
+      SigmaEst = 0.0
+      N = 0
+      
+      DO i = 1, MaxN
+         DO j = 1, NrThreads
+            Random = GaussianRandomNr( RandomNrGen(j) )
+            AverageEst = AverageEst + Random
+            SigmaEst   = SigmaEst   + Random**2
+            N = N + 1 
+            IF  ( MOD(N,NrOfStepEachPring) == 0 ) THEN
+               WRITE(123,*) N, AverageEst/N, sqrt(SigmaEst/N-(AverageEst/N)**2) 
+            END IF
+        END DO
+      END DO
+      
+   END SUBROUTINE TestGaussianDistribution
+ 
+   SUBROUTINE TestGaussianDistribution2( MaxN )
+      IMPLICIT NONE
+      INTEGER, INTENT(IN) :: MaxN
+      INTEGER, DIMENSION(61) :: IntCounter
+      INTEGER :: i, NrOfThreads, CurrentThread, RanIndex
+      TYPE( RNGInternalState ) :: RandomNrGen
+      REAL :: Random
+
+      WRITE(122,*) "# Interval of x, Nr of random numbers "
+
+      !$OMP PARALLEL PRIVATE(CurrentThread, Random, RandomNrGen, RanIndex  )
+      !$OMP MASTER
+      NrOfThreads = OMP_GET_NUM_THREADS()
+      IntCounter(:) = 0.0
+      !$OMP END MASTER
+   
+      CurrentThread = OMP_GET_THREAD_NUM() + 1
+      CALL SetSeed( RandomNrGen, -1-CurrentThread+1 )
+   
+      !$OMP DO REDUCTION(+:IntCounter)
+      DO i = 1, MaxN
+         Random = GaussianRandomNr( RandomNrGen ) 
+         RanIndex = CEILING( 30.0 + 10.*Random )
+         IF ( RanIndex >= 1 .AND. RanIndex <= 61 ) THEN
+            IntCounter(RanIndex) =  IntCounter(RanIndex) + 1
+         END IF
+      END DO
+      !$OMP END DO 
+      !$OMP END PARALLEL
+
+      DO i = 1, 61
+         WRITE(122,*)  (real(i-31)/10.), IntCounter(i)
+      END DO
+
+   END SUBROUTINE TestGaussianDistribution2
+
+
+   !****************************************************************************
+
+ 
 END MODULE RandomNumberGenerator

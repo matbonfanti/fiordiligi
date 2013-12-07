@@ -80,6 +80,8 @@ MODULE PolymerEquilibriumOscillator
    REAL, DIMENSION(:,:), ALLOCATABLE    :: AverageCoord           !< Average i-th coordinate vs time
    REAL, DIMENSION(:), ALLOCATABLE      :: EquilibAveTvsTime      !< Average temperature at time T during equilibration
 
+   TYPE(RNGInternalState) :: RandomNr
+   
    CONTAINS
 
 !*******************************************************************************
@@ -359,7 +361,7 @@ MODULE PolymerEquilibriumOscillator
                              NBeads*Temperature*TemperatureConversion(InternalUnits,InputUnits)
 
          ! Compute starting potential and forces
-         CALL EOM_RPMSymplectic( Equilibration, X, V, A,  SystemPotential, PotEnergy, .TRUE. )
+         CALL EOM_RPMSymplectic( Equilibration, X, V, A,  SystemPotential, PotEnergy, RandomNr, .TRUE. )
 
          ! Initialize temperature average and variance
          TempAverage = 0.0
@@ -371,7 +373,7 @@ MODULE PolymerEquilibriumOscillator
          DO iStep = 1, NrEquilibrationSteps 
 
             ! PROPAGATION for ONE TIME STEP
-            CALL EOM_RPMSymplectic( Equilibration, X, V, A,  SystemPotential, PotEnergy )
+            CALL EOM_RPMSymplectic( Equilibration, X, V, A,  SystemPotential, PotEnergy, RandomNr )
 
             IF ( PrintType >= FULL ) THEN
                ! compute kinetic energy and total energy
@@ -410,7 +412,7 @@ MODULE PolymerEquilibriumOscillator
 
          ! compute initial kinetic energy for this traj
          KinEnergy = EOM_KineticEnergy(Equilibration, V )
-         CALL EOM_RPMSymplectic( Equilibration, X, V, A,  SystemPotential, PotEnergy, .TRUE. )
+         CALL EOM_RPMSymplectic( Equilibration, X, V, A,  SystemPotential, PotEnergy, RandomNr, .TRUE. )
          ! Shift potential energy with respect to the bottom of the well
          IF ( MorsePotential )   PotEnergy = PotEnergy + MorseDe*NBeads
 
@@ -473,13 +475,13 @@ MODULE PolymerEquilibriumOscillator
          PRINT "(/,A)", " Propagating the system in time... "
          
          ! Compute starting potential and forces
-         CALL EOM_RPMSymplectic( MolecularDynamics, X, V, A,  SystemPotential, PotEnergy, .TRUE. )
+         CALL EOM_RPMSymplectic( MolecularDynamics, X, V, A,  SystemPotential, PotEnergy, RandomNr, .TRUE. )
 
          ! cycle over nstep velocity verlet iterations
          DO iStep = 1,NrOfSteps
 
             ! Propagate for one timestep
-            CALL EOM_RPMSymplectic( MolecularDynamics, X, V, A,  SystemPotential, PotEnergy )
+            CALL EOM_RPMSymplectic( MolecularDynamics, X, V, A,  SystemPotential, PotEnergy, RandomNr )
 
             ! output to write every nprint steps 
             IF ( mod(iStep,PrintStepInterval) == 0 ) THEN

@@ -47,8 +47,6 @@ MODULE ClassicalEqMotion
 
       REAL, PARAMETER :: Over2Sqrt3 = 1.0 / ( 2.0 * SQRT(3.0) )
 
-      LOGICAL :: GaussianNoise = .TRUE.
-      
       !> Evolution datatype, storing all the general data required
       !> for integration of the EoM, with or without Langevin thermostat and with or without Ring Polymer MD
       TYPE Evolution
@@ -371,12 +369,13 @@ MODULE ClassicalEqMotion
 !>
 !> @param EvolData     Evolution data type
 !*******************************************************************************
-   SUBROUTINE EOM_VelocityVerlet( EvolData, Pos, Vel, Acc, GetPotential, V )
+   SUBROUTINE EOM_VelocityVerlet( EvolData, Pos, Vel, Acc, GetPotential, V, RandomNr )
       IMPLICIT NONE
 
       TYPE( Evolution ), INTENT(INOUT)                 :: EvolData
       REAL, DIMENSION( EvolData%NDoF ), INTENT(INOUT)  :: Pos, Vel, Acc
       REAL, INTENT(OUT)                                :: V
+      TYPE(RNGInternalState), INTENT(INOUT) :: RandomNr
 
       INTERFACE
          REAL FUNCTION GetPotential( X, Force )
@@ -416,24 +415,13 @@ MODULE ClassicalEqMotion
 
          ! (3) NEW FORCES AND ACCELERATIONS 
          V = GetPotential( Pos, Acc )       ! Compute new forces and store the potential value
-         IF ( GaussianNoise ) THEN    ! add gaussian noise
-            DO iDoF = 1, EvolData%NDoF
-               IF ( EvolData%ThermoSwitch(iDoF) ) THEN
-                  Acc(iDoF) = ( Acc(iDoF)+GaussianRandomNr( EvolData%ThermalNoise(iDoF) ) ) / EvolData%Mass(iDoF)
-               ELSE IF ( .NOT. EvolData%ThermoSwitch(iDoF) ) THEN
-                  Acc(iDoF) = Acc(iDoF)  / EvolData%Mass(iDoF)
-               END IF
-            END DO
-         ELSE IF ( .NOT. GaussianNoise ) THEN    ! add uniform noise
-            DO iDoF = 1, EvolData%NDoF
-               IF ( EvolData%ThermoSwitch(iDoF) ) THEN
-                  Acc(iDoF) = ( Acc(iDoF) + UniformRandomNr( -sqrt(3.)*EvolData%ThermalNoise(iDoF),     &
-                                                         sqrt(3.)*EvolData%ThermalNoise(iDoF) ) )  / EvolData%Mass(iDoF)
-               ELSE IF ( .NOT. EvolData%ThermoSwitch(iDoF) ) THEN
-                  Acc(iDoF) = Acc(iDoF)  / EvolData%Mass(iDoF)
-               END IF
-            END DO
-         END IF
+         DO iDoF = 1, EvolData%NDoF
+            IF ( EvolData%ThermoSwitch(iDoF) ) THEN
+               Acc(iDoF) = ( Acc(iDoF)+GaussianRandomNr(RandomNr)*EvolData%ThermalNoise(iDoF) ) / EvolData%Mass(iDoF)
+            ELSE IF ( .NOT. EvolData%ThermoSwitch(iDoF) ) THEN
+               Acc(iDoF) = Acc(iDoF)  / EvolData%Mass(iDoF)
+            END IF
+         END DO
 
          ! (4) HALF TIME STEP AGAIN FOR THE VELOCITIES
          DO iDoF = 1, EvolData%NDoF
@@ -460,12 +448,13 @@ MODULE ClassicalEqMotion
 !>
 !> @param EvolData     Evolution data type
 !*******************************************************************************
-   SUBROUTINE EOM_Beeman( EvolData, Pos, Vel, Acc, PreAcc, GetPotential, V )
+   SUBROUTINE EOM_Beeman( EvolData, Pos, Vel, Acc, PreAcc, GetPotential, V, RandomNr )
       IMPLICIT NONE
 
       TYPE( Evolution ), INTENT(INOUT)                 :: EvolData
       REAL, DIMENSION( EvolData%NDoF ), INTENT(INOUT)  :: Pos, Vel, Acc, PreAcc
       REAL, INTENT(OUT)                                :: V
+      TYPE(RNGInternalState), INTENT(INOUT) :: RandomNr
 
       INTERFACE
          REAL FUNCTION GetPotential( X, Force )
@@ -495,25 +484,14 @@ MODULE ClassicalEqMotion
          ! (3) NEW ACCELERATION
          V = GetPotential( NewPos, NewAcc )         ! Compute new forces and store the potential value
 
-         IF ( GaussianNoise ) THEN    ! add gaussian noise
-            DO iDoF = 1, EvolData%NDoF
-               IF ( EvolData%ThermoSwitch(iDoF) ) THEN
-                  NewAcc(iDoF) = ( NewAcc(iDoF) + GaussianRandomNr(EvolData%ThermalNoise(iDoF)) ) / EvolData%Mass(iDoF) &
-                                                                                   - EvolData%Gamma*NewVel(iDoF)
-               ELSE IF ( .NOT. EvolData%ThermoSwitch(iDoF) ) THEN
-                  NewAcc(iDoF) = NewAcc(iDoF)  / EvolData%Mass(iDoF)
-               END IF
-            END DO
-         ELSE IF ( .NOT. GaussianNoise ) THEN    ! add uniform noise
-            DO iDoF = 1, EvolData%NDoF
-               IF ( EvolData%ThermoSwitch(iDoF) ) THEN
-                  NewAcc(iDoF) = ( NewAcc(iDoF) + UniformRandomNr(-sqrt(3.)*EvolData%ThermalNoise(iDoF),   &
-                             sqrt(3.)*EvolData%ThermalNoise(iDoF)) ) / EvolData%Mass(iDoF) - EvolData%Gamma*NewVel(iDoF)
-               ELSE IF ( .NOT. EvolData%ThermoSwitch(iDoF) ) THEN
-                  NewAcc(iDoF) = NewAcc(iDoF)  / EvolData%Mass(iDoF)
-               END IF
-            END DO
-         END IF
+         DO iDoF = 1, EvolData%NDoF
+            IF ( EvolData%ThermoSwitch(iDoF) ) THEN
+               NewAcc(iDoF) = ( NewAcc(iDoF) + GaussianRandomNr(RandomNr)*EvolData%ThermalNoise(iDoF) ) &
+                                                        / EvolData%Mass(iDoF) - EvolData%Gamma*NewVel(iDoF)
+            ELSE IF ( .NOT. EvolData%ThermoSwitch(iDoF) ) THEN
+               NewAcc(iDoF) = NewAcc(iDoF)  / EvolData%Mass(iDoF)
+            END IF
+         END DO
 
       END IF
 
@@ -535,12 +513,13 @@ MODULE ClassicalEqMotion
 !>
 !> @param EvolData     Evolution data type
 !*******************************************************************************
-   SUBROUTINE EOM_LangevinSecondOrder( EvolData, Pos, Vel, Acc, GetPotential, V )
+   SUBROUTINE EOM_LangevinSecondOrder( EvolData, Pos, Vel, Acc, GetPotential, V, RandomNr )
       IMPLICIT NONE
 
       TYPE( Evolution ), INTENT(INOUT)                 :: EvolData
       REAL, DIMENSION( EvolData%NDoF ), INTENT(INOUT)  :: Pos, Vel, Acc
       REAL, INTENT(OUT)                                :: V
+      TYPE(RNGInternalState), INTENT(INOUT)            :: RandomNr
 
       INTERFACE
          REAL FUNCTION GetPotential( X, Force )
@@ -556,8 +535,8 @@ MODULE ClassicalEqMotion
       ! (0) COMPUTE NECESSARY RANDOM VALUES
       DO iDoF = 1, EvolData%NDoF
          IF ( EvolData%ThermoSwitch(iDoF) ) THEN
-            Xi(iDoF)  = GaussianRandomNr(1.0)
-            Eta(iDoF) = GaussianRandomNr(1.0)
+            Xi(iDoF)  = GaussianRandomNr(RandomNr)
+            Eta(iDoF) = GaussianRandomNr(RandomNr)
             A(iDoF) = 0.5 * EvolData%dt**2 * ( Acc(iDoF) - EvolData%Gamma*Vel(iDoF) ) + &
                      EvolData%ThermalNoise2(iDoF) * EvolData%dt**(1.5) * ( 0.5 * Xi(iDoF) + Over2Sqrt3 * Eta(iDoF)  )
          ELSE IF ( .NOT. EvolData%ThermoSwitch(iDoF) ) THEN
@@ -599,11 +578,12 @@ MODULE ClassicalEqMotion
 !>
 !> @param EvolData     Evolution data type
 !*******************************************************************************
-   SUBROUTINE EOM_RPMSymplectic( EvolData, Pos, Vel, Acc, GetPotential, V, InitializeAcceleration )
+   SUBROUTINE EOM_RPMSymplectic( EvolData, Pos, Vel, Acc, GetPotential, V, RandomNr, InitializeAcceleration )
       IMPLICIT NONE
       TYPE( Evolution ), INTENT(INOUT)                                   :: EvolData
       REAL, DIMENSION( EvolData%NDoF * EvolData%NBeads ), INTENT(INOUT)  :: Pos, Vel, Acc
       REAL, INTENT(OUT)                                                  :: V
+      TYPE(RNGInternalState), INTENT(INOUT)                              :: RandomNr
       LOGICAL, OPTIONAL                                                  :: InitializeAcceleration
 
       INTERFACE
@@ -639,7 +619,7 @@ MODULE ClassicalEqMotion
 
                DO iBead = 1, EvolData%NBeads                                   ! evolve normal modes
                   BeadVAtT(iBead) = BeadVAt0(iBead) * EvolData%AlphaLang(iBead) + &
-                                    GaussianRandomNr( 1.0 ) * EvolData%BetaLang(iBead) / SQRT( EvolData%Mass(iDoF) )
+                                    GaussianRandomNr( RandomNr ) * EvolData%BetaLang(iBead) / SQRT( EvolData%Mass(iDoF) )
                END DO
 
                CALL ExecuteFFT( EvolData%RingNormalModes, BeadVAtT, INVERSE_FFT ) ! transform back to original coords
@@ -725,7 +705,7 @@ MODULE ClassicalEqMotion
 
                DO iBead = 1, EvolData%NBeads                                   ! evolve normal modes
                   BeadVAtT(iBead) = BeadVAt0(iBead) * EvolData%AlphaLang(iBead) + &
-                                    GaussianRandomNr( 1.0 ) * EvolData%BetaLang(iBead) / SQRT( EvolData%Mass(iDoF) )
+                                    GaussianRandomNr(RandomNr) * EvolData%BetaLang(iBead) / SQRT( EvolData%Mass(iDoF) )
                END DO
 
                CALL ExecuteFFT( EvolData%RingNormalModes, BeadVAtT, INVERSE_FFT ) ! transform back to original coords

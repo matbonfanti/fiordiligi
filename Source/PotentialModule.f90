@@ -154,10 +154,11 @@ MODULE PotentialModule
       ! The initial position and momenta of C and H are randomly chosen among a set of 
       ! conditions which are given as input
       ! data are initialized in ATOMIC UNITS
-      SUBROUTINE ZeroKelvinSlabConditions( Positions, Velocities, CHInitialConditions )
+      SUBROUTINE ZeroKelvinSlabConditions( Positions, Velocities, CHInitialConditions, RandomNr )
          IMPLICIT NONE
          REAL, DIMENSION(:), INTENT(OUT) :: Positions, Velocities
          REAL, DIMENSION(:,:), INTENT(IN) :: CHInitialConditions
+         TYPE(RNGInternalState), INTENT(INOUT) :: RandomNr
          INTEGER :: NDoF, iBath, NRandom, NInit
          REAL :: Value
 
@@ -179,7 +180,7 @@ MODULE PotentialModule
          Positions(5:NDoF) = MinSlab(1:NDoF-4)
 
          ! Choose a random initial set of coordinates
-         NInit = CEILING( UniformRandomNr(0.0, real(NRandom))  )
+         NInit = CEILING( UniformRandomNr(RandomNr)*real(NRandom)  )
 
          ! Accordingly set position and velocity
          Positions(1:4) = CHInitialConditions( NInit, 1:4 )
@@ -190,11 +191,12 @@ MODULE PotentialModule
 
       ! Setup initial conditions for the H atom + C slab
       ! data are initialized in ATOMIC UNITS
-      SUBROUTINE ThermalEquilibriumConditions( Positions, Velocities, Temperature, MassHydro, MassCarb )
+      SUBROUTINE ThermalEquilibriumConditions( Positions, Velocities, Temperature, MassHydro, MassCarb, RandomNr )
          IMPLICIT NONE
 
          REAL, DIMENSION(:), INTENT(OUT) :: Positions, Velocities
          REAL, INTENT(IN)  :: Temperature, MassCarb, MassHydro
+         TYPE(RNGInternalState), INTENT(INOUT) :: RandomNr
          INTEGER           :: nCarbon, NDoF
          REAL              :: SigmaCarbonVelocity, SigmaHydroVelocity
 
@@ -232,12 +234,12 @@ MODULE PotentialModule
                Velocities(1) = 0.0
                Velocities(2) = 0.0
          ELSE 
-               Velocities(1) = GaussianRandomNr( SigmaHydroVelocity ) 
-               Velocities(2) = GaussianRandomNr( SigmaHydroVelocity ) 
+               Velocities(1) = GaussianRandomNr( RandomNr ) * SigmaHydroVelocity
+               Velocities(2) = GaussianRandomNr( RandomNr ) * SigmaHydroVelocity
          END IF
-         Velocities(3) = GaussianRandomNr( SigmaHydroVelocity ) 
+         Velocities(3) = GaussianRandomNr( RandomNr ) * SigmaHydroVelocity
          DO nCarbon = 4,NDoF
-            Velocities(nCarbon) = GaussianRandomNr( SigmaCarbonVelocity ) 
+            Velocities(nCarbon) = GaussianRandomNr( RandomNr ) * SigmaCarbonVelocity 
          END DO
 !         Velocities(4) = 0.0      ! TO FIX EVEN C1 ATOM
 

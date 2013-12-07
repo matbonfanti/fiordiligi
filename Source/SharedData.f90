@@ -10,6 +10,7 @@
 MODULE SharedData
    USE ErrorTrap
    USE IndependentOscillatorsModel
+   USE RandomNumberGenerator
 
    IMPLICIT NONE
 
@@ -88,7 +89,9 @@ MODULE SharedData
 
    REAL, DIMENSION(:), ALLOCATABLE :: MassVector         !< Vector with the masses of the system
 
-
+   ! RANDOM NUMBER GENERATOR INTERAL STATE
+   TYPE( RNGInternalState ), SAVE  :: RandomNr
+   
 CONTAINS
 
    !> Subroutine to check the availability of a given runtype option

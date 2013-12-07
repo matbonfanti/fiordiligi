@@ -442,13 +442,13 @@ CONTAINS
 !> @param Q               In output, random initial coordinates of the bath
 !> @param V               In output, random initial velocities of the bath
 !*******************************************************************************  
-   SUBROUTINE BathOfRingsThermalConditions( Bath, NBeads, BeadsFrequency, Temperature, Q, V )
+   SUBROUTINE BathOfRingsThermalConditions( Bath, NBeads, BeadsFrequency, Temperature, Q, V, RandomNr )
       IMPLICIT NONE
       TYPE(BathData), INTENT(IN)                         :: Bath
       INTEGER, INTENT(IN)                                :: NBeads
       REAL, INTENT(IN)                                   :: BeadsFrequency, Temperature
       REAL, DIMENSION(Bath%BathSize,NBeads), INTENT(OUT) :: Q, V 
-
+      TYPE(RNGInternalState), INTENT(INOUT)              :: RandomNr
       REAL, DIMENSION(NBeads,NBeads)               :: RingPotentialMatrix, RingNormalModes
       REAL, DIMENSION(NBeads)                      :: RingEigenvalues
       REAL, DIMENSION(Bath%BathSize,Bath%BathSize) :: BathPotentialMatrix, BathNormalModes
@@ -501,8 +501,8 @@ CONTAINS
       ! Define random coordinates and velocities in the normal modes representation
       DO iBead = 1, NBeads
          DO iBath = 1, Bath%BathSize
-            NormalQ(iBath,iBead) = GaussianRandomNr( 1.0 ) * SigmaV / SQRT( BathEigenvalues(iBath) + RingEigenvalues(iBead) )
-            NormalV(iBath,iBead) = GaussianRandomNr( 1.0 ) * SigmaV            
+            NormalQ(iBath,iBead) = GaussianRandomNr(RandomNr) * SigmaV / SQRT( BathEigenvalues(iBath) + RingEigenvalues(iBead) )
+            NormalV(iBath,iBead) = GaussianRandomNr(RandomNr) * SigmaV            
          END DO
       END DO
 
@@ -555,12 +555,13 @@ CONTAINS
 !> @param Velocities   In output, random initial velocities of the bath
 !> @param Temperature  Temperature of the classical distribution 
 !*******************************************************************************     
-   SUBROUTINE ThermalEquilibriumBathConditions( Bath, Positions, Velocities, Temperature )
+   SUBROUTINE ThermalEquilibriumBathConditions( Bath, Positions, Velocities, Temperature, RandomNr )
       IMPLICIT NONE
 
-      TYPE(BathData), INTENT(IN)        :: Bath
-      REAL, DIMENSION(:), INTENT(OUT)   :: Positions, Velocities
-      REAL, INTENT(IN)                  :: Temperature
+      TYPE(BathData), INTENT(IN)            :: Bath
+      REAL, DIMENSION(:), INTENT(OUT)       :: Positions, Velocities
+      REAL, INTENT(IN)                      :: Temperature
+      TYPE(RNGInternalState), INTENT(INOUT) :: RandomNr
 
       REAL :: SigmaQ, SigmaV
       INTEGER :: iBath
@@ -578,8 +579,8 @@ CONTAINS
       SigmaQ = sqrt( Temperature / Bath%OscillatorsMass )
       DO iBath = 1, Bath%BathSize
          SigmaV = SigmaQ / Bath%Frequencies(iBath)
-         Positions(iBath) = GaussianRandomNr( SigmaQ )
-         Velocities(iBath) = GaussianRandomNr( SigmaV )
+         Positions(iBath) = GaussianRandomNr(RandomNr) * SigmaQ
+         Velocities(iBath) = GaussianRandomNr(RandomNr) * SigmaV
       END DO
    
    END SUBROUTINE ThermalEquilibriumBathConditions
@@ -601,12 +602,13 @@ CONTAINS
 !> @param Positions    In output, random initial coordinates of the bath
 !> @param Velocities   In output, random initial velocities of the bath
 !*******************************************************************************     
-   SUBROUTINE ZeroKelvinBathConditions( Bath, Positions, Velocities, ZeroPointEnergy )
+   SUBROUTINE ZeroKelvinBathConditions( Bath, Positions, Velocities, ZeroPointEnergy, RandomNr )
       IMPLICIT NONE
 
-      TYPE(BathData), INTENT(IN)        :: Bath
-      REAL, DIMENSION(:), INTENT(OUT)   :: Positions, Velocities
-      LOGICAL, INTENT(IN)               :: ZeroPointEnergy
+      TYPE(BathData), INTENT(IN)            :: Bath
+      REAL, DIMENSION(:), INTENT(OUT)       :: Positions, Velocities
+      LOGICAL, INTENT(IN)                   :: ZeroPointEnergy
+      TYPE(RNGInternalState), INTENT(INOUT) :: RandomNr
       INTEGER :: iCoord
       REAL :: Value
 
@@ -631,7 +633,7 @@ CONTAINS
             Velocities(:) = 0.0
          ELSE IF ( Bath%BathType == STANDARD_BATH ) THEN
             DO iCoord = 1, Bath%BathSize
-               Value = UniformRandomNr( 2.0*MyConsts_PI )
+               Value = UniformRandomNr( RandomNr )*2.0*MyConsts_PI
                Positions(iCoord) = COS(Value)/SQRT(Bath%OscillatorsMass*Bath%Frequencies(iCoord))
                Velocities(iCoord) = SIN(Value)*SQRT(Bath%Frequencies(iCoord)/Bath%OscillatorsMass)
             END DO

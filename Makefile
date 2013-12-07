@@ -13,7 +13,7 @@ LOGFILE = yes
 LOGNAME = jk6_v3.log
 
 # Compiler ( gfortran, ifort )
-FC = ifort      
+FC = gfortran   
 
 # Debugging options ( yes or no )
 DEBUG = no 
@@ -252,7 +252,7 @@ all : ${OBJS}
 # Make a target object file by preprocessing and compiling the fortran code
 ${OBJDIR}/%.o : ${SRCDIR}/%.f90
 	${PREPROCESS} ${SRCDIR}/$*.f90 ${PPDIR}/$*.f90
-	${COMPILE} ${PPDIR}/$*.f90
+	${COMPILE} ${PPDIR}/$*.f90 ${LIBFLG}
 	cp -p $*.o $(shell echo $* | tr A-Z a-z).mod ${OBJDIR}
 	rm $*.o $(shell echo $* | tr A-Z a-z).mod
 
@@ -303,6 +303,10 @@ ${OBJDIR}/PolymerEquilibriumOscillator.o : ${SRCDIR}/PolymerEquilibriumOscillato
 ${OBJDIR}/PolymerVibrationalRelax.o : ${SRCDIR}/PolymerVibrationalRelax.f90 ${OBJDIR}/SharedData.o ${OBJDIR}/InputField.o \
                               ${OBJDIR}/ClassicalEqMotion.o ${OBJDIR}/RandomNumberGenerator.o \
                               ${OBJDIR}/PotentialModule.o ${OBJDIR}/IndependentOscillatorsModel.o ${COMMONDEP}
+
+# Program to compute the properties of the PES
+${OBJDIR}/PotentialAnalysis.o : ${SRCDIR}/PotentialAnalysis.f90 ${OBJDIR}/MyLinearAlgebra.o ${OBJDIR}/SharedData.o \
+                                ${OBJDIR}/InputField.o ${OBJDIR}/PotentialModule.o ${COMMONDEP}
 
 # Set error and warning procedures
 ${OBJDIR}/ErrorTrap.o        : ${SRCDIR}/ErrorTrap.f90
