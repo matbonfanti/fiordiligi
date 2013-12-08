@@ -88,9 +88,6 @@ MODULE SharedData
    ! VECTOR WITH THE MASSES
 
    REAL, DIMENSION(:), ALLOCATABLE :: MassVector         !< Vector with the masses of the system
-
-   ! RANDOM NUMBER GENERATOR INTERAL STATE
-   TYPE( RNGInternalState ), SAVE  :: RandomNr
    
 CONTAINS
 

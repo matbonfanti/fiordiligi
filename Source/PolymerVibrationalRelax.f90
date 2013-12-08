@@ -22,6 +22,7 @@
 !>  \todo          implement vibrational relaxation of the morse oscillator
 !>                 
 !***************************************************************************************
+
 MODULE PolymerVibrationalRelax
    USE MyConsts
    USE ErrorTrap
@@ -82,6 +83,8 @@ MODULE PolymerVibrationalRelax
    REAL, DIMENSION(:), ALLOCATABLE      :: AverageESys        !< Average energy of the system vs time
    REAL, DIMENSION(:,:), ALLOCATABLE    :: AverageCoord       !< Average i-th coordinate vs time
 
+   TYPE(RNGInternalState) :: RandomNr
+   
    CONTAINS
 
 !*******************************************************************************
@@ -258,7 +261,7 @@ MODULE PolymerVibrationalRelax
       END IF
 
       ! Initialize random number seed
-      CALL SetSeed( 1 )
+      CALL SetSeed( RandomNr, -1 )
 
    END SUBROUTINE PolymerVibrationalRelax_Initialize
 
@@ -336,14 +339,14 @@ MODULE PolymerVibrationalRelax
          !*************************************************************
 
          ! Initial conditions of the system
-         NInit = CEILING( UniformRandomNr(0.0, real(NrOfInitSnapshots) ) )
+         NInit = CEILING( UniformRandomNr(RandomNr)*real(NrOfInitSnapshots) )
          DO iBead = 1, NBeads
             X((iBead-1)*NDim+1:(iBead-1)*NDim+NSystem) = SystemInitConditions( NInit, 1:NSystem )
             V((iBead-1)*NDim+1:(iBead-1)*NDim+NSystem) = SystemInitConditions( NInit, NSystem+1:NSystem*2 )
          END DO
 
          ! Initial conditions of the bath
-         CALL BathOfRingsThermalConditions( Bath, NBeads, BeadsFrequency, Temperature*NBeads, InitQBath, InitVBath )
+         CALL BathOfRingsThermalConditions( Bath, NBeads, BeadsFrequency, Temperature*NBeads, InitQBath, InitVBath, RandomNr )
          DO iBead = 1, NBeads
             X( (iBead-1)*NDim+NSystem+1 : iBead*NDim ) = InitQBath(:,iBead)
             V( (iBead-1)*NDim+NSystem+1 : iBead*NDim ) = InitVBath(:,iBead)
@@ -438,7 +441,7 @@ MODULE PolymerVibrationalRelax
          DO iStep = 1,NrOfSteps
 
             ! Propagate for one timestep
-            CALL EOM_VelocityVerlet( MolecularDynamics, X, V, A, VibrRelaxPotential, PotEnergy )
+            CALL EOM_LangevinSecondOrder( MolecularDynamics, X, V, A, VibrRelaxPotential, PotEnergy, RandomNr )
 
             ! output to write every nprint steps 
             IF ( mod(iStep,PrintStepInterval) == 0 ) THEN
@@ -631,9 +634,10 @@ MODULE PolymerVibrationalRelax
          DO iStep = 1, NTimeStepEachSnap
             ! Propagate for one timestep with Velocity-Verlet
             IF ( MorsePotential ) THEN
-               CALL EOM_VelocityVerlet( InitialConditions, Pos(1:1), Vel(1:1), Accel(1:1), MorseV, PotEnergy )
+               CALL EOM_LangevinSecondOrder( InitialConditions, Pos(1:1), Vel(1:1), Accel(1:1), MorseV, PotEnergy, RandomNr )
             ELSE
-               CALL EOM_VelocityVerlet( InitialConditions, Pos(1:4), Vel(1:4), Accel(1:4), VHFourDimensional, PotEnergy )
+               CALL EOM_LangevinSecondOrder( InitialConditions, Pos(1:4), Vel(1:4), Accel(1:4), VHFourDimensional, PotEnergy,&
+                                                                                                                  RandomNr )
             END IF
          END DO
 
