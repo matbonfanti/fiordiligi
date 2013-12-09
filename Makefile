@@ -13,7 +13,7 @@ LOGFILE = yes
 LOGNAME = jk6_v3.log
 
 # Compiler ( gfortran, ifort )
-FC = gfortran   
+FC = ifort 
 
 # Debugging options ( yes or no )
 DEBUG = no 
@@ -26,6 +26,9 @@ LAPACK = no
 
 # linking FFTW 3.3
 FFTW3 = yes
+
+# OpenMP libraries
+OPENMP = no 
 
 # Intel compiler version 
 # required only if FC=ifort and LAPACK=yes
@@ -71,7 +74,11 @@ ifeq (${FC},gfortran)
    LAPACKFLG =  -L/usr/lib/atlas/ -llapack -lf77blas -lcblas -latlas
 
    # FFTW3 flags
-   FFTW3FLG = -I/usr/local/include/ -lfftw3
+   FFTW3FLG = -lfftw3
+   FFTW3INCLUDE = -I/usr/local/include/
+
+   # OPENMP flags
+   OPENMPFLG = -openmp
 
    # Data type
    DATAFLG =
@@ -104,7 +111,11 @@ ifeq (${FC},ifort)
    endif
 
    # FFTW3 flags
-   FFTW3FLG = -I/usr/local/include/ -lfftw3
+   FFTW3FLG = -lfftw3
+   FFTW3INCLUDE = -I/usr/local/include/
+
+   # OPENMP flags
+   OPENMPFLG = -openmp
 
    # Data type
    DATAFLG =
@@ -139,6 +150,11 @@ ifeq (${FFTW3}, yes)
    PPDEFINE += -DWITH_FFTW3
 endif
 
+# Preprocess with OPENMP
+ifeq (${OPENMP}, yes)
+   PPDEFINE += -DWITH_OPENMP
+endif
+
 
 #----------------------------------------------------------------------------
 #              Setup linking and compilation flags
@@ -148,6 +164,7 @@ endif
 COMPILEFLG = 
 LINKFLG    = 
 LIBFLG     = 
+INCLUDEFLG =
 
 # if debugging set the appropriate flags
 ifeq (${DEBUG}, yes)
@@ -155,7 +172,7 @@ ifeq (${DEBUG}, yes)
 endif
 
 # Set flags for defining standard variable kinds
-COMPILEFLG +=  ${DATAFLG} 
+COMPILEFLG += ${DATAFLG} 
 
 # If lapack, add the linking options
 ifeq (${LAPACK}, yes)
@@ -165,6 +182,12 @@ endif
 # If FFTW3, add the linking options
 ifeq (${FFTW3}, yes)
    LIBFLG += ${FFTW3FLG}
+   INCLUDEFLG += ${FFTW3INCLUDE}
+endif
+
+# If OPENMP, add the linking options
+ifeq (${OPENMP}, yes)
+   LIBFLG += ${OPENMPFLG} 
 endif
 
 
@@ -190,7 +213,6 @@ ifeq (${OPTLEVEL},3)
 endif
 
 COMPILEFLG += ${OPTFLAGS}
-#LINKFLG    += ${OPTFLAGS}
 
 
 #----------------------------------------------------------------------------
@@ -235,14 +257,14 @@ AR 			= ar cr
 # Link objects to the produce the executable file ( JK_v3 )
 ${EXENAME} : ${SRCDIR}/Main_v3.f90 ${OBJS} 
 	${PREPROCESS} ${SRCDIR}/Main_v3.f90 ${PPDIR}/Main_v3.f90
-	${COMPILE} ${PPDIR}/Main_v3.f90
+	${COMPILE} ${PPDIR}/Main_v3.f90 ${INCLUDEFLG}
 	${LINK} ${EXEDIR}/$@ Main_v3.o $(OBJS) ${LIBFLG}
 	rm Main_v3.o
 
 # Link objects to the produce the executable file ( JK_v2 )
 JK6_v2 : ${SRCDIR}/Main.f90 ${OBJS} 
 	${PREPROCESS} ${SRCDIR}/Main.f90 ${PPDIR}/Main.f90
-	${COMPILE} ${PPDIR}/Main.f90
+	${COMPILE} ${PPDIR}/Main.f90 ${INCLUDEFLG}
 	${LINK} ${EXEDIR}/$@ Main.o $(OBJS) ${LIBFLG}
 	rm Main.o
 
@@ -252,7 +274,7 @@ all : ${OBJS}
 # Make a target object file by preprocessing and compiling the fortran code
 ${OBJDIR}/%.o : ${SRCDIR}/%.f90
 	${PREPROCESS} ${SRCDIR}/$*.f90 ${PPDIR}/$*.f90
-	${COMPILE} ${PPDIR}/$*.f90 ${LIBFLG}
+	${COMPILE} ${PPDIR}/$*.f90 ${INCLUDEFLG}
 	cp -p $*.o $(shell echo $* | tr A-Z a-z).mod ${OBJDIR}
 	rm $*.o $(shell echo $* | tr A-Z a-z).mod
 
@@ -278,7 +300,7 @@ clean-doc :
 # --------------------------------------------------------------------------------------------
 
 # Very basic files, which everything depends on
-COMMONDEP = Makefile ${OBJDIR}/ErrorTrap.o  ${OBJDIR}/MyConsts.o ${OBJDIR}/MyLinearAlgebra.o
+COMMONDEP = Makefile ${OBJDIR}/ErrorTrap.o  ${OBJDIR}/MyConsts.o ${OBJDIR}/MyLinearAlgebra.o  ${SRCDIR}/preprocessoptions.cpp
 
 # Program to simulate the vibrational relaxation
 ${OBJDIR}/VibrationalRelax.o : ${SRCDIR}/VibrationalRelax.f90 ${OBJDIR}/SharedData.o ${OBJDIR}/InputField.o \

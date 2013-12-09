@@ -71,6 +71,8 @@ MODULE ThermalEquilibrium
    REAL, DIMENSION(:), ALLOCATABLE  ::  StDevCoord         !< Standard deviation of the coordinates of each trajectory
    COMPLEX, DIMENSION(:), ALLOCATABLE  :: PowerSpectrum    !< Complex array to compute the power spectrum of autocorr functions
 
+   TYPE(RNGInternalState) :: RandomNr
+
    CONTAINS
 
 !*******************************************************************************
@@ -153,19 +155,19 @@ MODULE ThermalEquilibrium
       ! Allocate memory and initialize vectors for trajectory, acceleration and masses
 
       IF ( BathType ==  SLAB_POTENTIAL ) THEN
-         ALLOCATE( X(3+NCarbon), V(3+NCarbon), A(3+NCarbon), APre(3+NCarbon), MassVector(3+NCarbon), LangevinSwitchOn(3+NCarbon) )
+         ALLOCATE( X(3+NCarbon), V(3+NCarbon), A(3+NCarbon), MassVector(3+NCarbon), LangevinSwitchOn(3+NCarbon) )
          MassVector = (/ (MassH, iCoord=1,3), (MassC, iCoord=1,NCarbon) /)
 
       ELSE IF ( BathType ==  NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
-         ALLOCATE( X(4+NBath), V(4+NBath), A(4+NBath), APre(4+NBath), MassVector(4+NBath), LangevinSwitchOn(4+NBath) )
+         ALLOCATE( X(4+NBath), V(4+NBath), A(4+NBath), MassVector(4+NBath), LangevinSwitchOn(4+NBath) )
          MassVector = (/ (MassH, iCoord=1,3), MassC, (MassBath, iCoord=1,NBath) /)
 
       ELSE IF ( BathType ==  DOUBLE_CHAIN ) THEN
-         ALLOCATE( X(4+2*NBath), V(4+2*NBath), A(4+2*NBath), APre(4+2*NBath), MassVector(4+2*NBath), LangevinSwitchOn(4+2*NBath) )
+         ALLOCATE( X(4+2*NBath), V(4+2*NBath), A(4+2*NBath), MassVector(4+2*NBath), LangevinSwitchOn(4+2*NBath) )
          MassVector = (/ (MassH, iCoord=1,3), MassC, (MassBath, iCoord=1,2*NBath) /)
 
       ELSE IF ( BathType == LANGEVIN_DYN ) THEN
-         ALLOCATE( X(4), V(4), A(4), APre(4), MassVector(4), LangevinSwitchOn(4) )
+         ALLOCATE( X(4), V(4), A(4), MassVector(4), LangevinSwitchOn(4) )
          MassVector = (/ (MassH, iCoord=1,3), MassC /)
       END IF
 
@@ -237,7 +239,7 @@ MODULE ThermalEquilibrium
       GlobalTemperature = 0.0
 
       ! Initialize random number seed
-      CALL SetSeed( 1 )
+      CALL SetSeed( RandomNr, -1 )
 
    END SUBROUTINE ThermalEquilibrium_Initialize
 
@@ -307,12 +309,12 @@ MODULE ThermalEquilibrium
 
          ! Set initial conditions of the bath
          IF ( BathType == SLAB_POTENTIAL ) THEN 
-               CALL ThermalEquilibriumConditions( X, V, Temperature, MassH, MassC )
+            CALL ThermalEquilibriumConditions( X, V, Temperature, MassH, MassC, RandomNr )
          ELSE IF ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
-               CALL ThermalEquilibriumBathConditions( Bath, X(5:), V(5:), Temperature )
+            CALL ThermalEquilibriumBathConditions( Bath, X(5:), V(5:), Temperature, RandomNr )
          ELSE IF ( BathType == DOUBLE_CHAIN ) THEN
-               CALL ThermalEquilibriumBathConditions( DblBath(1), X(5:NBath+4), V(5:NBath+4), Temperature )
-               CALL ThermalEquilibriumBathConditions( DblBath(2), X(NBath+5:2*NBath+4), V(NBath+5:2*NBath+4), Temperature )
+            CALL ThermalEquilibriumBathConditions( DblBath(1), X(5:NBath+4), V(5:NBath+4), Temperature, RandomNr )
+            CALL ThermalEquilibriumBathConditions( DblBath(2), X(NBath+5:2*NBath+4), V(NBath+5:2*NBath+4), Temperature, RandomNr )
          ELSE IF ( BathType == LANGEVIN_DYN ) THEN
                ! nothing to do
          END IF
@@ -339,16 +341,8 @@ MODULE ThermalEquilibrium
          ! Do an equilibration run
          EquilibrationCycle: DO iStep = 1, NrEquilibSteps
 
-            ! PROPAGATION for ONE TIME STEP - if first step, previous acceleration are not available, use VV
-            IF ( iStep == 1 ) THEN
-               ! Store initial accelerations
-               APre(:) = A(:)
-               ! Propagate for one timestep with Velocity-Verlet and langevin thermostat
-               CALL EOM_VelocityVerlet( Equilibration, X, V, A, ThermalEquilibriumPotential, PotEnergy )
-            ELSE
-               ! Propagate for one timestep with Beeman's method and langevin thermostat
-               CALL EOM_Beeman( Equilibration, X, V, A, APre, ThermalEquilibriumPotential, PotEnergy )
-            END IF
+            ! PROPAGATION for ONE TIME STEP
+            CALL EOM_LangevinSecondOrder( Equilibration, X, V, A, ThermalEquilibriumPotential, PotEnergy, RandomNr )
 
             ! compute kinetic energy and total energy
             KinEnergy = EOM_KineticEnergy(Equilibration, V )
@@ -459,7 +453,7 @@ MODULE ThermalEquilibrium
          Propagation: DO iStep = 1, NrOfSteps
 
             ! Propagate for one timestep
-            CALL EOM_VelocityVerlet( MolecularDynamics, X, V, A, ThermalEquilibriumPotential, PotEnergy )
+            CALL EOM_LangevinSecondOrder( Equilibration, X, V, A, ThermalEquilibriumPotential, PotEnergy, RandomNr )
 
             ! Compute kin energy and temperature
             KinEnergy = EOM_KineticEnergy( MolecularDynamics, V )
@@ -641,7 +635,7 @@ MODULE ThermalEquilibrium
       ! Deallocate memory 
       DEALLOCATE( AverageCoord, StDevCoord )
       IF ( PrintType >= FULL )  DEALLOCATE( XatT0, ZHAutoCorr, CHAutoCorr, AverCoordOverTrajs, FullAutoCorr, PowerSpectrum )
-      DEALLOCATE( X, V, A, APre, MassVector )
+      DEALLOCATE( X, V, A, MassVector )
 
       ! Unset propagators 
       CALL DisposeEvolutionData( MolecularDynamics )

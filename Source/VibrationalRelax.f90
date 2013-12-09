@@ -67,6 +67,8 @@ MODULE VibrationalRelax
    REAL, DIMENSION(:), ALLOCATABLE      :: XatT0              !< Initial position of the dynamics
    REAL, DIMENSION(:,:), ALLOCATABLE    :: OscillCorrelations !< 1-n oscillator correlations in the chain
 
+   TYPE(RNGInternalState) :: RandomNr
+
    CONTAINS
 
 !*******************************************************************************
@@ -143,19 +145,19 @@ MODULE VibrationalRelax
       ! Allocate memory and initialize vectors for trajectory, acceleration and masses
 
       IF ( BathType ==  SLAB_POTENTIAL ) THEN
-         ALLOCATE( X(3+NCarbon), V(3+NCarbon), A(3+NCarbon), APre(3+NCarbon), MassVector(3+NCarbon), LangevinSwitchOn(3+NCarbon) )
+         ALLOCATE( X(3+NCarbon), V(3+NCarbon), A(3+NCarbon), MassVector(3+NCarbon), LangevinSwitchOn(3+NCarbon) )
          MassVector = (/ (MassH, iCoord=1,3), (MassC, iCoord=1,NCarbon) /)
 
       ELSE IF ( BathType ==  NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
-         ALLOCATE( X(4+NBath), V(4+NBath), A(4+NBath), APre(4+NBath), MassVector(4+NBath), LangevinSwitchOn(4+NBath) )
+         ALLOCATE( X(4+NBath), V(4+NBath), A(4+NBath), MassVector(4+NBath), LangevinSwitchOn(4+NBath) )
          MassVector = (/ (MassH, iCoord=1,3), MassC, (MassBath, iCoord=1,NBath) /)
 
       ELSE IF ( BathType ==  DOUBLE_CHAIN ) THEN
-         ALLOCATE( X(4+2*NBath), V(4+2*NBath), A(4+2*NBath), APre(4+2*NBath), MassVector(4+2*NBath), LangevinSwitchOn(4+2*NBath) )
+         ALLOCATE( X(4+2*NBath), V(4+2*NBath), A(4+2*NBath), MassVector(4+2*NBath), LangevinSwitchOn(4+2*NBath) )
          MassVector = (/ (MassH, iCoord=1,3), MassC, (MassBath, iCoord=1,2*NBath) /)
 
       ELSE IF ( BathType == LANGEVIN_DYN ) THEN
-         ALLOCATE( X(4), V(4), A(4), APre(4), MassVector(4), LangevinSwitchOn(4) )
+         ALLOCATE( X(4), V(4), A(4), MassVector(4), LangevinSwitchOn(4) )
          MassVector = (/ (MassH, iCoord=1,3), MassC /)
       END IF
 
@@ -224,7 +226,7 @@ MODULE VibrationalRelax
       END IF
 
       ! Initialize random number seed
-      CALL SetSeed( 1 )
+      CALL SetSeed( RandomNr, -1 )
 
    END SUBROUTINE VibrationalRelax_Initialize
 
@@ -308,7 +310,7 @@ MODULE VibrationalRelax
          ! Propagate the 4D traj in the microcanonical ensamble
          DO iStep = 1, NTimeStepEachSnap
             ! Propagate for one timestep with Velocity-Verlet
-            CALL EOM_VelocityVerlet( InitialConditions, X(1:4), V(1:4), A(1:4), VHFourDimensional, PotEnergy )
+            CALL EOM_LangevinSecondOrder( InitialConditions, X(1:4), V(1:4), A(1:4), VHFourDimensional, PotEnergy, RandomNr )
             ! compute kinetic energy and total energy
             KinEnergy = EOM_KineticEnergy(InitialConditions, V(1:4) )
             TotEnergy = PotEnergy + KinEnergy
@@ -337,22 +339,22 @@ MODULE VibrationalRelax
 
          ! Set initial conditions
          IF ( BathType == SLAB_POTENTIAL ) THEN 
-               CALL ZeroKelvinSlabConditions( X, V, CHInitConditions ) 
+               CALL ZeroKelvinSlabConditions( X, V, CHInitConditions, RandomNr ) 
                ! for atomistic model of the bath, move the slab so that C2-C3-C4 plane has z=0
                X(3:NDim) = X(3:NDim)  - (X(5)+X(6)+X(7))/3.0
          ELSE IF ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
-               NInit = CEILING( UniformRandomNr(0.0, real(NrOfInitSnapshots) ) )
+               NInit = CEILING( UniformRandomNr(RandomNr)*real(NrOfInitSnapshots) )
                X(1:4) = CHInitConditions( NInit, 1:4 )
                V(1:4) = CHInitConditions( NInit, 5:8 )
-               CALL ZeroKelvinBathConditions( Bath, X(5:), V(5:), ZPECorrection )
+               CALL ZeroKelvinBathConditions( Bath, X(5:), V(5:), ZPECorrection, RandomNr )
          ELSE IF ( BathType == DOUBLE_CHAIN ) THEN
-               NInit = CEILING( UniformRandomNr(0.0, real(NrOfInitSnapshots) ) )
+               NInit = CEILING( UniformRandomNr(RandomNr)*real(NrOfInitSnapshots) )
                X(1:4) = CHInitConditions( NInit, 1:4 )
                V(1:4) = CHInitConditions( NInit, 5:8 )
-               CALL ZeroKelvinBathConditions( DblBath(1), X(5:NBath+4), V(5:NBath+4), ZPECorrection )
-               CALL ZeroKelvinBathConditions( DblBath(2), X(NBath+5:2*NBath+4), V(NBath+5:2*NBath+4), ZPECorrection )
+               CALL ZeroKelvinBathConditions( DblBath(1), X(5:NBath+4), V(5:NBath+4), ZPECorrection, RandomNr )
+               CALL ZeroKelvinBathConditions( DblBath(2), X(NBath+5:2*NBath+4), V(NBath+5:2*NBath+4), ZPECorrection, RandomNr )
          ELSE IF ( BathType == LANGEVIN_DYN ) THEN
-               NInit = CEILING( UniformRandomNr(0.0, real(NrOfInitSnapshots) ) )
+               NInit = CEILING( UniformRandomNr(RandomNr)*real(NrOfInitSnapshots) )
                X(1:4) = CHInitConditions( NInit, 1:4 )
                V(1:4) = CHInitConditions( NInit, 5:8 )
          END IF
@@ -434,7 +436,7 @@ MODULE VibrationalRelax
          DO iStep = 1,NrOfSteps
 
             ! Propagate for one timestep
-            CALL EOM_VelocityVerlet( MolecularDynamics, X, V, A, VibrRelaxPotential, PotEnergy )
+            CALL EOM_LangevinSecondOrder( MolecularDynamics, X, V, A, VibrRelaxPotential, PotEnergy, RandomNr )
 
             ! output to write every nprint steps 
             IF ( mod(iStep,PrintStepInterval) == 0 ) THEN
@@ -587,7 +589,7 @@ MODULE VibrationalRelax
       IMPLICIT NONE
 
       ! Deallocate memory 
-      DEALLOCATE( X, V, A, APre, MassVector )
+      DEALLOCATE( X, V, A, MassVector )
       DEALLOCATE( AverageESys, AverageEBath, AverageECoup )
       IF ( PrintType >= FULL ) DEALLOCATE( AverageCoord, PowerSpec, XatT0 )
       IF ( PrintType >= FULL .AND. BathType == CHAIN_BATH ) DEALLOCATE( OscillCorrelations )

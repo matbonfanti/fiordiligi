@@ -13,6 +13,18 @@
 #define __CLOSE_LOG_FILE        CLOSE( UNIT=19 )
 #endif
 
+#if defined(WITH_OPENMP)
+#define __TotalNrOfThreads      OMP_GET_NUM_THREADS()
+#define __CurrentThreadNum      OMP_GET_THREAD_NUM() + 1
+#else
+#define __TotalNrOfThreads      1
+#define __CurrentThreadNum      1
+#endif
+
    /* These are modules that are used in most parts of the code */
    USE ErrorTrap
    USE MyConsts
+#if defined(WITH_OPENMP)
+   USE omp_lib
+#endif
+   

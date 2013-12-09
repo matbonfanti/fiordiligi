@@ -70,6 +70,8 @@ MODULE Harmonic1DModel
    REAL, DIMENSION(:), ALLOCATABLE  ::  StDevCoord         !< Standard deviation of the coordinates of each trajectory
    COMPLEX, DIMENSION(:), ALLOCATABLE  :: PowerSpectrum    !< Complex array to compute the power spectrum of autocorr functions
 
+   TYPE(RNGInternalState) :: RandomNr
+
    CONTAINS
 
 !*******************************************************************************
@@ -161,15 +163,15 @@ MODULE Harmonic1DModel
       CALL ERROR( BathType ==  SLAB_POTENTIAL, "Harmonic1DModel_Initialize: slab potential is not allowed for this run type " )
 
       IF ( BathType ==  NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
-         ALLOCATE( X(1+NBath), V(1+NBath), A(1+NBath), APre(1+NBath), MassVector(1+NBath), LangevinSwitchOn(1+NBath) )
+         ALLOCATE( X(1+NBath), V(1+NBath), A(1+NBath), MassVector(1+NBath), LangevinSwitchOn(1+NBath) )
          MassVector = (/ MassH, (MassBath, iCoord=1,NBath) /)
 
       ELSE IF ( BathType ==  DOUBLE_CHAIN ) THEN
-         ALLOCATE( X(1+2*NBath), V(1+2*NBath), A(1+2*NBath), APre(1+2*NBath), MassVector(1+2*NBath), LangevinSwitchOn(1+2*NBath) )
+         ALLOCATE( X(1+2*NBath), V(1+2*NBath), A(1+2*NBath), MassVector(1+2*NBath), LangevinSwitchOn(1+2*NBath) )
          MassVector = (/ MassH, (MassBath, iCoord=1,2*NBath) /)
 
       ELSE IF ( BathType == LANGEVIN_DYN ) THEN
-         ALLOCATE( X(1), V(1), A(1), APre(1), MassVector(1), LangevinSwitchOn(1) )
+         ALLOCATE( X(1), V(1), A(1), MassVector(1), LangevinSwitchOn(1) )
          MassVector = (/ MassH /)
       END IF
 
@@ -231,7 +233,7 @@ MODULE Harmonic1DModel
       GlobalTemperature = 0.0
 
       ! Initialize random number seed
-      CALL SetSeed( 1 )
+      CALL SetSeed( RandomNr, -1 )
 
    END SUBROUTINE Harmonic1DModel_Initialize
 
@@ -296,10 +298,10 @@ MODULE Harmonic1DModel
 
          ! Set initial conditions of the bath
          IF ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
-               CALL ThermalEquilibriumBathConditions( Bath, X(5:), V(5:), Temperature )
+            CALL ThermalEquilibriumBathConditions( Bath, X(5:), V(5:), Temperature, RandomNr )
          ELSE IF ( BathType == DOUBLE_CHAIN ) THEN
-               CALL ThermalEquilibriumBathConditions( DblBath(1), X(5:NBath+4), V(5:NBath+4), Temperature )
-               CALL ThermalEquilibriumBathConditions( DblBath(2), X(NBath+5:2*NBath+4), V(NBath+5:2*NBath+4), Temperature )
+            CALL ThermalEquilibriumBathConditions( DblBath(1), X(5:NBath+4), V(5:NBath+4), Temperature, RandomNr )
+            CALL ThermalEquilibriumBathConditions( DblBath(2), X(NBath+5:2*NBath+4), V(NBath+5:2*NBath+4), Temperature, RandomNr )
          ELSE IF ( BathType == LANGEVIN_DYN ) THEN
                ! nothing to do
          END IF
@@ -328,15 +330,8 @@ MODULE Harmonic1DModel
          ! Do an equilibration run
          EquilibrationCycle: DO iStep = 1, NrEquilibSteps
 
-            ! PROPAGATION for ONE TIME STEP - if first step, previous acceleration are not available, use VV
-            IF ( iStep == 1 ) THEN
-               ! Store initial accelerations
-               APre(:) = A(:)
-               ! Propagate for one timestep with Velocity-Verlet and langevin thermostat
-               CALL EOM_VelocityVerlet( Equilibration, X, V, A, VHarmonic, PotEnergy )
-            ELSE
-               CALL EOM_Beeman( Equilibration, X, V, A, APre, VHarmonic, PotEnergy )
-            END IF
+            ! PROPAGATION for ONE TIME STEP
+            CALL EOM_LangevinSecondOrder( Equilibration, X, V, A, VHarmonic, PotEnergy, RandomNr )
 
             ! compute kinetic energy and total energy
             KinEnergy = EOM_KineticEnergy(Equilibration, V )
@@ -444,7 +439,7 @@ MODULE Harmonic1DModel
          Propagation: DO iStep = 1, NrOfSteps
 
             ! Propagate for one timestep
-            CALL EOM_VelocityVerlet( MolecularDynamics, X, V, A, VHarmonic, PotEnergy )
+            CALL EOM_LangevinSecondOrder( MolecularDynamics, X, V, A, VHarmonic, PotEnergy, RandomNr )
 
             ! Compute kin energy and temperature
             KinEnergy = EOM_KineticEnergy( MolecularDynamics, V )
@@ -593,7 +588,7 @@ MODULE Harmonic1DModel
       ! Deallocate memory 
       DEALLOCATE( AverageCoord, StDevCoord )
       IF ( PrintType >= FULL )  DEALLOCATE( XatT0, QAutoCorr, AverCoordOverTrajs, PowerSpectrum )
-      DEALLOCATE( X, V, A, APre, MassVector )
+      DEALLOCATE( X, V, A, MassVector )
 
       ! Unset propagators 
       CALL DisposeEvolutionData( MolecularDynamics )

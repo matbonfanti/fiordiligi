@@ -272,9 +272,6 @@ MODULE PolymerEquilibriumOscillator
          EquilibAveTvsTime(:) = 0.0
       END IF
 
-      ! Initialize random number seed
-      CALL SetSeed( 10 )
-
    END SUBROUTINE PolymerEquilibriumOscillator_Initialize
 
 !-********************************************************************************************
@@ -285,6 +282,8 @@ MODULE PolymerEquilibriumOscillator
 !*******************************************************************************
    SUBROUTINE PolymerEquilibriumOscillator_Run()
       IMPLICIT NONE
+      !> Integers for OPENMP thread counters
+      INTEGER :: NrOfThreads, CurrentThread
       !> Output unit numbers
       INTEGER :: PosCorrelationUnit, AvCoordOutputUnit, TEquilUnit, EnergyOutputUnit, InitTUnit
       !> Debug unit numbers
@@ -345,6 +344,18 @@ MODULE PolymerEquilibriumOscillator
       TotalPotAverage  = 0.0
       TotalPotVariance = 0.0
 
+      !$OMP PARALLEL PRIVATE(CurrentThread, RandomNr, X, V, A, PotEnergy )
+
+      ! Set total nr of OPENMP threads and nr of the current thread
+      !$OMP MASTER
+      NrOfThreads = __TotalNrOfThreads
+      !$OMP END MASTER
+      CurrentThread = __CurrentThreadNum
+
+      ! Initialize random number seed
+      CALL SetSeed( RandomNrGen, -1-CurrentThread+1 )
+
+      !$OMP DO REDUCTION(+:IntCounter)
       !run NrTrajs number of trajectories
       DO iTraj = 1,NrTrajs
       
@@ -785,8 +796,8 @@ MODULE PolymerEquilibriumOscillator
       ! Define random coordinates and velocities in the normal modes representation
       DO iBead = 1, NBeads
          DO iSys = 1, NDim
-            NormalQ(iSys,iBead) = GaussianRandomNr( 1.0 ) * SigmaV / SQRT( SysEigenvalues(iSys) + RingEigenvalues(iBead) )
-            NormalV(iSys,iBead) = GaussianRandomNr( 1.0 ) * SigmaV            
+            NormalQ(iSys,iBead) = GaussianRandomNr( RandomNr ) * SigmaV / SQRT( SysEigenvalues(iSys) + RingEigenvalues(iBead) )
+            NormalV(iSys,iBead) = GaussianRandomNr( RandomNr ) * SigmaV            
          END DO
       END DO
 

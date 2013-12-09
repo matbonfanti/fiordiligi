@@ -32,9 +32,7 @@
 !
 !***************************************************************************************
 MODULE RandomNumberGenerator
-   USE MyConsts
-   USE ErrorTrap
-   USE omp_lib
+#include "preprocessoptions.cpp"
 
    IMPLICIT NONE
 
@@ -42,7 +40,7 @@ MODULE RandomNumberGenerator
    PUBLIC :: RNGInternalState
    PUBLIC :: SetSeed, UniformRandomNr, GaussianRandomNr
    PUBLIC :: TestGaussianDistribution, TestGaussianDistribution2, TestCorrelations
-   
+
    ! Integer type for the random number generation
    INTEGER, PARAMETER, PUBLIC :: K4B=selected_int_kind(9)
 
@@ -56,7 +54,7 @@ MODULE RandomNumberGenerator
       REAL         :: TempGaussian
       LOGICAL      :: GaussianAvail = .FALSE.
    END TYPE
-   
+
  CONTAINS   
 
 !****************************************************************************
@@ -239,13 +237,13 @@ MODULE RandomNumberGenerator
 
       WRITE(122,*) "# Interval of x, Nr of random numbers "
 
-      !$OMP PARALLEL PRIVATE(CurrentThread, Random, RandomNrGen, RanIndex  )
+      !$OMP PARALLEL PRIVATE(CurrentThread, Random, RandomNrGen, RanIndex )
       !$OMP MASTER
-      NrOfThreads = OMP_GET_NUM_THREADS()
+      NrOfThreads = __TotalNrOfThreads
       IntCounter(:) = 0.0
       !$OMP END MASTER
    
-      CurrentThread = OMP_GET_THREAD_NUM() + 1
+      CurrentThread = __CurrentThreadNum
       CALL SetSeed( RandomNrGen, -1-CurrentThread+1 )
    
       !$OMP DO REDUCTION(+:IntCounter)
