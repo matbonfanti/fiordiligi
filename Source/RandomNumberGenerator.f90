@@ -122,13 +122,13 @@ MODULE RandomNumberGenerator
    REAL FUNCTION GaussianRandomNr( IntState ) RESULT( RandNr )
       IMPLICIT NONE
       TYPE( RNGInternalState ), INTENT(INOUT) :: IntState 
-      REAL :: Theta, R
+      REAL :: Theta, R, Random
 
       IF ( .NOT. IntState%GaussianAvail ) THEN
 
             ! Generate random number for 2D gaussian function
             Theta = 2. * MyConsts_PI * UniformRandomNr(IntState)
-            R     = SQRT( -2. * LOG( 1- UniformRandomNr(IntState) ) )
+            R     = SQRT( -2. * LOG( UniformRandomNr(IntState) ) )
 
             ! TRansform in cartesian coordinate, Return one number and store the other
             RandNr = R * sin( Theta )

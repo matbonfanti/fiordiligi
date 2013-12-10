@@ -67,7 +67,7 @@ MODULE VibrationalRelax
    REAL, DIMENSION(:), ALLOCATABLE      :: XatT0              !< Initial position of the dynamics
    REAL, DIMENSION(:,:), ALLOCATABLE    :: OscillCorrelations !< 1-n oscillator correlations in the chain
 
-   TYPE(RNGInternalState) :: RandomNr
+   TYPE(RNGInternalState), SAVE :: RandomNr
 
    CONTAINS
 

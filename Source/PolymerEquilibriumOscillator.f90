@@ -80,7 +80,7 @@ MODULE PolymerEquilibriumOscillator
    REAL, DIMENSION(:,:), ALLOCATABLE    :: AverageCoord           !< Average i-th coordinate vs time
    REAL, DIMENSION(:), ALLOCATABLE      :: EquilibAveTvsTime      !< Average temperature at time T during equilibration
 
-   TYPE(RNGInternalState) :: RandomNr
+   TYPE(RNGInternalState), SAVE :: RandomNr
    
    CONTAINS
 
@@ -238,18 +238,6 @@ MODULE PolymerEquilibriumOscillator
       ALLOCATE( X(NDim*NBeads), V(NDim*NBeads), A(NDim*NBeads), MassVector(NDim) )
       MassVector( : ) = MassSystem
 
-      ! Set variables for EOM integration in the microcanonical ensamble
-      CALL EvolutionSetup( MolecularDynamics, NDim, MassVector, TimeStep )
-      ! Set ring polymer molecular dynamics parameter
-      CALL SetupRingPolymer( MolecularDynamics, NBeads, BeadsFrequency ) 
-
-      ! Set variables for EOM integration for the Bath in the canonical ensamble
-      CALL EvolutionSetup( Equilibration, NDim, MassVector, EquilTStep )
-      ! Set ring polymer molecular dynamics parameter
-      CALL SetupRingPolymer( Equilibration, NBeads, BeadsFrequency ) 
-      ! Set thermostatting with PILE
-      CALL SetupThermostat( Equilibration, EquilGamma, Temperature )
-
       ! ALLOCATE AND INITIALIZE DATA WITH THE AVERAGES OVER THE SET OF TRAJECTORIES
 
       ! PRINTTYPE
@@ -325,12 +313,14 @@ MODULE PolymerEquilibriumOscillator
                                                              trim(TemperUnit(InputUnits)), ") - ", NrTrajs, " trajectories "
       ENDIF
 
+#if !defined(WITH_OPENMP)
       IF ( PrintType == DEBUG ) THEN
          TEquilUnit = LookForFreeUnit()
          OPEN( FILE="EquilibrationTemp.dat", UNIT=TEquilUnit )
          WRITE(TEquilUnit, "(A,I6,5A,/)") "# ", NrTrajs, " Temperature for each equilibration (", &
                                                             trim(TimeUnit(InputUnits)), ",", trim(TemperUnit(InputUnits)), ")"
       END IF
+#endif
 
       PRINT "(2/,A)",    "***************************************************"
       PRINT "(A,F10.5)", "               VIBRATIONAL RELAXATION"
@@ -344,7 +334,9 @@ MODULE PolymerEquilibriumOscillator
       TotalPotAverage  = 0.0
       TotalPotVariance = 0.0
 
-      !$OMP PARALLEL PRIVATE(CurrentThread, RandomNr, X, V, A, PotEnergy )
+      !$OMP PARALLEL PRIVATE( CurrentThread, RandomNr, kStep, iStep, OutFileName, DebugUnitEn, DebugUnitCoord, DebugUnitVel, &
+      !$OMP&                  MolecularDynamics, Equilibration, X, V, A, PotEnergy, KinEnergy, IstTemperature, X0, & 
+      !$OMP&                  TempAverage, TempVariance, TrajKinAverage, TrajKinVariance, TrajPotAverage, TrajPotVariance )
 
       ! Set total nr of OPENMP threads and nr of the current thread
       !$OMP MASTER
@@ -352,14 +344,31 @@ MODULE PolymerEquilibriumOscillator
       !$OMP END MASTER
       CurrentThread = __CurrentThreadNum
 
-      ! Initialize random number seed
-      CALL SetSeed( RandomNrGen, -1-CurrentThread+1 )
+      !$OMP CRITICAL
+      ! Set variables for EOM integration in the microcanonical ensamble
+      CALL EvolutionSetup( MolecularDynamics, NDim, MassVector, TimeStep )
+      ! Set ring polymer molecular dynamics parameter
+      CALL SetupRingPolymer( MolecularDynamics, NBeads, BeadsFrequency ) 
 
-      !$OMP DO REDUCTION(+:IntCounter)
+      ! Set variables for EOM integration for the Bath in the canonical ensamble
+      CALL EvolutionSetup( Equilibration, NDim, MassVector, EquilTStep )
+      ! Set ring polymer molecular dynamics parameter
+      CALL SetupRingPolymer( Equilibration, NBeads, BeadsFrequency ) 
+      ! Set thermostatting with PILE
+      CALL SetupThermostat( Equilibration, EquilGamma, Temperature )
+
+      ! Initialize random number seed
+      CALL SetSeed( RandomNr, -1-CurrentThread+1 )
+      !$OMP END CRITICAL
+
       !run NrTrajs number of trajectories
+      !$OMP DO REDUCTION( + : EquilibAveTvsTime, AverageE, PositionCorrelation, AverageCoord, &
+      !$OMP&                  TotalKinAverage, TotalKinVariance, TotalPotAverage, TotalPotVariance )
       DO iTraj = 1,NrTrajs
-      
-         PRINT "(/,A,I6,A)"," **** Trajectory Nr. ", iTraj," ****" 
+
+         IF ( CurrentThread == 1 ) THEN
+            PRINT "(/,A,I6,A)"," **** Trajectory Nr. ", iTraj," ****" 
+         END IF
 
          !*************************************************************
          ! INITIALIZATION OF THE COORDINATES AND MOMENTA OF THE SYSTEM
@@ -368,8 +377,10 @@ MODULE PolymerEquilibriumOscillator
          ! set reasonable initial conditions for the equilibration via a normal mode calculations of the ring polymer
          CALL InitialConditionsForNormalModes( X, V ) 
 
-         PRINT "(/,A,F12.1)"," Equilibrating the initial conditions at Tp = ", &
-                             NBeads*Temperature*TemperatureConversion(InternalUnits,InputUnits)
+         IF ( CurrentThread == 1 ) THEN
+            PRINT "(/,A,F12.1)"," Equilibrating the initial conditions at Tp = ", &
+                              NBeads*Temperature*TemperatureConversion(InternalUnits,InputUnits)
+         END IF
 
          ! Compute starting potential and forces
          CALL EOM_RPMSymplectic( Equilibration, X, V, A,  SystemPotential, PotEnergy, RandomNr, .TRUE. )
@@ -405,6 +416,7 @@ MODULE PolymerEquilibriumOscillator
                   EquilibAveTvsTime(kStep) = EquilibAveTvsTime(kStep) + TempAverage/iStep
                END IF
                
+#if !defined(WITH_OPENMP)
                IF ( PrintType == DEBUG ) THEN              ! write debug output
                   ! Temperature profile during equilibration
                   IF ( iStep == 1 )  WRITE(TEquilUnit,*) " " 
@@ -413,6 +425,7 @@ MODULE PolymerEquilibriumOscillator
                         sqrt((TempVariance/iStep)-(TempAverage/iStep)**2)*TemperatureConversion(InternalUnits,InputUnits)
                END IF
                851 FORMAT( F20.5, 2F20.6 )
+#endif
             END IF
 
          END DO
@@ -424,8 +437,6 @@ MODULE PolymerEquilibriumOscillator
          ! compute initial kinetic energy for this traj
          KinEnergy = EOM_KineticEnergy(Equilibration, V )
          CALL EOM_RPMSymplectic( Equilibration, X, V, A,  SystemPotential, PotEnergy, RandomNr, .TRUE. )
-         ! Shift potential energy with respect to the bottom of the well
-         IF ( MorsePotential )   PotEnergy = PotEnergy + MorseDe*NBeads
 
          ! Increment averages of Kin and Pot for the single traj
          TrajKinAverage  = KinEnergy/(NDim*NBeads)
@@ -434,10 +445,12 @@ MODULE PolymerEquilibriumOscillator
          TrajPotVariance = (PotEnergy/(NDim*NBeads))**2
 
          ! PRINT INITIAL CONDITIONS of THE BATH and THE SYSTEM
-         WRITE(*,600)  KinEnergy/(NDim*NBeads)*EnergyConversion(InternalUnits,InputUnits), &
-                       2.0*KinEnergy/(NDim*NBeads)*TemperatureConversion(InternalUnits,InputUnits), &
-                       PotEnergy/(NDim*NBeads)*EnergyConversion(InternalUnits,InputUnits), &
-                       2.0*PotEnergy/(NDim*NBeads)*TemperatureConversion(InternalUnits,InputUnits)
+         IF ( CurrentThread == 1 ) THEN
+            WRITE(*,600)  KinEnergy/(NDim*NBeads)*EnergyConversion(InternalUnits,InputUnits), &
+                        2.0*KinEnergy/(NDim*NBeads)*TemperatureConversion(InternalUnits,InputUnits), &
+                        PotEnergy/(NDim*NBeads)*EnergyConversion(InternalUnits,InputUnits), &
+                        2.0*PotEnergy/(NDim*NBeads)*TemperatureConversion(InternalUnits,InputUnits)
+         END IF
 
          ! Compute and store expectation values of the energy
          AverageE(:,0) = AverageE(:,0) + EnergyAverages( X, V, MassVector )
@@ -483,7 +496,9 @@ MODULE PolymerEquilibriumOscillator
          ! initialize counter for printing steps
          kStep = 0
 
-         PRINT "(/,A)", " Propagating the system in time... "
+         IF ( CurrentThread == 1 ) THEN
+            PRINT "(/,A)", " Propagating the system in time... "
+         END IF
          
          ! Compute starting potential and forces
          CALL EOM_RPMSymplectic( MolecularDynamics, X, V, A,  SystemPotential, PotEnergy, RandomNr, .TRUE. )
@@ -503,8 +518,6 @@ MODULE PolymerEquilibriumOscillator
  
                ! compute kinetic energy for this traj
                KinEnergy = EOM_KineticEnergy(MolecularDynamics, V )
-               ! Shift potential energy with respect to the bottom of the well
-               IF ( MorsePotential )   PotEnergy = PotEnergy + MorseDe*NBeads
  
                ! Increment averages of Kin and Pot for the single traj
                TrajKinAverage  = TrajKinAverage + KinEnergy/(NDim*NBeads)
@@ -545,10 +558,12 @@ MODULE PolymerEquilibriumOscillator
          TrajPotVariance = TrajPotVariance / real(NrOfPrintSteps+1) - TrajPotAverage**2
 
          ! PRINT AVERAGES FOR THE TRAJ
-         WRITE(*,700)  TrajKinAverage*EnergyConversion(InternalUnits,InputUnits), &
-                       2.0*TrajKinAverage*TemperatureConversion(InternalUnits,InputUnits), &
-                       TrajPotAverage*EnergyConversion(InternalUnits,InputUnits), &
-                       2.0*TrajPotAverage*TemperatureConversion(InternalUnits,InputUnits)
+         IF ( CurrentThread == 1 ) THEN
+            WRITE(*,700)  TrajKinAverage*EnergyConversion(InternalUnits,InputUnits), &
+                        2.0*TrajKinAverage*TemperatureConversion(InternalUnits,InputUnits), &
+                        TrajPotAverage*EnergyConversion(InternalUnits,InputUnits), &
+                        2.0*TrajPotAverage*TemperatureConversion(InternalUnits,InputUnits)
+         END IF
 
          ! Increment averages over the whole set of trajs
          TotalKinAverage  = TotalKinAverage  + TrajKinAverage
@@ -557,7 +572,9 @@ MODULE PolymerEquilibriumOscillator
          TotalPotVariance = TotalPotVariance + TrajPotVariance
 
       END DO
-      
+      !$OMP END DO
+      !$OMP END PARALLEL
+
       PRINT "(A)"," Done! "
 
       TotalKinAverage = TotalKinAverage / real(NrTrajs) 

@@ -70,7 +70,7 @@ MODULE Harmonic1DModel
    REAL, DIMENSION(:), ALLOCATABLE  ::  StDevCoord         !< Standard deviation of the coordinates of each trajectory
    COMPLEX, DIMENSION(:), ALLOCATABLE  :: PowerSpectrum    !< Complex array to compute the power spectrum of autocorr functions
 
-   TYPE(RNGInternalState) :: RandomNr
+   TYPE(RNGInternalState), SAVE :: RandomNr
 
    CONTAINS
 

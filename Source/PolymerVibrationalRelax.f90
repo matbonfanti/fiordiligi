@@ -83,7 +83,7 @@ MODULE PolymerVibrationalRelax
    REAL, DIMENSION(:), ALLOCATABLE      :: AverageESys        !< Average energy of the system vs time
    REAL, DIMENSION(:,:), ALLOCATABLE    :: AverageCoord       !< Average i-th coordinate vs time
 
-   TYPE(RNGInternalState) :: RandomNr
+   TYPE(RNGInternalState), SAVE :: RandomNr
    
    CONTAINS
 

@@ -1,5 +1,5 @@
 
-# ******************** MethaneOnSurfaceCRP MAKEFILE **************** 
+# ******************** JK6 MAKEFILE **************** 
 
 #----------------------------------------------------------------------------
 #                         USER DEFINABLE OPTIONS
@@ -19,23 +19,34 @@ FC = ifort
 DEBUG = no 
 
 # Optimization level
-OPTLEVEL = 3
-
-# linking LAPACK and BLAS 
-LAPACK = no 
+OPTLEVEL = 0
 
 # linking FFTW 3.3
-FFTW3 = yes
+FFTW3 = no 
 
 # OpenMP libraries
-OPENMP = no 
+OPENMP = yes
 
-# Intel compiler version 
-# required only if FC=ifort and LAPACK=yes
-INTELVERS = 11
+# linking LAPACK and BLAS 
+LAPACK = yes
 
 # Compile with standard real 8 (see details about the flags for each compiler...)
 REAL8 = yes
+
+#----------------------------------------------------------------------------
+#                      LAPACK AND BLAS FINE DETAILS
+#----------------------------------------------------------------------------
+
+# Intel compiler version ( used only if FC=ifort and LAPACK=yes )
+# 2013-SEQ, 2013-MULTI      -   2013 version, sequential / multithreaded 
+# 11-SEQ,   11-MULTI        -   11.x version, sequential / multithreaded 
+# 10-SEQ,   10-MULTI        -   10.x version, sequential / multithreaded 
+INTELVERS = 2013-MULTI
+
+# gfortran lapack libraries
+# GNU      - system default libraries 
+# ATLAS    - atlas libraries
+GLAPACK = GNU
 
 #----------------------------------------------------------------------------
 #                             STRIP ALL SPACES
@@ -47,9 +58,11 @@ DEBUG := $(strip ${DEBUG})
 OPTLEVEL := $(strip ${OPTLEVEL})
 LAPACK := $(strip ${LAPACK})
 INTELVERS := $(strip ${INTELVERS})
+GLAPACK := $(strip ${GLAPACK})
 LOGFILE := $(strip ${LOGFILE})
 LOGNAME := $(strip ${LOGNAME})
 FFTW3 := $(strip ${FFTW3})
+OPENMP := $(strip ${OPENMP})
 
 
 #----------------------------------------------------------------------------
@@ -67,18 +80,22 @@ ifeq (${FC},gfortran)
    # Debug flag
    DEBUGFLG = -g -fbounds-check
 
-   # GNU Lapack and Blas flags 
-   LAPACKFLG = -llapack -lblas
-
-   # ATLAS Lapack and Blas flags
-   LAPACKFLG =  -L/usr/lib/atlas/ -llapack -lf77blas -lcblas -latlas
+   # LAPACK AND BLAS flags
+   ifeq (${GLAPACK},GNU)
+      # GNU Lapack and Blas flags 
+      LAPACKFLG = -llapack -lblas
+   endif
+   ifeq (${GLAPACK},ATLAS)
+      # ATLAS Lapack and Blas flags
+      LAPACKFLG =  -L/usr/lib64/atlas/ -llapack -lf77blas -lcblas -latlas
+   endif
 
    # FFTW3 flags
    FFTW3FLG = -lfftw3
-   FFTW3INCLUDE = -I/usr/local/include/
+   FFTW3COMPILE = -I/usr/local/include/ 
 
    # OPENMP flags
-   OPENMPFLG = -openmp
+   OPENMPFLG = -fopenmp
 
    # Data type
    DATAFLG =
@@ -103,16 +120,33 @@ ifeq (${FC},ifort)
    DEBUGFLG  =  -g -traceback -fpe-all=0 -debug all -check all 
 
    # MKL flags
-   ifeq (${INTELVERS},11)
-      LAPACKFLG = -lmkl_lapack  -lmkl_intel -lmkl_sequential -lmkl_core -lguide -lpthread
+   ifeq (${INTELVERS},2013-SEQ)
+      LAPACKFLG = -lpthread -lm
+      LAPACKCOMPILE = -mkl=sequential
    endif
-   ifeq (${INTELVERS},10)
-      LAPACKFLG = -lmkl -lmkl_lapack -lguide -lpthread 
+   ifeq (${INTELVERS},2013-MULTI)
+      LAPACKFLG = -lpthread -lm
+      LAPACKCOMPILE = -openmp -mkl=parallel 
+   endif
+   ifeq (${INTELVERS},11-SEQ)
+      LAPACKFLG = -L$(MKLROOT)/lib/intel64 -lmkl_intel_lp64 -lmkl_core -lmkl_sequential -lpthread -lm
+      LAPACKCOMPILE = -I$(MKLROOT)/include
+   endif
+   ifeq (${INTELVERS},11-MULTI)
+      LAPACKFLG = -L$(MKLROOT)/lib/intel64 -lmkl_intel_lp64 -lmkl_core -lmkl_intel_thread -lpthread -lm
+      LAPACKCOMPILE = -openmp -I$(MKLROOT)/include
+   endif
+   ifeq (${INTELVERS},10-SEQ)
+      LAPACKFLG = -L$(MKLROOT)/lib/intel64 -lmkl_intel_lp64 -lmkl_core -lmkl_sequential -lpthread -lm
+      LAPACKCOMPILE = -I$(MKLROOT)/include
+   endif
+   ifeq (${INTELVERS},10-MULTI)
+      LAPACKFLG = -L$(MKLROOT)/lib/intel64 -lmkl_intel_lp64 -lmkl_core -lmkl_intel_thread -lpthread -lm
+      LAPACKCOMPILE = -openmp -I$(MKLROOT)/include
    endif
 
    # FFTW3 flags
    FFTW3FLG = -lfftw3
-   FFTW3INCLUDE = -I/usr/local/include/
 
    # OPENMP flags
    OPENMPFLG = -openmp
@@ -177,17 +211,19 @@ COMPILEFLG += ${DATAFLG}
 # If lapack, add the linking options
 ifeq (${LAPACK}, yes)
    LIBFLG += ${LAPACKFLG}
+   LINKFLG += ${LAPACKCOMPILE}
 endif
 
 # If FFTW3, add the linking options
 ifeq (${FFTW3}, yes)
    LIBFLG += ${FFTW3FLG}
-   INCLUDEFLG += ${FFTW3INCLUDE}
+   COMPILEFLG += ${FFTW3COMPILE}
 endif
 
 # If OPENMP, add the linking options
 ifeq (${OPENMP}, yes)
-   LIBFLG += ${OPENMPFLG} 
+   LIBFLG += ${OPENMPFLG}
+   COMPILEFLG += ${OPENMPFLG}
 endif
 
 
@@ -257,14 +293,14 @@ AR 			= ar cr
 # Link objects to the produce the executable file ( JK_v3 )
 ${EXENAME} : ${SRCDIR}/Main_v3.f90 ${OBJS} 
 	${PREPROCESS} ${SRCDIR}/Main_v3.f90 ${PPDIR}/Main_v3.f90
-	${COMPILE} ${PPDIR}/Main_v3.f90 ${INCLUDEFLG}
+	${COMPILE} ${PPDIR}/Main_v3.f90 
 	${LINK} ${EXEDIR}/$@ Main_v3.o $(OBJS) ${LIBFLG}
 	rm Main_v3.o
 
 # Link objects to the produce the executable file ( JK_v2 )
 JK6_v2 : ${SRCDIR}/Main.f90 ${OBJS} 
 	${PREPROCESS} ${SRCDIR}/Main.f90 ${PPDIR}/Main.f90
-	${COMPILE} ${PPDIR}/Main.f90 ${INCLUDEFLG}
+	${COMPILE} ${PPDIR}/Main.f90 
 	${LINK} ${EXEDIR}/$@ Main.o $(OBJS) ${LIBFLG}
 	rm Main.o
 
@@ -274,7 +310,7 @@ all : ${OBJS}
 # Make a target object file by preprocessing and compiling the fortran code
 ${OBJDIR}/%.o : ${SRCDIR}/%.f90
 	${PREPROCESS} ${SRCDIR}/$*.f90 ${PPDIR}/$*.f90
-	${COMPILE} ${PPDIR}/$*.f90 ${INCLUDEFLG}
+	${COMPILE} ${PPDIR}/$*.f90 
 	cp -p $*.o $(shell echo $* | tr A-Z a-z).mod ${OBJDIR}
 	rm $*.o $(shell echo $* | tr A-Z a-z).mod
 
@@ -331,13 +367,17 @@ ${OBJDIR}/PotentialAnalysis.o : ${SRCDIR}/PotentialAnalysis.f90 ${OBJDIR}/MyLine
                                 ${OBJDIR}/InputField.o ${OBJDIR}/PotentialModule.o ${COMMONDEP}
 
 # Set error and warning procedures
-${OBJDIR}/ErrorTrap.o        : ${SRCDIR}/ErrorTrap.f90
+${OBJDIR}/ErrorTrap.o        : ${SRCDIR}/ErrorTrap.f90 Makefile
 
 # Define common physical and mathematical constants
-${OBJDIR}/MyConsts.o         : ${SRCDIR}/MyConsts.f90 ${OBJDIR}/ErrorTrap.o
+${OBJDIR}/MyConsts.o         : ${SRCDIR}/MyConsts.f90 ${OBJDIR}/ErrorTrap.o Makefile
+
+# Utility subroutines and functions of NR
+${OBJDIR}/NRUtility.o        : ${SRCDIR}/NRUtility.f90 Makefile
 
 # Linear algebra module
-${OBJDIR}/MyLinearAlgebra.o : ${SRCDIR}/MyLinearAlgebra.f90 ${OBJDIR}/ErrorTrap.o ${OBJDIR}/MyConsts.o ${OBJDIR}/NRUtility.o
+${OBJDIR}/MyLinearAlgebra.o : ${SRCDIR}/MyLinearAlgebra.f90 ${OBJDIR}/ErrorTrap.o ${OBJDIR}/MyConsts.o ${OBJDIR}/NRUtility.o \
+                              Makefile
 
 # Set procedure for reading quasi-free format input file
 ${OBJDIR}/InputField.o       : ${SRCDIR}/InputField.f90 ${COMMONDEP}
