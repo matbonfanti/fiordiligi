@@ -239,11 +239,11 @@ MODULE RandomNumberGenerator
 
       !$OMP PARALLEL PRIVATE(CurrentThread, Random, RandomNrGen, RanIndex )
       !$OMP MASTER
-      NrOfThreads = __TotalNrOfThreads
+      NrOfThreads = __OMP_TotalNrOfThreads
       IntCounter(:) = 0.0
       !$OMP END MASTER
    
-      CurrentThread = __CurrentThreadNum
+      CurrentThread = __OMP_CurrentThreadNum
       CALL SetSeed( RandomNrGen, -1-CurrentThread+1 )
    
       !$OMP DO REDUCTION(+:IntCounter)

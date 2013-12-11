@@ -482,10 +482,9 @@ MODULE MyLinearAlgebra
       IMPLICIT NONE
       REAL, DIMENSION(:), INTENT(IN)   :: Vector1, Vector2
       REAL                             :: VDotV
+#if defined(WITH_LAPACK)
       REAL(kind=SINGLE_PRECISION_KIND) :: SDOT
       REAL(kind=DOUBLE_PRECISION_KIND) :: DDOT
-
-#if defined(WITH_LAPACK)
       INTEGER( SHORT_INTEGER_KIND )   :: N
 #endif
 #if !defined(WITH_LAPACK)

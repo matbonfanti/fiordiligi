@@ -64,7 +64,7 @@ MODULE FFTWrapper
       INTEGER :: NData
       COMPLEX, DIMENSION(:,:), POINTER :: DirectDFT, InverseDFT
 #endif
-      LOGICAL     :: isSetup
+      LOGICAL     :: isSetup = .FALSE.
    END TYPE FFTComplexType
 
    TYPE FFTHalfComplexType
@@ -79,7 +79,7 @@ MODULE FFTWrapper
       INTEGER :: NData
       REAL, DIMENSION(:,:), POINTER :: DirectDFT, InverseDFT
 #endif
-      LOGICAL     :: isSetup
+      LOGICAL     :: isSetup = .FALSE.
    END TYPE FFTHalfComplexType
 
    INTERFACE SetupFFT

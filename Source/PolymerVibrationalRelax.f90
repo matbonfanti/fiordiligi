@@ -19,16 +19,20 @@
 !>  \par Updates
 !>  \arg 
 !
-!>  \todo          implement vibrational relaxation of the morse oscillator
+!>  \todo          * implement energy averages
+!>                 * fix the computation of the initial condition of the bath (with FFT)
+!>                 * include constrained ring polymer relaxation for initial system coords
+!>                 * clean the code and use unit conversion
+!>                 * check OMP variables declaration
 !>                 
 !***************************************************************************************
 
 MODULE PolymerVibrationalRelax
-   USE MyConsts
-   USE ErrorTrap
+#include "preprocessoptions.cpp"
    USE MyLinearAlgebra
    USE SharedData
    USE InputField
+   USE UnitConversion
    USE ClassicalEqMotion
    USE PotentialModule
    USE IndependentOscillatorsModel
@@ -74,16 +78,17 @@ MODULE PolymerVibrationalRelax
    INTEGER :: PrintStepInterval         !< Nr of time steps between each printing of propagation info ( = NrOfSteps / NrOfPrintSteps )
 
    ! Time evolution dataset
-   TYPE(Evolution),SAVE :: MolecularDynamics     !< Propagate in micro/canonical ensamble to extract results
-   TYPE(Evolution),SAVE :: InitialConditions     !< Propagate in microcanonical ensamble to generate initial conditions
+   TYPE(Evolution), DIMENSION(:), POINTER :: MolecularDynamics     !< Propagate in micro/canonical ensamble to extract results
+   TYPE(Evolution), SAVE :: InitialConditions                      !< Propagate in microcanonical ensamble to generate initial conditions
 
    ! Averages computed during propagation
-   REAL, DIMENSION(:), ALLOCATABLE      :: AverageEBath       !< Average energy of the bath vs time
-   REAL, DIMENSION(:), ALLOCATABLE      :: AverageECoup       !< Average coupling energy vs time
-   REAL, DIMENSION(:), ALLOCATABLE      :: AverageESys        !< Average energy of the system vs time
-   REAL, DIMENSION(:,:), ALLOCATABLE    :: AverageCoord       !< Average i-th coordinate vs time
+   REAL, DIMENSION(:), ALLOCATABLE      :: PositionCorrelation       !< Position correlation function
+   REAL, DIMENSION(:,:), ALLOCATABLE    :: AverageCoord              !< Average i-th coordinate vs time
+   INTEGER, PARAMETER                   :: NrOfEnergyAverages = 4    !< Nr of average values computed by the function EnergyAverages
+   REAL, DIMENSION(:,:), ALLOCATABLE    :: AverageE                  !< Traj averages of the energy in time
 
-   TYPE(RNGInternalState), SAVE :: RandomNr
+   ! Internal state of the random number generator
+   TYPE(RNGInternalState), SAVE :: RandomNr                          !< Internal state of the random number generator
    
    CONTAINS
 
@@ -105,22 +110,26 @@ MODULE PolymerVibrationalRelax
 
       IF ( MorsePotential ) THEN                ! Morse Parameters 
          CALL SetFieldFromInput( InputData, "MorseAlpha", MorseAlpha )
+         MorseAlpha = MorseAlpha / LengthConversion(InputUnits, InternalUnits)
          CALL SetFieldFromInput( InputData, "MorseDe", MorseDe )
-         MorseDe = MorseDe / MyConsts_Hartree2eV
+         MorseDe = MorseDe * EnergyConversion(InputUnits, InternalUnits)
          HarmonicFreq = SQRT( 2.0 * MorseAlpha**2 * MorseDe / MassH )
+         NSystem = 1
+      ELSE
+         NSystem = 4
       END IF
 
       ! READ THE VARIABLES TO SET THE INITIAL CONDITIONS OF THE SYSTEM
 
       ! Initial energy of the system (input in eV and transform to AU)
       CALL SetFieldFromInput( InputData, "InitEnergy", InitEnergy)
-      InitEnergy = InitEnergy / MyConsts_Hartree2eV
+      InitEnergy = InitEnergy * EnergyConversion(InputUnits, InternalUnits)
 
       ! READ THE VARIABLES TO SET THE EQUILIBRATION CONDITIONS
 
       ! Temperature of the bath
       CALL SetFieldFromInput( InputData, "Temperature", Temperature, 1.0 )
-      Temperature = Temperature * MyConsts_K2AU
+      Temperature = Temperature * TemperatureConversion(InputUnits, InternalUnits)
 
       ! Frequency and force constant of the harmonic force between the beads
       BeadsFrequency = NBeads * Temperature
@@ -133,7 +142,7 @@ MODULE PolymerVibrationalRelax
 
       ! Timestep of the propagation
       CALL SetFieldFromInput( InputData, "TimeStep", TimeStep )
-      TimeStep = TimeStep * MyConsts_fs2AU
+      TimeStep = TimeStep * TimeConversion(InputUnits, InternalUnits)
 
       ! Nr of steps of the propagation
       CALL SetFieldFromInput( InputData, "NrOfSteps", NrOfSteps )
@@ -183,63 +192,48 @@ MODULE PolymerVibrationalRelax
 !*******************************************************************************
    SUBROUTINE PolymerVibrationalRelax_Initialize()
       IMPLICIT NONE
-      INTEGER :: iCoord, iBead
-      LOGICAL, DIMENSION(:), ALLOCATABLE :: LangevinSwitchOn
-      REAL, DIMENSION(:), ALLOCATABLE    :: SystemMasses
+      INTEGER :: iCoord, iBead, NrOfThreads, iThread
 
       CALL ERROR( BathType ==  SLAB_POTENTIAL, " PolymerVibrationalRelax_Initialize: slab potential not implemented" )
       CALL ERROR( BathType ==  DOUBLE_CHAIN, " PolymerVibrationalRelax_Initialize: double chain not implemented" )
+      CALL ERROR( BathType ==  LANGEVIN_DYN, " PolymerVibrationalRelax_Initialize: double chain not implemented" )
 
-      ! Define dimension of the system
+      ! Define dimension of the system+bath and mass vector
+      NDim = NSystem + NBath
+      ALLOCATE( MassVector(NDim) )
       IF ( MorsePotential ) THEN
-         NSystem = 1
-         ALLOCATE( SystemMasses(NSystem) )
-         SystemMasses = (/ MassH /)
+         MassVector = (/ MassH, (MassBath, iCoord=1,NBath) /)
       ELSE 
-         NSystem = 4
-         ALLOCATE( SystemMasses(NSystem) )
-         SystemMasses = (/ (MassH, iCoord=1,3), MassC /)
+         MassVector = (/ (MassH, iCoord=1,3), MassC, (MassBath, iCoord=1,NBath) /)
       END IF
-
+      
       ! Allocate memory and initialize vectors for trajectory, acceleration and masses
+      ALLOCATE( X(NDim*NBeads), V(NDim*NBeads), A(NDim*NBeads) )
 
-      IF ( BathType ==  NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
-         NDim = (NSystem+NBath)
-         ALLOCATE( X(NDim*NBeads), V(NDim*NBeads), A(NDim*NBeads), MassVector(NDim*NBeads) )
-         DO iBead = 1, NBeads
-            MassVector((iBead-1)*NDim+1:iBead*NDim ) = (/ (SystemMasses(iCoord), iCoord=1,NSystem), (MassBath, iCoord=1,NBath) /)
-         END DO
-
-      ELSE IF ( BathType == LANGEVIN_DYN ) THEN
-         ! store the nr of dimensions
-         NDim = NSystem
-         ALLOCATE( X(NDim*NBeads), V(NDim*NBeads), A(NDim*NBeads), MassVector(NDim*NBeads) )
-         DO iBead = 1, NBeads
-            MassVector( (iBead-1)*NDim + 1 : iBead*NDim ) = SystemMasses(:)
-         END DO
-      END IF
-
-      ! Set variables for EOM integration in the microcanonical ensamble (system + bath)
-      CALL EvolutionSetup( MolecularDynamics, NDim*NBeads, MassVector, TimeStep )
-
-      ALLOCATE( LangevinSwitchOn( NDim*NBeads ) )
-
-      ! Switch on Langevin relaxation when needed
-      IF ( BathType == LANGEVIN_DYN .AND. DynamicsGamma /= 0.0 ) THEN
-         DO iBead = 1, NBeads
-            LangevinSwitchOn( (iBead-1)*NDim + 1 : iBead*NDim ) = (/ .FALSE. , .FALSE. , .FALSE. , .TRUE. /)   
-         END DO
-         CALL SetupThermostat( MolecularDynamics, DynamicsGamma, Temperature, LangevinSwitchOn )
-      END IF
-
+      !$OMP PARALLEL 
+      ! Set total nr of OPENMP threads
+      !$OMP MASTER
+      NrOfThreads = __OMP_TotalNrOfThreads
+      !$OMP END MASTER
+      !$OMP END PARALLEL 
+      
+      ! Propagation data is replicated, so that in the parallel region of the code
+      ! each threads has its own set of variables
+      ALLOCATE( MolecularDynamics(NrOfThreads) )
+      DO iThread = 1, NrOfThreads
+         ! Set variables for EOM integration in the microcanonical ensamble (system + bath)
+         CALL EvolutionSetup( MolecularDynamics(iThread), NDim, MassVector, TimeStep )
+         ! Set ring polymer molecular dynamics parameter
+         CALL SetupRingPolymer( MolecularDynamics(iThread), NBeads, BeadsFrequency ) 
+      END DO
+      
       ! Set variables for EOM integration of the system only in the microcanonical ensamble 
+      ! this will be done in a serial way, so no replicated data
       IF ( MorsePotential ) THEN
          CALL EvolutionSetup( InitialConditions, 4, MassVector(1:4), TimeStep )
       ELSE
          CALL EvolutionSetup( InitialConditions, 1, MassVector(1:1), TimeStep )
       END IF
-
-      DEALLOCATE( LangevinSwitchOn, SystemMasses )
 
       ! ALLOCATE AND INITIALIZE DATA WITH THE AVERAGES OVER THE SET OF TRAJECTORIES
 
@@ -248,20 +242,19 @@ MODULE PolymerVibrationalRelax
       ! DEBUG - print also the average coordinates
       ! FULL - print detailed information about the initial conditions and about the trajectories
 
-      ! Allocate and initialize the variables for the trajectory averages
-      ALLOCATE( AverageESys(0:NrOfPrintSteps), AverageEBath(0:NrOfPrintSteps), AverageECoup(0:NrOfPrintSteps) )
-      AverageESys(:)            = 0.0
-      AverageEBath(:)           = 0.0
-      AverageECoup(:)           = 0.0
-
+      ! Allocate and initialize the variable for the trajectory average of the position correlation
+      ALLOCATE( PositionCorrelation(0:NrOfPrintSteps) )
+      PositionCorrelation(:)  = 0.0
+      
+      ! Allocate and initialize the variable for the trajectory averages of the energy
+      ALLOCATE( AverageE(NrOfEnergyAverages,0:NrOfPrintSteps) ) 
+      AverageE(:,:) = 0.0
+      
       ! Average coordinates over time 
       IF ( PrintType >= FULL ) THEN
          ALLOCATE( AverageCoord(NDim,0:NrOfPrintSteps) )
          AverageCoord(1:NDim,0:NrOfPrintSteps) = 0.0
       END IF
-
-      ! Initialize random number seed
-      CALL SetSeed( RandomNr, -1 )
 
    END SUBROUTINE PolymerVibrationalRelax_Initialize
 
@@ -273,46 +266,46 @@ MODULE PolymerVibrationalRelax
 !*******************************************************************************
    SUBROUTINE PolymerVibrationalRelax_Run()
       IMPLICIT NONE
-      !> Output units: minimal output
-      INTEGER  ::  AvEnergyOutputUnit
-      !> Output units: standard output
-      INTEGER  ::  AvCoordOutputUnit, AvBathCoordUnit
+      INTEGER :: CurrentThread, NrOfThreads
+      !> Output units: minimal and standard output
+      INTEGER  ::  AvEnergyOutputUnit, AvCoordOutputUnit, AvBathCoordUnit, TLogUnit, PosCorrelationUnit
       !> Output units: debug output
       INTEGER  ::  DebugUnitEn, DebugUnitCoord, DebugUnitVel
       !> Initial energies of the bath
       REAL     ::  InitKinAverage, InitKinVariance, InitPotAverage, InitPotVariance
       !> Energy averages
-      REAL     ::  VSys, KSys, Ecoup, VBath, KBath
       REAL     ::  TotEnergy, PotEnergy, KinEnergy
       !> integer Counters
       INTEGER  ::  iTraj, iBead, iStep, kStep, iCoord
       !> Filename for output files
       CHARACTER(100) :: OutFileName
       !> Centroid of positions and velocities
-      REAL, DIMENSION(NDim) :: CentroidX, CentroidV
+      REAL, DIMENSION(NDim*NBeads) :: X0
 
       REAL, DIMENSION(NrOfInitSnapshots,NSystem*2) :: SystemInitConditions
-      INTEGER  ::  NTimeStepEachSnap, NInit
 
       REAL, DIMENSION(NBath,NBeads) :: InitQBath, InitVBath
 
-      REAL :: K1, K2, K3, K4
-      REAL, DIMENSION(0:NrOfPrintSteps,4)    :: AverageKin
-      AverageKin(:,:) = 0.0
-
+      PosCorrelationUnit = LookForFreeUnit()
+      OPEN( FILE="PositionCorrelation.dat", UNIT=PosCorrelationUnit )
+      WRITE(PosCorrelationUnit, "(3A,I6,A,/)") "# <X(0)X(t)> vs time (",TimeUnit(InputUnits)," | au) - ", NrTrajs, " trajectories "
+                                                                                  
       AvEnergyOutputUnit = LookForFreeUnit()
-      OPEN( FILE="AverageEnergy.dat", UNIT=AvEnergyOutputUnit )
-      WRITE(AvEnergyOutputUnit, "(A,I6,A,/)") "# average energy vs time (fs | eV) - ", NrTrajs, " trajectories "
-
+      OPEN( FILE="EnergyAverages.dat", UNIT=AvEnergyOutputUnit )
+      WRITE(AvEnergyOutputUnit, "(5A,I6,A,/)") "# E vs time (", trim(TimeUnit(InputUnits)), ",", &
+                                                             trim(EnergyUnit(InputUnits)), ") - ", NrTrajs, " trajectories "
+      
       IF ( PrintType >= FULL ) THEN
          AvCoordOutputUnit = LookForFreeUnit()
          OPEN( FILE="AverageCoords.dat", UNIT=AvCoordOutputUnit )
-         WRITE(AvCoordOutputUnit, "(A,I6,A,/)") "# average coordinate vs time (fs | Ang) - ", NrTrajs, " trajectories "
+         WRITE(AvCoordOutputUnit, "(5A,I6,A,/)") "# System coordinate vs time (", trim(TimeUnit(InputUnits)), ",", &
+                                                             trim(LengthUnit(InputUnits)), ") - ", NrTrajs, " trajectories "
 
          AvBathCoordUnit = LookForFreeUnit()
          OPEN( FILE="AverageBathCoords.dat", UNIT=AvBathCoordUnit )
-         WRITE(AvBathCoordUnit, "(A,I6,A,/)") "# average Q coordinate vs time (Ang | fs) - ", NrTrajs, " trajectories "
-      ENDIF
+         WRITE(AvBathCoordUnit, "(5A,I6,A,/)") "# Bath coordinate vs time (", trim(TimeUnit(InputUnits)), ",", &
+                                                             trim(LengthUnit(InputUnits)), ") - ", NrTrajs, " trajectories "
+      END IF
 
       PRINT "(2/,A)",    "***************************************************"
       PRINT "(A,F10.5)", "               VIBRATIONAL RELAXATION"
@@ -329,7 +322,22 @@ MODULE PolymerVibrationalRelax
       InitPotAverage  = 0.0
       InitPotVariance = 0.0
 
+      !$OMP PARALLEL PRIVATE( CurrentThread, RandomNr, iBead, iStep, kStep, InitQBath, InitVBath,            &
+      !$OMP&                  X, X0, V, A, PotEnergy, KinEnergy,                     & 
+      !$OMP&                        OutFileName, DebugUnitEn, DebugUnitCoord, DebugUnitVel )
+
+      ! Set total nr of OPENMP threads and nr of the current thread
+      !$OMP MASTER
+      NrOfThreads = __OMP_TotalNrOfThreads
+      !$OMP END MASTER
+      CurrentThread = __OMP_CurrentThreadNum
+
+      ! Initialize random number seed
+      CALL SetSeed( RandomNr, -1-CurrentThread+1 )
+      
       !run NrTrajs number of trajectories
+      !$OMP DO REDUCTION( + : AverageE, PositionCorrelation, AverageCoord,    &
+      !$OMP&                  InitKinAverage, InitKinVariance, InitPotAverage, InitPotVariance )
       DO iTraj = 1,NrTrajs
       
          PRINT "(/,A,I6,A)"," **** Trajectory Nr. ", iTraj," ****" 
@@ -338,63 +346,66 @@ MODULE PolymerVibrationalRelax
          ! INITIALIZATION OF THE COORDINATES AND MOMENTA OF THE SYSTEM
          !*************************************************************
 
-         ! Initial conditions of the system
-         NInit = CEILING( UniformRandomNr(RandomNr)*real(NrOfInitSnapshots) )
+         ! *************  Initial conditions of the system *****************
+
+         ! Choose a random integer and choose a x,p in microcanonical distribution
+         kStep = CEILING( UniformRandomNr(RandomNr)*real(NrOfInitSnapshots) )
          DO iBead = 1, NBeads
-            X((iBead-1)*NDim+1:(iBead-1)*NDim+NSystem) = SystemInitConditions( NInit, 1:NSystem )
-            V((iBead-1)*NDim+1:(iBead-1)*NDim+NSystem) = SystemInitConditions( NInit, NSystem+1:NSystem*2 )
+            X((iBead-1)*NDim+1:(iBead-1)*NDim+NSystem) = SystemInitConditions( kStep, 1:NSystem )
+            V((iBead-1)*NDim+1:(iBead-1)*NDim+NSystem) = SystemInitConditions( kStep, NSystem+1:NSystem*2 )
          END DO
 
-         ! Initial conditions of the bath
+         ! *************  Initial conditions of the bath *****************
+
+         ! Use harmonic oscillator sampling for the normal modes of the ring polymer bath
          CALL BathOfRingsThermalConditions( Bath, NBeads, BeadsFrequency, Temperature*NBeads, InitQBath, InitVBath, RandomNr )
          DO iBead = 1, NBeads
             X( (iBead-1)*NDim+NSystem+1 : iBead*NDim ) = InitQBath(:,iBead)
             V( (iBead-1)*NDim+NSystem+1 : iBead*NDim ) = InitVBath(:,iBead)
          END DO
 
-         ! Compute potential energy of the full RP 
-         PotEnergy = BathPotential( X, .TRUE. )
-         PotEnergy = PotEnergy/(NBeads*NBath)
+         
+         !*************************************************************
+         ! INFORMATION ON INITIAL CONDITIONS, INITIALIZATION, OTHER...
+         !*************************************************************
+         
+         ! Compute potential energy of the full RP
+         PotEnergy = 0.0
+!          PotEnergy = BathPotential( X, .TRUE. )
+!          PotEnergy = PotEnergy/(NBeads*NBath)
 
          ! Compute kinetic energy of the full RP
          KinEnergy = 0.0
-         DO iBead = 1, NBeads
-            DO iCoord = 1, NBath
-               KinEnergy = KinEnergy + V( (iBead-1)*NDim+NSystem+iCoord )**2
-            END DO
-         END DO
-         KinEnergy = KinEnergy * 0.5 * MassBath / (NBeads*NBath)
+!          KinEnergy = 0.0
+!          DO iBead = 1, NBeads
+!             DO iCoord = 1, NBath
+!                KinEnergy = KinEnergy + V( (iBead-1)*NDim+NSystem+iCoord )**2
+!             END DO
+!          END DO
+!          KinEnergy = KinEnergy * 0.5 * MassBath / (NBeads*NBath)
 
-         ! Increment averages
+         ! Increment averages of the initial conditions of the bath
          InitKinAverage  = InitKinAverage + KinEnergy
          InitKinVariance = InitKinVariance + KinEnergy**2
          InitPotAverage  = InitPotAverage + PotEnergy
          InitPotVariance = InitPotVariance + PotEnergy**2
+         
+         ! PRINT INFORMATION ON INITIAL CONDITIONS of THE BATH and THE SYSTEM
+         __OMP_OnlyMasterBEGIN
+!          WRITE(*,600)  (KSys+VSys)*MyConsts_Hartree2eV, KinEnergy*MyConsts_Hartree2eV, 2.0*KinEnergy/MyConsts_K2AU, &
+!                                                         PotEnergy*MyConsts_Hartree2eV, 2.0*PotEnergy/MyConsts_K2AU
+         __OMP_OnlyMasterEND
 
-         !*************************************************************
-         ! INFORMATION ON INITIAL CONDITIONS, INITIALIZATION, OTHER...
-         !*************************************************************
+         ! Store initial coordinates
+         X0 = X
+         ! Compute position correlation function
+         PositionCorrelation(0) = PositionCorrelation(0) + CorrelationFunction( X, X0 )
+         
+         ! Various expectation values of the energy
+         AverageE(:,0) = EnergyAverages( X, V, MassVector ) 
 
-         ! Energy of the system, Coupling energy and energy of the bath
-         CALL IstantaneousEnergies( KSys, VSys, Ecoup, VBath, KBath )
-         CALL KineticEnergies( K1, K2, K3, K4 )
-
-         ! PRINT INITIAL CONDITIONS of THE BATH and THE SYSTEM
-         WRITE(*,600)  (KSys+VSys)*MyConsts_Hartree2eV, KinEnergy*MyConsts_Hartree2eV, 2.0*KinEnergy/MyConsts_K2AU, &
-                                                        PotEnergy*MyConsts_Hartree2eV, 2.0*PotEnergy/MyConsts_K2AU
-
-         ! Store starting values of the averages
-         AverageESys(0)         = AverageESys(0)  + KSys + VSys
-         AverageEBath(0)        = AverageEBath(0) + KBath + VBath
-         AverageECoup(0)        = AverageECoup(0) + Ecoup
-         CentroidX = CentroidCoord( X )
-         CentroidV = CentroidCoord( V )
-         IF ( PrintType >= FULL )  AverageCoord(1:NDim,0) = AverageCoord(1:NDim,0) + CentroidX(:)
-
-         AverageKin(0,1) = AverageKin(0,1) + K1 + VSys
-         AverageKin(0,2) = AverageKin(0,2) + K2 + VSys
-         AverageKin(0,3) = AverageKin(0,3) + K3 + VSys
-         AverageKin(0,4) = AverageKin(0,4) + K4 + VSys
+         ! Average values of the centroid coordinates
+         IF ( PrintType >= FULL ) AverageCoord(1:NDim,0) = AverageCoord(1:NDim,0) + CentroidCoord( X )
 
         ! Open unit for massive output, with detailed info on trajectories
          IF ( PrintType == DEBUG ) THEN
@@ -411,17 +422,16 @@ MODULE PolymerVibrationalRelax
             OPEN( Unit=DebugUnitVel, File=OutFileName )
 
             ! Write initial values
-            WRITE( DebugUnitEn, "(/,A)" ) "# TRAJECTORY ENERGY: time / fs | ESys, ECoup, EBath, KSys, VSys, KBath, VBath / Eh "
-            WRITE(DebugUnitEn,800) 0.0,  KSys+VSys, Ecoup, KBath+VBath, KSys, VSys, KBath, VBath
+            WRITE( DebugUnitEn, "(/,A)" ) "# TRAJECTORY ENERGY: time / fs | Ekin, Epot, Etot / Eh "
+            WRITE(DebugUnitEn,800) 0.0,  KinEnergy, PotEnergy, KinEnergy+PotEnergy
 
             WRITE( DebugUnitCoord, "(/,A)" ) "# TRAJECTORY COORD: time / fs | X(1) X(2) ... X(N) / bohr "
-            WRITE(DebugUnitCoord,800) 0.0, (/ (CentroidX(iCoord), iCoord = 1,NSystem) /), &
-                                                            (/ (CentroidX(iCoord+NSystem)+0.05*iCoord, iCoord = 1, NBath) /)
+            WRITE(DebugUnitCoord,800) 0.0, X(:)
 
             WRITE( DebugUnitVel, "(/,A)" ) "# TRAJECTORY VELOCITIES: time / fs | X(1) X(2) ... X(N) / au "
-            WRITE(DebugUnitVel,800) 0.0, CentroidV(:)
+            WRITE(DebugUnitVel,800) 0.0, V(:)
 
-          ENDIF
+          END IF
 
          !*************************************************************
          !         TIME EVOLUTION OF THE TRAJECTORY
@@ -430,18 +440,18 @@ MODULE PolymerVibrationalRelax
          ! initialize counter for printing steps
          kStep = 0
 
-         PRINT "(/,A)", " Propagating system and bath in the microcanonical ensamble... "
+         __OMP_OnlyMasterBEGIN
+            PRINT "(/,A)", " Propagating system and bath in the microcanonical ensamble... "
+         __OMP_OnlyMasterEND
          
          ! Compute starting potential and forces
-         A(:) = 0.0
-         PotEnergy = VibrRelaxPotential( X, A )
-         A(:) = A(:) / MassVector(:)
+         CALL EOM_RPMSymplectic( MolecularDynamics(CurrentThread), X, V, A,  VibrRelaxPotential, PotEnergy, RandomNr, .TRUE. )
 
          ! cycle over nstep velocity verlet iterations
          DO iStep = 1,NrOfSteps
 
             ! Propagate for one timestep
-            CALL EOM_LangevinSecondOrder( MolecularDynamics, X, V, A, VibrRelaxPotential, PotEnergy, RandomNr )
+            CALL EOM_RPMSymplectic( MolecularDynamics(CurrentThread), X, V, A, VibrRelaxPotential, PotEnergy, RandomNr )
 
             ! output to write every nprint steps 
             IF ( mod(iStep,PrintStepInterval) == 0 ) THEN
@@ -450,87 +460,68 @@ MODULE PolymerVibrationalRelax
                kStep = kStep+1
                IF ( kStep > NrOfPrintSteps ) CYCLE 
 
-               ! Energy of the system
-               CALL IstantaneousEnergies( KSys, VSys, Ecoup, VBath, KBath )
-               CALL KineticEnergies( K1, K2, K3, K4 )
+               ! Various expectation values of the energy
+               AverageE(:,kStep) = EnergyAverages( X, V, MassVector ) 
 
-               ! Update averages over time
-               AverageESys(kStep)            = AverageESys(kStep)  + KSys + VSys
-               AverageEBath(kStep)           = AverageEBath(kStep) + KBath + VBath
-               AverageECoup(kStep)           = AverageECoup(kStep) + Ecoup
-
-               AverageKin(kStep,1) = AverageKin(kStep,1) + K1 + VSys
-               AverageKin(kStep,2) = AverageKin(kStep,2) + K2 + VSys
-               AverageKin(kStep,3) = AverageKin(kStep,3) + K3 + VSys
-               AverageKin(kStep,4) = AverageKin(kStep,4) + K4 + VSys
-
-               CentroidX = CentroidCoord( X )
-               CentroidV = CentroidCoord( V )
-               IF ( PrintType >= FULL )   AverageCoord(1:NDim,kStep) = AverageCoord(1:NDim,kStep) + CentroidX(:)
-
+               ! Average values of the centroid coordinates
+               IF ( PrintType >= FULL )    AverageCoord(1:NDim,kStep) = AverageCoord(1:NDim,kStep) + CentroidCoord( X )
+               
                ! If massive level of output, print traj information to std out
                IF ( PrintType == DEBUG ) THEN
-                  WRITE(DebugUnitEn,800) TimeStep*real(iStep)/MyConsts_fs2AU, &
-                                        KSys+VSys, Ecoup, KBath+VBath, KSys, VSys, KBath, VBath
-                  WRITE(DebugUnitCoord,800) TimeStep*real(iStep)/MyConsts_fs2AU, (/ (CentroidX(iCoord), iCoord = 1,NSystem) /), &
-                                          (/ (CentroidX(iCoord+NSystem)+0.05*iCoord, iCoord = 1, NBath) /)
-                  WRITE(DebugUnitVel,800) TimeStep*real(iStep)/MyConsts_fs2AU, CentroidV(:)
+                  WRITE(DebugUnitEn,800) TimeStep*real(iStep)/MyConsts_fs2AU, KinEnergy, PotEnergy, KinEnergy+PotEnergy
+                  WRITE(DebugUnitCoord,800) TimeStep*real(iStep)/MyConsts_fs2AU, X(:)
+                  WRITE(DebugUnitVel,800) TimeStep*real(iStep)/MyConsts_fs2AU, V(:)
                END IF
 
             END IF 
 
          END DO
 
-         PRINT "(A)", " Time propagation completed! "
-
-!          ! Print log information about the final condition of the trajectory
-!          WRITE(*,601)  (KSys+VSys)*MyConsts_Hartree2eV, KBath*MyConsts_Hartree2eV, IstTemperature
+         __OMP_OnlyMasterBEGIN PRINT "(A)", " Time propagation completed! " __OMP_OnlyMasterEND
 
          IF ( PrintType == DEBUG ) THEN
-               CLOSE( Unit=DebugUnitEn )
-               CLOSE( Unit=DebugUnitCoord )
-               CLOSE( Unit=DebugUnitVel )
-         ENDIF
+            CLOSE( Unit=DebugUnitEn )
+            CLOSE( Unit=DebugUnitCoord )
+            CLOSE( Unit=DebugUnitVel )
+         END IF
+
+         __OMP_OnlyMasterBEGIN
+!          ! Print log information about the final condition of the trajectory
+!          WRITE(*,601)  (KSys+VSys)*MyConsts_Hartree2eV, KBath*MyConsts_Hartree2eV, IstTemperature
+         __OMP_OnlyMasterEND
 
       END DO
+      !$OMP END DO
+      !$OMP END PARALLEL
       
       PRINT "(A)"," Done! "
 
-      InitKinAverage = InitKinAverage / real(NrTrajs)
+      InitKinAverage = InitKinAverage / real(NrTrajs) 
       InitKinVariance = SQRT( InitKinVariance/real(NrTrajs) - InitKinAverage**2 )
-      PRINT*, " --------------------------------------------------- " 
-      PRINT*, " Average T : ",InitKinAverage, " St dev : ", InitKinVariance
-      PRINT*, " --------------------------------------------------- " 
-      PRINT*, " " 
-
-      InitPotAverage = InitPotAverage / real(NrTrajs)
-      InitPotVariance = SQRT( InitPotVariance/real(NrTrajs) - InitPotAverage**2 )
-      PRINT*, " --------------------------------------------------- " 
-      PRINT*, " Average V : ",InitPotAverage, " St dev : ", InitPotVariance
-      PRINT*, " --------------------------------------------------- " 
-      PRINT*, " " 
+      InitPotAverage = InitPotAverage / real(NrTrajs) 
+      InitPotVariance = SQRT( InitPotVariance/real(NrTrajs) - InitPotAverage**2 ) 
+      
+      TLogUnit = LookForFreeUnit()
+      OPEN( UNIT = TLogUnit, FILE = "FinalAverTemperature.log" )
+      WRITE(TLogUnit,500)  NrTrajs, 2.*InitKinAverage*TemperatureConversion(InternalUnits,InputUnits), TemperUnit(InputUnits),  &
+                                    2.*InitKinVariance*TemperatureConversion(InternalUnits,InputUnits), TemperUnit(InputUnits), &
+                                    2.*InitPotAverage*TemperatureConversion(InternalUnits,InputUnits), TemperUnit(InputUnits),  &
+                                    2.*InitPotVariance*TemperatureConversion(InternalUnits,InputUnits), TemperUnit(InputUnits)
+      CLOSE( UNIT = TLogUnit )
 
       !*************************************************************
       !         OUTPUT OF THE RELEVANT AVERAGES 
       !*************************************************************
 
       ! Normalize averages 
-      AverageESys(:)            = AverageESys(:)    / real(NrTrajs)
-      AverageEBath(:)           = AverageEBath(:)   / real(NrTrajs)
-      AverageECoup(:)           = AverageECoup(:)   / real(NrTrajs)
+      PositionCorrelation(:)  =  PositionCorrelation(:)  / real(NrTrajs)
+      AverageE(:,:)           = AverageE(:,:)            / real(NrTrajs)
       IF ( PrintType >= FULL )   AverageCoord(1:NDim,:) = AverageCoord(1:NDim,:) / real(NrTrajs) 
-
-      AverageKin(0:NrOfPrintSteps,1:4) = AverageKin(0:NrOfPrintSteps,1:4) / real(NrTrajs)
-
-      DO iStep = 0, NrOfPrintSteps
-         WRITE(900, "(F14.8,4F14.8)") TimeStep*real(PrintStepInterval*iStep)/MyConsts_fs2AU, &
-               AverageKin(iStep,1:4)*MyConsts_Hartree2eV
-      END DO
 
       ! PRINT average energy of the system, of the coupling, of the bath
       DO iStep = 0, NrOfPrintSteps
          WRITE(AvEnergyOutputUnit,"(F14.8,3F14.8)") TimeStep*real(PrintStepInterval*iStep)/MyConsts_fs2AU, &
-         AverageESys(iStep)*MyConsts_Hartree2eV, AverageECoup(iStep)*MyConsts_Hartree2eV,  AverageEBath(iStep)*MyConsts_Hartree2eV
+                                                     AverageE(:,iStep)*MyConsts_Hartree2eV
       END DO
 
       IF ( PrintType >= FULL ) THEN
@@ -550,9 +541,10 @@ MODULE PolymerVibrationalRelax
             END DO
          END DO
 
-      ENDIF
+      END IF
 
       ! Close output files
+      CLOSE(PosCorrelationUnit)
       CLOSE( AvEnergyOutputUnit )
       IF ( PrintType >= FULL ) THEN
          CLOSE( AvCoordOutputUnit )
@@ -570,6 +562,11 @@ MODULE PolymerVibrationalRelax
                      " * Energy of the system (eV)         ",1F10.4,/    &
                      " * Kinetic Energy of the bath (eV)   ",1F10.4,/    &
                      " * Istantaneous temperature (K)      ",1F10.4,/ ) 
+      500 FORMAT (/, " Nr of trajectories :                               ",1I10,       2/, &
+                     " Average Translational Temperature :                ",1F15.6,1X,A, /, &
+                     " Standard Deviation of Translational Temperature :  ",1F15.6,1X,A,2/, &
+                     " Average Vibrational Temperature :                  ",1F15.6,1X,A, /, &
+                     " Standard Deviation of Vibrational Temperature :    ",1F15.6,1X,A, / ) 
 
    END SUBROUTINE PolymerVibrationalRelax_Run
 
@@ -581,17 +578,169 @@ MODULE PolymerVibrationalRelax
 !*******************************************************************************
    SUBROUTINE PolymerVibrationalRelax_Dispose()
       IMPLICIT NONE
+      INTEGER :: i 
 
       ! Deallocate memory 
       DEALLOCATE( X, V, A, MassVector )
-      DEALLOCATE( AverageESys, AverageEBath, AverageECoup )
+      DEALLOCATE( AverageE )
       IF ( PrintType >= FULL ) DEALLOCATE( AverageCoord )
 
       ! Unset propagators 
-      CALL DisposeEvolutionData( MolecularDynamics )
+      DO i = 1, size(MolecularDynamics)
+         CALL DisposeEvolutionData( MolecularDynamics(i) )
+      END DO
       CALL DisposeEvolutionData( InitialConditions )
 
+      DEALLOCATE( MolecularDynamics )
+
    END SUBROUTINE PolymerVibrationalRelax_Dispose
+
+!*************************************************************************************************
+
+   REAL FUNCTION VibrRelaxPotential( Positions, Forces ) RESULT(V)
+      IMPLICIT NONE
+      REAL, DIMENSION(:), TARGET, INTENT(IN)  :: Positions
+      REAL, DIMENSION(:), TARGET, INTENT(OUT) :: Forces
+      REAL, DIMENSION(NBath)   :: ForceQCoord
+      REAL, DIMENSION(NSystem) :: ForceSystem
+      REAL                     :: ForceCoupCoord, CouplingFunc
+
+      ! Check the number degrees of freedom
+      CALL ERROR( size(Forces) /= size( Positions ), "PolymerVibrationalRelax.VibrRelaxPotential: array dimension mismatch" )
+      CALL ERROR( size( Positions ) /= NDim,         "PolymerVibrationalRelax.VibrRelaxPotential: wrong number of DoFs"     )
+     
+      V = 0.0
+      Forces(:) = 0.0
+
+      ! Compute potential and forces of the system replica
+      IF ( MorsePotential ) THEN
+         V = V + MorseV( Positions(1:1), ForceSystem )
+      ELSE
+         V = V + VHFourDimensional( Positions(1:4), ForceSystem )
+      END IF
+      Forces( 1:NSystem ) = Forces( 1:NSystem ) + ForceSystem(:)
+
+      ! Compute potential and forces of the bath replica
+      ForceCoupCoord = 0.0
+      ForceQCoord(:) = 0.0
+      IF ( MorsePotential ) THEN
+         CouplingFunc = Positions(1)
+      ELSE 
+         CouplingFunc = Positions(4) - C1Puckering
+      END IF
+      CALL BathPotentialAndForces( Bath, CouplingFunc, Positions( NSystem+1:NDim ), V, ForceCoupCoord, ForceQCoord(:) ) 
+      IF ( MorsePotential ) THEN
+         Forces(1) = Forces(1) + ForceCoupCoord
+      ELSE
+         Forces(4) = Forces(4) + ForceCoupCoord
+      END IF
+      Forces( NSystem+1:NDim ) = Forces( NSystem+1:NDim ) + ForceQCoord(:)
+
+      ! when collinear calculation, make sure that the forces on HX and HY are zero
+      IF ( Collinear .AND. (.NOT. MorsePotential ))   Forces(1:2) = 0.0
+      
+   END FUNCTION VibrRelaxPotential
+
+   REAL FUNCTION MorseV( Positions, Forces ) RESULT(V) 
+      IMPLICIT NONE
+      REAL, DIMENSION(:), TARGET, INTENT(IN)  :: Positions
+      REAL, DIMENSION(:), TARGET, INTENT(OUT) :: Forces 
+
+      V = MorseDe * ( exp(-2.0*MorseAlpha*Positions(1)) - 2.0 * exp(-MorseAlpha*Positions(1)) )  
+      Forces(1) = 2.0 * MorseAlpha * MorseDe * (  exp(-2.0*MorseAlpha*Positions(1)) - exp(-MorseAlpha*Positions(1)) )  
+
+   END FUNCTION MorseV
+   
+!*************************************************************************************************
+
+   FUNCTION CentroidCoord( X )
+      IMPLICIT NONE
+      REAL, DIMENSION( NDim )   :: CentroidCoord
+      REAL, DIMENSION( NDim*NBeads ), INTENT(IN) :: X
+      INTEGER :: i, iCoord
+
+      CentroidCoord( 1:NDim ) = 0.0
+      DO i = 1, NBeads
+         DO iCoord = 1, NDim
+            CentroidCoord( iCoord ) = CentroidCoord( iCoord ) + X( (i-1)*NDim + iCoord )
+         END DO
+      END DO
+      CentroidCoord( 1:NDim ) = CentroidCoord( 1:NDim ) / NBeads
+
+   END FUNCTION CentroidCoord
+   
+!*************************************************************************************************
+
+   REAL FUNCTION CorrelationFunction( X, X0 )
+      IMPLICIT NONE
+      REAL, DIMENSION( NBeads ), INTENT(IN) :: X, X0
+
+      CorrelationFunction =  TheOneWithVectorDotVector( CentroidCoord( X ), CentroidCoord( X0 ) )
+   END FUNCTION CorrelationFunction
+   
+!*************************************************************************************************
+   
+   FUNCTION EnergyAverages( X, V, Mass ) 
+      IMPLICIT NONE
+      REAL, DIMENSION(4) :: EnergyAverages
+      REAL, DIMENSION(NDim*NBeads), INTENT(IN) :: X, V
+      REAL, DIMENSION(NDim), INTENT(IN)        :: Mass
+      REAL                          :: PotEnergy
+      REAL, DIMENSION(NDim*NBeads)  :: SngForce
+      REAL, DIMENSION(NDim)         :: CentroidV
+      INTEGER                       :: iCoord, iBead
+
+      EnergyAverages = 0.0
+      
+!       ! (4) POTENTIAL ENERGY    *****************************************************
+!       ! System potential averaged over the beads, and force acting on each bead
+!       PotEnergy = 0.0
+!       DO iBead = 1, NBeads 
+!          PotEnergy = PotEnergy + SystemPotential( X((iBead-1)*NDim+1:iBead*NDim), SngForce((iBead-1)*NDim+1:iBead*NDim) )
+!       END DO
+!       EnergyAverages(4) = PotEnergy / real(NBeads)
+! 
+!       ! (1) VIRIAL TOTAL ENERGY    **************************************************
+!       ! centroid of the virial product (virial as average)
+!       EnergyAverages(1) = 0.0
+!       DO iBead = 1, NBeads
+!          DO iCoord = 1, NDim
+!             EnergyAverages(1) = EnergyAverages(1) - X((iBead-1)*NDim+iCoord) * SngForce((iBead-1)*NDim+iCoord)
+!          END DO
+!       END DO
+!       EnergyAverages(1) = 0.5 * EnergyAverages(1) / real(NBeads)
+!       ! add potential energy to get full energy
+!       EnergyAverages(1) = EnergyAverages(1) + EnergyAverages(4)
+! 
+!       ! 2) THERMODYNAMICS TOTAL ENERGY
+!       ! sum up energy of the ring oscillators and subtract it to average energy
+!       EnergyAverages(2) = 0.0 
+!       DO iCoord = 1, NDim
+!          IF ( NBeads == 2 ) THEN
+!             EnergyAverages(2) = EnergyAverages(2) + Mass(iCoord) * ( X(NDim+iCoord) - X(iCoord) )**2 
+!          ELSE IF ( NBeads > 2 ) THEN
+!             DO iBead = 1, NBeads-1
+!                EnergyAverages(2) = EnergyAverages(2) + Mass(iCoord) * ( X(iBead*NDim+iCoord) - X((iBead-1)*NDim+iCoord) )**2 
+!             END DO
+!             EnergyAverages(2) = EnergyAverages(2) + Mass(iCoord) * ( X(iCoord) - X((NBeads-1)*NDim+iCoord) )**2 
+!          END IF
+!       END DO
+!       EnergyAverages(2) = 0.5 * ( NBeads * NDim * Temperature - BeadsForceConst * EnergyAverages(2) )
+!       ! add potential energy to get full energy
+!       EnergyAverages(2) = EnergyAverages(2) + EnergyAverages(4)
+! 
+!       ! 3) POTENTIAL PLUS KINETIC ENERGY OF THE CENTROID
+!       ! Compute centroid of the velocity
+!       CentroidV = CentroidCoord( V )
+!       EnergyAverages(3) = 0.0
+!       DO iCoord = 1, NDim
+!          EnergyAverages(3) = EnergyAverages(3) + Mass(iCoord) * CentroidV(iCoord)**2
+!       END DO
+!       EnergyAverages(3) =  0.5 * EnergyAverages(3)
+!       ! add potential energy to get full energy
+!       EnergyAverages(3) = EnergyAverages(3) + EnergyAverages(4)
+
+   END FUNCTION EnergyAverages
 
 !*************************************************************************************************
 
@@ -647,338 +796,6 @@ MODULE PolymerVibrationalRelax
       END DO
 
    END SUBROUTINE MicrocanonicalSamplingOfTheSystem
-
-!*************************************************************************************************
-
-   FUNCTION CentroidCoord( X )
-      IMPLICIT NONE
-      REAL, DIMENSION( NDim )   :: CentroidCoord
-      REAL, DIMENSION( NDim*NBeads ), INTENT(IN) :: X
-      INTEGER :: i, iCoord
-
-      CentroidCoord( 1:NDim ) = 0.0
-      DO i = 1, NBeads
-         DO iCoord = 1, NDim
-            CentroidCoord( iCoord ) = CentroidCoord( iCoord ) + X( (i-1)*NDim + iCoord )
-         END DO
-      END DO
-      CentroidCoord( 1:NDim ) = CentroidCoord( 1:NDim ) / NBeads
-
-   END FUNCTION CentroidCoord
-
-!*************************************************************************************************
-
-   REAL FUNCTION VibrRelaxPotential( Positions, Forces )
-      IMPLICIT NONE
-      REAL, DIMENSION(:), TARGET, INTENT(IN)  :: Positions
-      REAL, DIMENSION(:), TARGET, INTENT(OUT) :: Forces
-
-      INTEGER :: iBead, iCoord
-      REAL, DIMENSION(NBeads)  :: RingCoord, RingForces 
-      REAL, DIMENSION(NDim)    :: SingleF
-      REAL :: SingleV
-
-      ! Check the number degrees of freedom
-      CALL ERROR( size(Forces) /= size( Positions ), "PolymerVibrationalRelax.VibrRelaxPotential: array dimension mismatch" )
-      CALL ERROR( size( Positions ) /= NDim*NBeads, "PolymerVibrationalRelax.VibrRelaxPotential: wrong number of DoFs" )
-
-      ! Initialize forces and potential
-      VibrRelaxPotential = 0.0
-      Forces(:)          = 0.0
-
-      ! System-bath potential for each bead
-      DO iBead = 1, NBeads 
-         ! Compute potential and force for a single bead
-         CALL  SingleBeadPotential( Positions((iBead-1)*NDim+1:iBead*NDim), SingleF, SingleV )
-         ! Sum up to total potential and total force
-         VibrRelaxPotential = VibrRelaxPotential + SingleV
-         Forces((iBead-1)*NDim+1:iBead*NDim) = Forces((iBead-1)*NDim+1:iBead*NDim) + SingleF(:)
-      END DO
-
-      IF ( NBeads > 1 ) THEN
-         ! Harmonic forces between beads
-         DO iCoord = 1, NDim
-            DO iBead = 1, NBeads
-               RingCoord(iBead) = X( iCoord + (iBead-1)*NDim )
-            END DO
-            CALL PolymerRingPotential( MassVector(iCoord), RingCoord, VibrRelaxPotential, RingForces )
-            DO iBead = 1, NBeads
-               Forces( iCoord + (iBead-1)*NDim ) =  Forces( iCoord + (iBead-1)*NDim ) + RingForces(iBead)
-            END DO
-         END DO
-      END IF
-
-      ! when collinear calculation, make sure that the forces on HX and HY are zero
-      IF ( Collinear .AND. (.NOT. MorsePotential )) THEN
-         DO iBead = 1, NBeads 
-            Forces((iBead-1)*NDim+1 : (iBead-1)*NDim+2) = 0.0
-         END DO
-      END IF
-
-   END FUNCTION VibrRelaxPotential
-
-   REAL FUNCTION BathPotential( Positions, AddRingPotential )
-      IMPLICIT NONE
-      REAL, DIMENSION(:), TARGET, INTENT(IN)  :: Positions
-      LOGICAL, INTENT(IN)                     :: AddRingPotential
-
-      INTEGER :: iBead, iCoord
-      REAL    :: SingleV, VCoupling
-      REAL, DIMENSION(NBeads)  :: RingCoord 
-
-      ! Check the number degrees of freedom
-      CALL ERROR( size( Positions ) /= NDim*NBeads, "PolymerVibrationalRelax.BathPotential: wrong number of DoFs" )
-
-      ! Initialize forces and potential
-      BathPotential = 0.0
-
-      IF ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
-
-         ! Compute potential and forces of the bath replica
-         DO iBead = 1, NBeads 
-            CALL EnergyOfTheBath( Bath, 0.0, Positions((iBead-1)*NDim+NSystem+1:iBead*NDim), VCoupling, SingleV ) 
-            BathPotential = BathPotential + SingleV
-         END DO
-
-         ! Harmonic forces between beads
-         IF ( NBeads > 1 .AND. AddRingPotential ) THEN
-            DO iCoord = NSystem+1, NDim
-               DO iBead = 1, NBeads
-                  RingCoord(iBead) = X( iCoord + (iBead-1)*NDim )
-               END DO
-               CALL PolymerRingPotential( MassVector(iCoord), RingCoord, BathPotential )
-            END DO
-         END IF
-
-      ELSE IF ( BathType == LANGEVIN_DYN ) THEN
-         ! DO NOTHING
-      END IF
-
-   END FUNCTION BathPotential
-
-   REAL FUNCTION MorseV( Positions, Forces ) RESULT(V) 
-      IMPLICIT NONE
-      REAL, DIMENSION(:), TARGET, INTENT(IN)  :: Positions
-      REAL, DIMENSION(:), TARGET, INTENT(OUT) :: Forces 
-
-      V = MorseDe * ( exp(-2.0*MorseAlpha*Positions(1)) - 2.0 * exp(-MorseAlpha*Positions(1)) )  
-      Forces(1) = 2.0 * MorseAlpha * MorseDe * (  exp(-2.0*MorseAlpha*Positions(1)) - exp(-MorseAlpha*Positions(1)) )  
-
-   END FUNCTION MorseV
-
-   SUBROUTINE PolymerRingPotential( Mass, X, V, ForceOnX )
-      IMPLICIT NONE
-      REAL                                       :: Mass
-      REAL, DIMENSION(:), INTENT(IN)             :: X
-      REAL, DIMENSION(:), INTENT(OUT), OPTIONAL  :: ForceOnX
-      REAL, INTENT(INOUT)                        :: V
-      INTEGER :: i, NRing
-
-      NRing = size(X)
-
-      IF ( NRing == 1 ) THEN
-         V = V
-         IF (PRESENT(ForceOnX)) ForceOnX = 0.0
-      ELSE IF ( NRing == 2 ) THEN
-         V = V + 0.5 * Mass * BeadsForceConst * ( X(2) - X(1) )**2 
-         IF (PRESENT(ForceOnX)) ForceOnX(1) = Mass * BeadsForceConst * ( X(2) - X(1) )  
-         IF (PRESENT(ForceOnX)) ForceOnX(2) = Mass * BeadsForceConst * ( - X(2) + X(1) )  
-      ELSE
-         V = V + 0.5 * Mass * BeadsForceConst * ( X(2) - X(1) )**2 
-         IF (PRESENT(ForceOnX)) ForceOnX(1) = - Mass * BeadsForceConst * ( - X(NRing) + X(1) * 2 - X(2) )  
-         DO i = 2, NRing-1
-            V = V + 0.5 * Mass * BeadsForceConst * ( X(i+1) - X(i) )**2 
-            IF (PRESENT(ForceOnX)) ForceOnX(i) = - Mass * BeadsForceConst * ( - X(i-1) + X(i) * 2 - X(i+1) )  
-         END DO
-         V = V + 0.5 * Mass * BeadsForceConst * ( X(1) - X(NRing) )**2 
-         IF (PRESENT(ForceOnX)) ForceOnX(NRing) = - Mass * BeadsForceConst * ( - X(NRing-1) + X(NRing) * 2 - X(1) )  
-      END IF
-
-   END SUBROUTINE PolymerRingPotential
-
-   SUBROUTINE SingleBeadPotential( Positions, Forces, V )
-      IMPLICIT NONE
-      REAL, DIMENSION(:), TARGET, INTENT(IN)  :: Positions
-      REAL, DIMENSION(:), TARGET, INTENT(OUT) :: Forces
-      REAL, INTENT(OUT)                       :: V
-
-      INTEGER                  :: iCoord
-      REAL, DIMENSION(NBath)   :: ForceQCoord
-      REAL, DIMENSION(NSystem) :: ForceSystem
-      REAL                     :: ForceCoupCoord, CouplingFunc
-
-      V = 0.0
-      Forces(:) = 0.0
-
-      ! Compute potential and forces of the system replica
-      IF ( MorsePotential ) THEN
-         V = V + MorseV( Positions(1:1), ForceSystem )
-      ELSE
-         V = V + VHFourDimensional( Positions(1:4), ForceSystem )
-      END IF
-      Forces( 1:NSystem ) = Forces( 1:NSystem ) + ForceSystem(:)
-
-      ! Compute potential and forces of the bath replica
-      IF ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
-         ForceCoupCoord = 0.0
-         ForceQCoord(:) = 0.0
-         IF ( MorsePotential ) THEN
-            CouplingFunc = Positions(1)
-         ELSE 
-            CouplingFunc = Positions(4) - C1Puckering
-         END IF
-         CALL BathPotentialAndForces( Bath, CouplingFunc, Positions( NSystem+1:NDim ), V, ForceCoupCoord, ForceQCoord(:) ) 
-         IF ( MorsePotential ) THEN
-            Forces(1) = Forces(1) + ForceCoupCoord
-         ELSE
-            Forces(4) = Forces(4) + ForceCoupCoord
-         END IF
-         Forces( NSystem+1:NDim ) = Forces( NSystem+1:NDim ) + ForceQCoord(:)
-
-      ELSE IF ( BathType == LANGEVIN_DYN ) THEN
-         ! DO NOTHING
-      END IF
-
-   END SUBROUTINE SingleBeadPotential
-
-
-!*************************************************************************************************
-   
-   SUBROUTINE KineticEnergies( K1, K2, K3, K4 )
-      IMPLICIT NONE
-      REAL, INTENT(OUT)             :: K1, K2, K3, K4
-      REAL, DIMENSION(NDim*NBeads)  :: SngForce
-      REAL, DIMENSION(NDim)         :: CentroidX, CentroidF, CentroidV, SingleF
-      INTEGER                       :: iCoord, iBead
-      REAL :: Pot
-
-      SngForce(:) = 0.0
-      ! System-bath potential for each bead
-      DO iBead = 1, NBeads
-         ! Compute potential and force for a single bead
-         CALL  SingleBeadPotential( X((iBead-1)*NDim+1:iBead*NDim), SngForce((iBead-1)*NDim+1:iBead*NDim), Pot )
-      END DO
-
-      ! Compute centroids
-      CentroidX = CentroidCoord( X )
-      CentroidF = CentroidCoord( SngForce )
-      CentroidV = CentroidCoord( V )
-
-      ! First definition: kinetic energy of the centroid
-      K1 = 0.0
-      DO iCoord = 1, NSystem
-         K1 = K1 + 0.5 * MassVector(iCoord) * CentroidV(iCoord)**2
-      END DO
-
-      ! Second definition: centroid of kinetic energies
-      K2 = 0.0
-      DO iBead = 1, NBeads
-         DO iCoord = 1, NSystem
-            K2  = K2  + 0.5 * MassVector(iCoord) * V((iBead-1)*NDim+iCoord)**2
-         END DO
-      END DO
-      K2 = K2 / real(NBeads)
-
-      ! Fourth definition: virial of the centroids (virial as correlation product)
-      K3 = 0.0
-      DO iCoord = 1, NSystem
-         K3  = K3  -0.5 * CentroidX(iCoord) * CentroidF(iCoord)
-      END DO
-
-      ! Third definition: centroid of the virial product (virial as average)
-      K4 = 0.0
-      DO iBead = 1, NBeads
-         DO iCoord = 1, NSystem
-            K4  = K4  -0.5 * X((iBead-1)*NDim+iCoord) * SngForce((iBead-1)*NDim+iCoord)
-         END DO
-      END DO
-      K4 = K4 / real(NBeads)
-
-   END SUBROUTINE KineticEnergies
-
-   SUBROUTINE IstantaneousEnergies( KSys, VSys, Ecoup, VBath, KBath )
-      IMPLICIT NONE
-      REAL, INTENT(OUT) :: KSys, VSys, Ecoup, VBath, KBath
-      REAL, DIMENSION(NDim) :: CentroidV, Dummy
-      REAL    :: VBath1, Ecoup1, CouplingFunc
-      INTEGER :: iCoord, iBead
-
-      ! Centroid of the velocities
-      CentroidV = CentroidCoord( V )
-
-!       ! Compute kinetic energy as average of the kinetic energy over the replicas
-!       KSys = 0.0
-!       DO iBead = 1, NBeads
-!          DO iCoord = 1, 4
-!             KSys = KSys + 0.5 * MassVector(iCoord) * V( (iBead-1)*NDim+iCoord )**2
-!          END DO
-!       END DO
-!       KSys = KSys / NBeads 
-
-      ! Compute kinetic energy as the kinetic energy of the centroid
-      KSys = 0.0
-!       DO iCoord = 1, NSystem
-!          KSys = KSys + 0.5 * MassVector(iCoord) * CentroidV(iCoord)**2
-!       END DO
-! 
-      ! Energy of the system - average of the potential energies of the system replicas
-      VSys = 0.0
-      DO iBead = 1, NBeads
-         IF ( MorsePotential ) THEN
-            CouplingFunc = X((iBead-1)*NDim+1)
-            VSys = VSys + MorseV( X((iBead-1)*NDim+1:(iBead-1)*NDim+1), Dummy(1:1) )
-         ELSE
-            CouplingFunc = X((iBead-1)*NDim+4) - C1Puckering 
-            VSys = VSys + VHFourDimensional( X((iBead-1)*NDim+1:(iBead-1)*NDim+4), Dummy(1:4) )
-         END IF
-         VSys = VSys + 0.5 * GetDistorsionForce( Bath ) * CouplingFunc**2
-      END DO
-      VSys = VSys / NBeads 
-      
-      IF ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
-
-         ! Kinetic energy - kinetic energy of the velocity centroid for the bath
-         KBath = 0.0
-         DO iCoord = 5, NDim
-            KBath = KBath + 0.5 * MassVector(iCoord) * CentroidV(iCoord)**2
-         END DO
-
-!          ! Compute kinetic energy as average of the kinetic energy over the replicas
-!          KBath = 0.0
-!          DO iBead = 1, NBeads
-!             DO iCoord = 5, NDim
-!                KBath = KBath + 0.5 * MassVector(iCoord) * V( (iBead-1)*NDim+iCoord )**2
-!             END DO
-!          END DO
-!          KBath = KBath / NBeads 
-
-         ! Coupling energy and energy of the bath - average of the potential energies of the system replicas
-         Ecoup = 0.0
-         VBath = 0.0
-         DO iBead = 1, NBeads
-            IF ( MorsePotential ) THEN
-               CouplingFunc = X((iBead-1)*NDim+1)
-            ELSE 
-               CouplingFunc = X((iBead-1)*NDim+4) - C1Puckering
-            END IF
-            CALL EnergyOfTheBath( Bath, CouplingFunc, X( (iBead-1)*NDim+NSystem+1 : iBead*NDim ), Ecoup1, VBath1 )
-            Ecoup = Ecoup + Ecoup1
-            VBath = VBath + VBath1
-         END DO
-         Ecoup = Ecoup / NBeads
-         VBath = VBath / NBeads
-
-      ELSE IF ( BathType == LANGEVIN_DYN ) THEN
-
-         ! The energies of the bath and the coupling cannot be defined
-         Ecoup = 0.0
-         VBath = 0.0
-         KBath = 0.0
-
-      END IF
-
-   END SUBROUTINE IstantaneousEnergies
-
 
 !*************************************************************************************************
 

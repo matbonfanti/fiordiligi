@@ -14,11 +14,15 @@
 #endif
 
 #if defined(WITH_OPENMP)
-#define __TotalNrOfThreads      OMP_GET_NUM_THREADS()
-#define __CurrentThreadNum      OMP_GET_THREAD_NUM() + 1
+#define __OMP_TotalNrOfThreads      OMP_GET_NUM_THREADS()
+#define __OMP_CurrentThreadNum      OMP_GET_THREAD_NUM() + 1
+#define __OMP_OnlyMasterBEGIN       IF ( OMP_GET_THREAD_NUM() == 0 ) THEN;
+#define __OMP_OnlyMasterEND         ; END IF
 #else
-#define __TotalNrOfThreads      1
-#define __CurrentThreadNum      1
+#define __OMP_TotalNrOfThreads      1
+#define __OMP_CurrentThreadNum      1
+#define __OMP_OnlyMasterBEGIN   
+#define __OMP_OnlyMasterEND     
 #endif
 
    /* These are modules that are used in most parts of the code */

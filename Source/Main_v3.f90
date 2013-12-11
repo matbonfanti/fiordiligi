@@ -51,6 +51,9 @@ PROGRAM JK6_v3
    ! Units of input data, defined from the input file
    INTEGER     :: InputLength, InputEnergy, InputMass, InputTime, InputTemp, InputFreq
 
+   ! keep track of initial time and final time
+   INTEGER, DIMENSION(8)    :: Time1, Time2
+
 
    PRINT "(/,     '                    ==============================')"
    PRINT "(       '                                JK6_v3            ')"
@@ -58,6 +61,7 @@ PROGRAM JK6_v3
    PRINT "(       '                    Author: Matteo Bonfanti  ')"
    PRINT "(       '         ( Potential originally implemented by B.Jackson and J.Kerwin )',/)"
 
+   CALL date_and_time (values=Time1)
 
    !*************************************************************
    !         COMMAND LINE ARGUMENT
@@ -412,6 +416,26 @@ PROGRAM JK6_v3
       CALL DisposeIndepOscillatorsModel( DblBath(2) )
    END IF
 
+   CALL date_and_time (values=Time2)
+   
+   WRITE(*,*)
+   WRITE(*,*) " Execution Time : ",TimeDifference( Time2, Time1 )
+   
+   
+      CONTAINS
+   
+   FUNCTION TimeDifference( Time1, Time2 )
+      INTEGER, DIMENSION(8), INTENT(IN)    :: Time1, Time2         
+      REAL :: TimeDifference
+   
+      TimeDifference =  (Time1(3)-Time2(3))*24.0*60.0*60.0*1000. + &
+                        (Time1(5)-Time2(5))*60.0*60.0*1000. + &
+                        (Time1(6)-Time2(6))*60.0*1000. + &
+                        (Time1(7)-Time2(7))*1000. + &
+                        (Time1(8)-Time2(8))
+         
+   END FUNCTION TimeDifference
+   
 END PROGRAM JK6_v3
 
 

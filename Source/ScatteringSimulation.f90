@@ -17,7 +17,7 @@
 !>  \todo            everything
 !>                 
 !***************************************************************************************
-MODULE Scattering
+MODULE ScatteringSimulation
    USE MyConsts
    USE ErrorTrap
    USE MyLinearAlgebra
@@ -352,4 +352,4 @@ MODULE Scattering
    END SUBROUTINE Scattering_Dispose
 
 
-END MODULE Scattering
+END MODULE ScatteringSimulation
