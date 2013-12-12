@@ -38,6 +38,7 @@ MODULE IndependentOscillatorsModel
    USE SplineInterpolator
    USE RandomNumberGenerator
    USE MyLinearAlgebra
+   USE FFTWrapper
 
    IMPLICIT NONE
 
@@ -358,13 +359,14 @@ CONTAINS
 !> @param  CouplForce  In output, CouplForces is incremented with the derivatives of the coupling potential
 !> @param  QForces     In output, array is incremented with the derivatives of the potential (in au)
 !*******************************************************************************     
-   SUBROUTINE BathPotentialAndForces( Bath, QCoupl, QBath, V, CouplForce, QForces ) 
+   SUBROUTINE BathPotentialAndForces( Bath, QCoupl, QBath, V, CouplForce, QForces, CouplingV ) 
       IMPLICIT NONE
       TYPE(BathData), INTENT(IN)                :: Bath
       REAL, INTENT(IN)                          :: QCoupl
       REAL, DIMENSION(:), TARGET, INTENT(IN)    :: QBath
       REAL, INTENT(INOUT)                       :: V, CouplForce
       REAL, DIMENSION(:), TARGET, INTENT(INOUT) :: QForces 
+      REAL, INTENT(OUT), OPTIONAL               :: CouplingV
 
       INTEGER :: iBath
       REAL, DIMENSION(:), POINTER :: Dn
@@ -384,7 +386,12 @@ CONTAINS
          Dn => Bath%Couplings(2:Bath%BathSize)
 
          ! COUPLING POTENTIAL AND DISTORSION
-         V = V - Bath%Couplings(1) * QCoupl * QBath(1) + 0.5 * Bath%DistorsionForce * QCoupl**2
+         IF ( PRESENT( CouplingV ) ) THEN
+            V = V + 0.5 * Bath%DistorsionForce * QCoupl**2
+            CouplingV = CouplingV - Bath%Couplings(1) * QCoupl * QBath(1) 
+         ELSE
+            V = V - Bath%Couplings(1) * QCoupl * QBath(1) + 0.5 * Bath%DistorsionForce * QCoupl**2
+         END IF
 
          ! POTENTIAL OF THE BATH OSCILLATORS
          DO iBath = 1, Bath%BathSize - 1
@@ -418,7 +425,12 @@ CONTAINS
                                    + QCoupl * Bath%Couplings(iBath)
             Coupl = Coupl + Bath%Couplings(iBath) * QBath(iBath)
          END DO
-         V = V - Coupl * QCoupl + 0.5 * Bath%DistorsionForce * QCoupl**2
+         IF ( PRESENT( CouplingV ) ) THEN
+            V = V + 0.5 * Bath%DistorsionForce * QCoupl**2
+            CouplingV = CouplingV - Coupl * QCoupl
+         ELSE
+            V = V - Coupl * QCoupl + 0.5 * Bath%DistorsionForce * QCoupl**2
+         END IF
          CouplForce = CouplForce + Coupl - Bath%DistorsionForce * QCoupl
 
       END IF
@@ -442,20 +454,21 @@ CONTAINS
 !> @param Q               In output, random initial coordinates of the bath
 !> @param V               In output, random initial velocities of the bath
 !*******************************************************************************  
-   SUBROUTINE BathOfRingsThermalConditions( Bath, NBeads, BeadsFrequency, Temperature, Q, V, RandomNr )
+   SUBROUTINE BathOfRingsThermalConditions( Bath, NBeads, BeadsFrequency, Temperature, Q, V,  &
+                                                                           PotEnergy, KinEnergy, RandomNr, RingNormalModes )
       IMPLICIT NONE
       TYPE(BathData), INTENT(IN)                         :: Bath
       INTEGER, INTENT(IN)                                :: NBeads
       REAL, INTENT(IN)                                   :: BeadsFrequency, Temperature
       REAL, DIMENSION(Bath%BathSize,NBeads), INTENT(OUT) :: Q, V 
+      REAL, INTENT(OUT)                                  :: PotEnergy, KinEnergy
       TYPE(RNGInternalState), INTENT(INOUT)              :: RandomNr
-      REAL, DIMENSION(NBeads,NBeads)               :: RingPotentialMatrix, RingNormalModes
-      REAL, DIMENSION(NBeads)                      :: RingEigenvalues
-      REAL, DIMENSION(Bath%BathSize,Bath%BathSize) :: BathPotentialMatrix, BathNormalModes
-      REAL, DIMENSION(Bath%BathSize)               :: BathEigenvalues
-
-      REAL, DIMENSION(Bath%BathSize,NBeads) :: NormalQ, NormalV 
-      INTEGER :: iBath, iBead, jBath, jBead
+      TYPE(FFTHalfComplexType), INTENT(INOUT)            :: RingNormalModes
+      REAL, DIMENSION(NBeads)                            :: RingEigenvalues
+      REAL, DIMENSION(Bath%BathSize,Bath%BathSize)       :: BathPotentialMatrix, BathNormalModes
+      REAL, DIMENSION(Bath%BathSize)                     :: BathEigenvalues
+      REAL, DIMENSION(Bath%BathSize,NBeads)              :: NormalQ, NormalV 
+      INTEGER :: iBath, iBead
       REAL    :: SigmaV
 
       ! Setup bath potential matrix
@@ -481,60 +494,42 @@ CONTAINS
          END DO
       END IF
 
-      ! Setup ring potential matrix
-      RingPotentialMatrix(:,:) = 0.0
-      DO iBead = 1, NBeads-1
-         RingPotentialMatrix(iBead,iBead)   = 2.0 * BeadsFrequency**2
-         RingPotentialMatrix(iBead+1,iBead) = - BeadsFrequency**2
-         RingPotentialMatrix(iBead,iBead+1) = - BeadsFrequency**2
+      ! Compute normal mode frequencies
+      DO iBead = 1, NBeads
+         RingEigenvalues(iBead) = ( 2.0 * BeadsFrequency * SIN( MyConsts_PI * real(iBead-1) / real(NBeads) ) )**2
       END DO
-      RingPotentialMatrix(NBeads,NBeads) = 2.0 * BeadsFrequency**2
-      RingPotentialMatrix(1,NBeads) = - BeadsFrequency**2
-      RingPotentialMatrix(NBeads,1) = - BeadsFrequency**2
-
-      ! Diagonalize ring potential
-      CALL TheOneWithDiagonalization(RingPotentialMatrix, RingNormalModes, RingEigenvalues)
 
       ! Set sigma of the maxwell boltzmann distribution
       SigmaV = sqrt( Temperature / Bath%OscillatorsMass )
+      ! Initialize kinetic energy and potential energy
+      PotEnergy = 0.0
+      KinEnergy = 0.0
 
-      ! Define random coordinates and velocities in the normal modes representation
       DO iBead = 1, NBeads
          DO iBath = 1, Bath%BathSize
+            ! Define random coordinates and velocities in the normal modes representation
             NormalQ(iBath,iBead) = GaussianRandomNr(RandomNr) * SigmaV / SQRT( BathEigenvalues(iBath) + RingEigenvalues(iBead) )
             NormalV(iBath,iBead) = GaussianRandomNr(RandomNr) * SigmaV            
+            ! Compute kinetic and potential energies in normal mode representation
+            PotEnergy = PotEnergy + 0.5 * Bath%OscillatorsMass * &
+                                           (BathEigenvalues(iBath) + RingEigenvalues(iBead) ) * NormalQ(iBath,iBead)**2
+            KinEnergy = KinEnergy + 0.5 * Bath%OscillatorsMass * NormalV(iBath,iBead)**2
          END DO
       END DO
 
-      ! Transform bath to original representation
+      ! Transform normal modes of the ring polymer to ring polymer coordinates
+      DO iBath = 1, Bath%BathSize
+         CALL ExecuteFFT( RingNormalModes, NormalQ(iBath,:), INVERSE_FFT ) 
+         CALL ExecuteFFT( RingNormalModes, NormalV(iBath,:), INVERSE_FFT ) 
+      END DO
+
+      ! Transform normal modes of the bath to original representation
       IF ( Bath%BathType == CHAIN_BATH ) THEN
-         DO iBath = 1, Bath%BathSize
-            DO iBead = 1, NBeads
-               Q(iBath,iBead) = 0.0
-               V(iBath,iBead) = 0.0
-               DO jBath = 1, Bath%BathSize
-                  DO jBead = 1, NBeads
-                     Q(iBath,iBead) = Q(iBath,iBead) + &
-                                           BathNormalModes(iBath,jBath) * RingNormalModes(iBead,jBead) * NormalQ(jBath,jBead)
-                     V(iBath,iBead) = V(iBath,iBead) + &
-                                           BathNormalModes(iBath,jBath) * RingNormalModes(iBead,jBead) * NormalV(jBath,jBead)
-                  END DO
-               END DO
-            END DO
-         END DO
-
+         Q = TheOneWithMatrixMultiplication( BathNormalModes, NormalQ )
+         V = TheOneWithMatrixMultiplication( BathNormalModes, NormalV )
       ELSE IF ( Bath%BathType == STANDARD_BATH ) THEN
-         DO iBath = 1, Bath%BathSize
-            DO iBead = 1, NBeads
-               Q(iBath,iBead) = 0.0
-               V(iBath,iBead) = 0.0
-               DO jBead = 1, NBeads
-                  Q(iBath,iBead) = Q(iBath,iBead) + RingNormalModes(iBead,jBead) * NormalQ(iBath,jBead)
-                  V(iBath,iBead) = V(iBath,iBead) + RingNormalModes(iBead,jBead) * NormalV(iBath,jBead)
-               END DO
-            END DO
-         END DO
-
+         Q = NormalQ
+         V = NormalV
       END IF
 
    END SUBROUTINE BathOfRingsThermalConditions

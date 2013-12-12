@@ -333,10 +333,10 @@ PROGRAM JK6_v3
    END IF
    
    IF  ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
-      PRINT "(/,A,F10.6,/)"," * Bath distorsion force constant:              ", GetDistorsionForce( Bath ), " au"
+      PRINT "(/,A,F10.6,A,/)"," * Bath distorsion force constant:              ", GetDistorsionForce( Bath ), " au"
    ELSE IF ( BathType == DOUBLE_CHAIN ) THEN
-      PRINT "(/,A,F10.6)"," * Bath 1 distorsion force constant:              ", GetDistorsionForce( DblBath(1) ), " au"
-      PRINT "(A,F10.6,/)"," * Bath 2 distorsion force constant:              ", GetDistorsionForce( DblBath(2) ), " au"
+      PRINT "(/,A,F10.6,A)"," * Bath 1 distorsion force constant:              ", GetDistorsionForce( DblBath(1) ), " au"
+      PRINT "(A,F10.6,A,/)"," * Bath 2 distorsion force constant:              ", GetDistorsionForce( DblBath(2) ), " au"
    END IF
 
    !*************************************************************

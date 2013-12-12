@@ -13,7 +13,7 @@ LOGFILE = yes
 LOGNAME = jk6_v3.log
 
 # Compiler ( gfortran, ifort )
-FC = gfortran
+FC = ifort    
 
 # Debugging options ( yes or no )
 DEBUG = no 
@@ -28,7 +28,7 @@ FFTW3 = yes
 OPENMP = yes
 
 # linking LAPACK and BLAS 
-LAPACK = yes
+LAPACK = no 
 
 # Compile with standard real 8 (see details about the flags for each compiler...)
 REAL8 = yes
@@ -157,6 +157,47 @@ ifeq (${FC},ifort)
 	DATAFLG = -r8 -i4
    endif
  
+   # Flag to specify the position of mod files
+   MODULEFLG = -I
+
+endif
+
+ifeq (${FC},fermi)
+
+   # Set name of the cross-compiler wrapper
+   FC = bgxlf_r -qarch=qp -qtune=qp
+
+   # Optimization flags
+   O0FLAGS  = -O0
+   O1FLAGS  = -O1
+   O2FLAGS  = -O2
+   O3FLAGS  = -O3
+
+   # Debug flags
+   DEBUGFLG  = -g -qfullpath -qcheck -qflttrap -qkeepparm
+
+   # MKL flags
+   LAPACKFLG = -L\${LAPACK_LIB} -llapack -L\${ESSL_LIB} -lesslbg -L\${BLAS_LIB} -lblas
+   LAPACKCOMPILE =
+
+   # FFTW3 flags
+   ifeq (${REAL8},yes)
+      FFTW3FLG = -L\${FFTW3_LIB} -lfftw3
+      FFTW3COMPILE = -I${FFTW3_INC}
+   else
+      FFTW3FLG = -L\${FFTW3_LIB} -lfftw3f
+      FFTW3COMPILE = -I\${FFTW3_INC}
+   endif
+
+   # OPENMP flags
+   OPENMPFLG = -openmp
+
+   # Data type
+   DATAFLG =
+   ifeq (${REAL8},yes)
+      DATAFLG = -r8 -i4
+   endif
+
    # Flag to specify the position of mod files
    MODULEFLG = -I
 
@@ -402,7 +443,7 @@ ${OBJDIR}/ClassicalEqMotion.o  : ${SRCDIR}/ClassicalEqMotion.f90 ${OBJDIR}/Rando
 
 # Module containing the definitions of the independent oscillator model
 ${OBJDIR}/IndependentOscillatorsModel.o  : ${SRCDIR}/IndependentOscillatorsModel.f90 ${OBJDIR}/MyLinearAlgebra.o ${OBJDIR}/PotentialModule.o \
-                                           ${OBJDIR}/RandomNumberGenerator.o ${OBJDIR}/SplineInterpolator.o ${COMMONDEP}
+                                           ${OBJDIR}/RandomNumberGenerator.o ${OBJDIR}/SplineInterpolator.o ${OBJDIR}/FFTWrapper.o ${COMMONDEP}
 
 # Module containing the spline interpolation subroutines
 ${OBJDIR}/SplineInterpolator.o : ${SRCDIR}/SplineInterpolator.f90 ${OBJDIR}/NRUtility.o ${COMMONDEP}

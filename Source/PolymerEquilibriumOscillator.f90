@@ -466,11 +466,11 @@ MODULE PolymerEquilibriumOscillator
 
          ! PRINT INITIAL CONDITIONS of THE BATH and THE SYSTEM
          __OMP_OnlyMasterBEGIN
-            WRITE(*,600)  KinEnergy/(NDim*NBeads) * EnergyConversion(InternalUnits,InputUnits), EnergyUnit(InputUnits),           &
-                          2.0*KinEnergy/(NDim*NBeads) * TemperatureConversion(InternalUnits,InputUnits), TemperUnit(InputUnits),  &
-                          PotEnergy/(NDim*NBeads) * EnergyConversion(InternalUnits,InputUnits), EnergyUnit(InputUnits),           &
-                          2.0*PotEnergy/(NDim*NBeads) * TemperatureConversion(InternalUnits,InputUnits), TemperUnit(InputUnits)
-         __OMP_OnlyMasterEND
+            WRITE(*,600)  KinEnergy/(NDim*NBeads) * EnergyConversion(InternalUnits,InputUnits), EnergyUnit(InputUnits),          &
+                          2.0*KinEnergy/(NDim*NBeads) * TemperatureConversion(InternalUnits,InputUnits), TemperUnit(InputUnits), &
+                          PotEnergy/(NDim*NBeads) * EnergyConversion(InternalUnits,InputUnits), EnergyUnit(InputUnits),          &
+                          2.0*PotEnergy/(NDim*NBeads) * TemperatureConversion(InternalUnits,InputUnits),                         &
+                          TemperUnit(InputUnits)  __OMP_OnlyMasterEND
 
          ! Compute and store expectation values of the energy
          AverageE(:,0) = AverageE(:,0) + EnergyAverages( X, V, MassVector )
@@ -580,8 +580,8 @@ MODULE PolymerEquilibriumOscillator
             WRITE(*,700)   TrajKinAverage*EnergyConversion(InternalUnits,InputUnits), EnergyUnit(InputUnits),            &
                            2.0*TrajKinAverage*TemperatureConversion(InternalUnits,InputUnits), TemperUnit(InputUnits),   &
                            TrajPotAverage*EnergyConversion(InternalUnits,InputUnits), EnergyUnit(InputUnits),            &
-                           2.0*TrajPotAverage*TemperatureConversion(InternalUnits,InputUnits), TemperUnit(InputUnits)
-         __OMP_OnlyMasterEND
+                           2.0*TrajPotAverage*TemperatureConversion(InternalUnits,InputUnits),                           &
+                           TemperUnit(InputUnits)  __OMP_OnlyMasterEND
 
          ! Increment averages over the whole set of trajs
          TotalKinAverage  = TotalKinAverage  + TrajKinAverage
@@ -694,7 +694,6 @@ MODULE PolymerEquilibriumOscillator
       END DO
       
       DEALLOCATE( MolecularDynamics, Equilibration, RingNormalModes )
-
 
    END SUBROUTINE PolymerEquilibriumOscillator_Dispose
 
@@ -827,7 +826,7 @@ MODULE PolymerEquilibriumOscillator
 
       ! Set eigenvalues of the bead
       DO iBead = 1, NBeads
-         RingEigenvalues(iBead) = 2.0 * BeadsFrequency * SIN( MyConsts_PI * real(iBead-1) / real(NBeads) )
+         RingEigenvalues(iBead) = ( 2.0 * BeadsFrequency * SIN( MyConsts_PI * real(iBead-1) / real(NBeads) ) )**2
       END DO
 
       ! Set sigma of the maxwell boltzmann distribution
