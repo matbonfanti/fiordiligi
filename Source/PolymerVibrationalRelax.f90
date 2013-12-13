@@ -234,11 +234,11 @@ MODULE PolymerVibrationalRelax
       
       ! Set variables for EOM integration of the system only in the microcanonical ensamble 
       ! this will be done in a serial way, so no replicated data
-      IF ( MorsePotential ) THEN
-         CALL EvolutionSetup( InitialConditions, 4, MassVector(1:4), TimeStep )
-      ELSE
-         CALL EvolutionSetup( InitialConditions, 1, MassVector(1:1), TimeStep )
-      END IF
+      CALL EvolutionSetup( InitialConditions, NSystem, MassVector(1:NSystem), TimeStep )
+      ! Set ring polymer molecular dynamics parameter
+      CALL SetupRingPolymer( InitialConditions, NBeads, BeadsFrequency ) 
+      CALL SetupThermostat( InitialConditions, 0.001, Temperature )
+
 
       ! ALLOCATE AND INITIALIZE DATA WITH THE AVERAGES OVER THE SET OF TRAJECTORIES
 
@@ -435,7 +435,7 @@ MODULE PolymerVibrationalRelax
          PRINT "(/,A)", " Propagating system and bath in the microcanonical ensamble... " __OMP_OnlyMasterEND
          
          ! Compute starting potential and forces
-         CALL EOM_RPMSymplectic( MolecularDynamics(CurrentThread), X, V, A,  VibrRelaxPotential, PotEnergy, RandomNr, .TRUE. )
+         CALL EOM_RPMSymplectic( MolecularDynamics(CurrentThread), X, V, A,  VibrRelaxPotential, PotEnergy, RandomNr, 1 )
 
          ! cycle over nstep velocity verlet iterations
          DO iStep = 1,NrOfSteps
@@ -807,17 +807,20 @@ MODULE PolymerVibrationalRelax
       IMPLICIT NONE
       REAL, DIMENSION(:,:), INTENT(OUT) :: InitConditions
 
-      INTEGER :: NTimeStepEachSnap, iTraj, iStep
+      INTEGER :: NTimeStepEachSnap, iTraj, iStep, iBeads
       REAL :: PotEnergy
-      REAL, DIMENSION(10) :: Accel, Pos, Vel
+      REAL, DIMENSION(NSystem*NBeads) :: Accel, Pos, Vel
+      REAL :: XCentroid, XGyration
+      REAL :: VCentroid, VGyration
+      REAL :: KinCentroid, PotCentroid
+      REAL, DIMENSION(1) :: Dummy
 
       CALL ERROR( SIZE(InitConditions,2) /= NSystem*2, "MicrocanonicalSamplingOfTheSystem: wrong nr of dimensions"  ) 
 
-      Accel(:) = 0.0
       IF ( MorsePotential ) THEN
-         Pos(1) = 0.0
+         Pos(:) = 0.0
          PotEnergy = MorseV( Pos(1:1), Accel(1:1) )
-         Vel(1) = sqrt( 2.0 * (InitEnergy-PotEnergy) / MassVector(1) )
+         Vel(:) = sqrt( 2.0 * (InitEnergy-PotEnergy) / MassVector(1) )
       ELSE
          Pos(1:2) = 0.0
          Pos(3) = HZEquilibrium 
@@ -828,12 +831,11 @@ MODULE PolymerVibrationalRelax
          Vel(3) = + sqrt( 2.0 * (InitEnergy-PotEnergy) / MassVector(3) ) * 0.958234410548192
          Vel(4) = - sqrt( 2.0 * (InitEnergy-PotEnergy) / MassVector(4) ) * 0.285983940880181 
       END IF
-      DO iStep = 1, NSystem
-         Accel(iStep) = Accel(iStep) / MassVector(iStep)
-      END DO
+      CALL EOM_RPMSymplectic( InitialConditions, Pos, Vel, Accel, MorseV, PotEnergy, RandomNr, 1 )
 
       ! Define when to store the dynamics snapshot
       NTimeStepEachSnap = INT( TimeBetweenSnaps / TimeStep )
+      NTimeStepEachSnap = 100
 
       ! Cycle over the nr of snapshot to store
       DO iTraj = 1, SIZE(InitConditions,1)
@@ -842,17 +844,36 @@ MODULE PolymerVibrationalRelax
          DO iStep = 1, NTimeStepEachSnap
             ! Propagate for one timestep with Velocity-Verlet
             IF ( MorsePotential ) THEN
-               CALL EOM_LangevinSecondOrder( InitialConditions, Pos(1:1), Vel(1:1), Accel(1:1), MorseV, PotEnergy, RandomNr )
+               CALL EOM_RPMSymplectic( InitialConditions, Pos, Vel, Accel, MorseV, PotEnergy, RandomNr, 2 )
             ELSE
-               CALL EOM_LangevinSecondOrder( InitialConditions, Pos(1:4), Vel(1:4), Accel(1:4), VHFourDimensional, PotEnergy,&
-                                                                                                                  RandomNr )
+               CALL EOM_RPMSymplectic( InitialConditions, Pos, Vel, Accel, VHFourDimensional, PotEnergy, RandomNr, 2 )
             END IF
+
          END DO
+
+         XCentroid = 0.0; VCentroid = 0.0; XGyration = 0.0; VGyration = 0.0
+         PotCentroid = 0.0
+         DO iBeads = 1, NBeads
+            XCentroid = XCentroid + Pos(iBeads)
+            VCentroid = VCentroid + Vel(iBeads)
+            XGyration = XGyration + Pos(iBeads)**2
+            VGyration = VGyration + Vel(iBeads)**2
+            PotCentroid = PotCentroid + MorseV( (/ Pos(iBeads) /), Dummy )
+         END DO
+         XCentroid = XCentroid / NBeads
+         VCentroid = VCentroid / NBeads
+         XGyration = SQRT( XGyration / NBeads - XCentroid**2 )
+         VGyration = SQRT( VGyration / NBeads - VCentroid**2 )
+         PotCentroid = PotCentroid / NBeads
+         KinCentroid = 0.5 * MassVector(1) * VCentroid**2
+         WRITE(88,"(I5,10F20.8)")  iTraj, XCentroid, VCentroid, XGyration, VGyration
+         WRITE(89,"(I5,10F20.8)")  iTraj, PotCentroid, KinCentroid,  PotCentroid+KinCentroid
 
          ! Store snapshot
          InitConditions( iTraj, 1:NSystem )           = Pos(1:NSystem)
          InitConditions( iTraj, NSystem+1:2*NSystem ) = Vel(1:NSystem)
       END DO
+      STOP
 
    END SUBROUTINE MicrocanonicalSamplingOfTheSystem
 

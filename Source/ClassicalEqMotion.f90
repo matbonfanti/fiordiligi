@@ -609,22 +609,25 @@ MODULE ClassicalEqMotion
 !>                   EOM_RPMSymplectic
 !*******************************************************************************
 !> Propagate trajectory with symplectic algorithm for Ring-Polymer MD. 
+!> SpecialOptions : 1 - initialize acceleration and do not propagate
+!>                  2 - equilibrate only the internal mode of the ring polymer 
 !>
-!> @param EvolData      Evolution data type
-!> @param Pos           In/Out coordinates vector
-!> @param Vel           In/Out velocities vector
-!> @param Acc           In/Out acceleration vector (need to be properly computed as input)
-!> @param GetPotential  Function to evaluete potential and forces
-!> @param RandomNr      Internal state of the random number generator
+!> @param EvolData        Evolution data type
+!> @param Pos             In/Out coordinates vector
+!> @param Vel             In/Out velocities vector
+!> @param Acc             In/Out acceleration vector (need to be properly computed as input)
+!> @param GetPotential    Function to evaluete potential and forces
+!> @param RandomNr        Internal state of the random number generator
+!> @param SpecialOptions  Define special behaviour of the subroutine
 !*******************************************************************************
-   SUBROUTINE EOM_RPMSymplectic( EvolData, Pos, Vel, Acc, GetPotential, V, RandomNr, InitializeAcceleration )
+   SUBROUTINE EOM_RPMSymplectic( EvolData, Pos, Vel, Acc, GetPotential, V, RandomNr, SpecialOptions )
       IMPLICIT NONE
       TYPE( Evolution ), INTENT(INOUT)                                   :: EvolData
       REAL, DIMENSION( EvolData%NDoF * EvolData%NBeads ), INTENT(INOUT)  :: Pos, Vel, Acc
       REAL, INTENT(OUT)                                                  :: V
       TYPE(RNGInternalState), INTENT(INOUT)                              :: RandomNr
-      LOGICAL, OPTIONAL                                                  :: InitializeAcceleration
-
+      INTEGER, INTENT(IN), OPTIONAL                                      :: SpecialOptions
+   
       INTERFACE
          REAL FUNCTION GetPotential( X, Force )
             REAL, DIMENSION(:), TARGET, INTENT(IN)  :: X
@@ -633,20 +636,20 @@ MODULE ClassicalEqMotion
       END INTERFACE
 
       REAL, DIMENSION(EvolData%NBeads)  :: BeadQAt0, BeadVAt0, BeadQAtT, BeadVAtT
-      INTEGER :: iDoF, iBead, iStart, iEnd
+      INTEGER :: iDoF, iBead, iStart, iEnd, PropagOption
       REAL    :: VBead
-      LOGICAL :: DoPropagation
 
       CALL ERROR( .NOT. EvolData%HasRingPolymer, " EOM_RPMSymplectic: data for RPMD are needed "  ) 
 
-      ! the subroutine can be used for initial definition of acceleration
-      IF ( PRESENT(InitializeAcceleration) ) THEN
-         DoPropagation = .NOT. InitializeAcceleration      ! in such case, no propagation is performed
+      ! the subroutine can be used for special kind of propagations
+      IF ( PRESENT(SpecialOptions) ) THEN
+         PropagOption = SpecialOptions      ! in such case, a special option is enabled
       ELSE
-         DoPropagation = .TRUE.
+         PropagOption = 0                   ! 0 means normal propagation
       END IF
 
-      IF ( DoPropagation ) THEN
+      IF ( PropagOption /= 1 ) THEN
+
       ! (1)  HALF TIME STEP FOR THERMOSTATTING THE SYSTEM (only when langevin dynamics)
          IF ( EvolData%HasThermostat ) THEN
             DO iDoF = 1, EvolData%NDoF
@@ -656,10 +659,18 @@ MODULE ClassicalEqMotion
                END DO
                CALL ExecuteFFT( EvolData%RingNormalModes, BeadVAt0, DIRECT_FFT ) ! transform to normal modes coords
 
-               DO iBead = 1, EvolData%NBeads                                   ! evolve normal modes
-                  BeadVAtT(iBead) = BeadVAt0(iBead) * EvolData%AlphaLang(iBead) + &
-                                    GaussianRandomNr( RandomNr ) * EvolData%BetaLang(iBead) / SQRT( EvolData%Mass(iDoF) )
-               END DO
+               IF ( PropagOption == 2 ) THEN
+                  BeadVAtT(1) = BeadVAt0(1)
+                  DO iBead = 2, EvolData%NBeads                                   ! evolve normal modes
+                     BeadVAtT(iBead) = BeadVAt0(iBead) * EvolData%AlphaLang(iBead) + &
+                                       GaussianRandomNr( RandomNr ) * EvolData%BetaLang(iBead) / SQRT( EvolData%Mass(iDoF) )
+                  END DO
+               ELSE
+                  DO iBead = 1, EvolData%NBeads                                   ! evolve normal modes
+                     BeadVAtT(iBead) = BeadVAt0(iBead) * EvolData%AlphaLang(iBead) + &
+                                       GaussianRandomNr( RandomNr ) * EvolData%BetaLang(iBead) / SQRT( EvolData%Mass(iDoF) )
+                  END DO
+               END IF
 
                CALL ExecuteFFT( EvolData%RingNormalModes, BeadVAtT, INVERSE_FFT ) ! transform back to original coords
                DO iBead = 1, EvolData%NBeads               ! copy single bead positions and velocities to input arrays
@@ -688,7 +699,7 @@ MODULE ClassicalEqMotion
          CALL ExecuteFFT( EvolData%RingNormalModes, BeadQAt0, DIRECT_FFT ) ! transform to normal modes coords
          CALL ExecuteFFT( EvolData%RingNormalModes, BeadVAt0, DIRECT_FFT )
 
-         IF ( DoPropagation ) THEN
+         IF ( PropagOption /= 1 ) THEN
             DO iBead = 1, EvolData%NBeads                                   ! evolve normal modes
                BeadQAtT(iBead) = EvolData%NormModesPropag(1,iBead) * BeadQAt0(iBead) + &
                                                                           EvolData%NormModesPropag(2,iBead) * BeadVAt0(iBead)
@@ -725,7 +736,7 @@ MODULE ClassicalEqMotion
          V = V + VBead
       END DO
 
-      IF ( DoPropagation ) THEN
+      IF ( PropagOption /= 1 ) THEN
       ! (5) HALF TIME STEP FOR THE VELOCITIES
          DO iBead = 1, EvolData%NBeads
             iStart = (iBead-1) * EvolData%NDoF + 1
@@ -742,10 +753,18 @@ MODULE ClassicalEqMotion
                END DO
                CALL ExecuteFFT( EvolData%RingNormalModes, BeadVAt0, DIRECT_FFT ) ! transform to normal modes coords
 
-               DO iBead = 1, EvolData%NBeads                                   ! evolve normal modes
-                  BeadVAtT(iBead) = BeadVAt0(iBead) * EvolData%AlphaLang(iBead) + &
-                                    GaussianRandomNr(RandomNr) * EvolData%BetaLang(iBead) / SQRT( EvolData%Mass(iDoF) )
-               END DO
+               IF ( PropagOption == 2 ) THEN
+                  BeadVAtT(1) = BeadVAt0(1)
+                  DO iBead = 2, EvolData%NBeads                                   ! evolve normal modes
+                     BeadVAtT(iBead) = BeadVAt0(iBead) * EvolData%AlphaLang(iBead) + &
+                                       GaussianRandomNr(RandomNr) * EvolData%BetaLang(iBead) / SQRT( EvolData%Mass(iDoF) )
+                  END DO
+               ELSE
+                  DO iBead = 1, EvolData%NBeads                                   ! evolve normal modes
+                     BeadVAtT(iBead) = BeadVAt0(iBead) * EvolData%AlphaLang(iBead) + &
+                                       GaussianRandomNr(RandomNr) * EvolData%BetaLang(iBead) / SQRT( EvolData%Mass(iDoF) )
+                  END DO
+               END IF
 
                CALL ExecuteFFT( EvolData%RingNormalModes, BeadVAtT, INVERSE_FFT ) ! transform back to original coords
                DO iBead = 1, EvolData%NBeads               ! copy single bead positions and velocities to input arrays

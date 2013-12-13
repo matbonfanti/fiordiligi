@@ -403,7 +403,7 @@ MODULE PolymerEquilibriumOscillator
                                      NBeads*Temperature*TemperatureConversion(InternalUnits,InputUnits)  __OMP_OnlyMasterEND
 
          ! Compute starting potential and forces
-         CALL EOM_RPMSymplectic( Equilibration(CurrentThread), X, V, A,  SystemPotential, PotEnergy, RandomNr, .TRUE. )
+         CALL EOM_RPMSymplectic( Equilibration(CurrentThread), X, V, A,  SystemPotential, PotEnergy, RandomNr, 1 )
 
          ! Initialize temperature average and variance
          TempAverage = 0.0
@@ -456,7 +456,7 @@ MODULE PolymerEquilibriumOscillator
 
          ! compute initial kinetic energy for this traj
          KinEnergy = EOM_KineticEnergy(Equilibration(CurrentThread), V )
-         CALL EOM_RPMSymplectic( Equilibration(CurrentThread), X, V, A,  SystemPotential, PotEnergy, RandomNr, .TRUE. )
+         CALL EOM_RPMSymplectic( Equilibration(CurrentThread), X, V, A,  SystemPotential, PotEnergy, RandomNr, 1 )
 
          ! Increment averages of Kin and Pot for the single traj
          TrajKinAverage  = KinEnergy/(NDim*NBeads)
@@ -519,7 +519,7 @@ MODULE PolymerEquilibriumOscillator
          __OMP_OnlyMasterBEGIN  PRINT "(/,A)", " Propagating the system in time... " __OMP_OnlyMasterEND
          
          ! Compute starting potential and forces
-         CALL EOM_RPMSymplectic( MolecularDynamics(CurrentThread), X, V, A,  SystemPotential, PotEnergy, RandomNr, .TRUE. )
+         CALL EOM_RPMSymplectic( MolecularDynamics(CurrentThread), X, V, A,  SystemPotential, PotEnergy, RandomNr, 1 )
 
          ! cycle over nstep velocity verlet iterations
          DO iStep = 1,NrOfSteps
