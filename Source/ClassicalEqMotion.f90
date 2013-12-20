@@ -638,6 +638,7 @@ MODULE ClassicalEqMotion
       REAL, DIMENSION(EvolData%NBeads)  :: BeadQAt0, BeadVAt0, BeadQAtT, BeadVAtT
       INTEGER :: iDoF, iBead, iStart, iEnd, PropagOption
       REAL    :: VBead
+      REAL, DIMENSION(EvolData%NBeads, EvolData%NDoF) :: StoreAccel
 
       CALL ERROR( .NOT. EvolData%HasRingPolymer, " EOM_RPMSymplectic: data for RPMD are needed "  ) 
 
@@ -700,12 +701,23 @@ MODULE ClassicalEqMotion
          CALL ExecuteFFT( EvolData%RingNormalModes, BeadVAt0, DIRECT_FFT )
 
          IF ( PropagOption /= 1 ) THEN
+            IF ( PropagOption == 2 ) THEN
+            BeadQAtT(1) = BeadQAt0(1)
+            BeadVAtT(1) = BeadVAt0(1)
+            DO iBead = 2, EvolData%NBeads                                   ! evolve normal modes
+               BeadQAtT(iBead) = EvolData%NormModesPropag(1,iBead) * BeadQAt0(iBead) + &
+                                                                          EvolData%NormModesPropag(2,iBead) * BeadVAt0(iBead)
+               BeadVAtT(iBead) = EvolData%NormModesPropag(3,iBead) * BeadQAt0(iBead) + &
+                                                                          EvolData%NormModesPropag(4,iBead) * BeadVAt0(iBead)
+            END DO
+            ELSE
             DO iBead = 1, EvolData%NBeads                                   ! evolve normal modes
                BeadQAtT(iBead) = EvolData%NormModesPropag(1,iBead) * BeadQAt0(iBead) + &
                                                                           EvolData%NormModesPropag(2,iBead) * BeadVAt0(iBead)
                BeadVAtT(iBead) = EvolData%NormModesPropag(3,iBead) * BeadQAt0(iBead) + &
                                                                           EvolData%NormModesPropag(4,iBead) * BeadVAt0(iBead)
             END DO
+            END IF
          ELSE
             BeadQAtT(:) = BeadQAt0(:)
             BeadVAtT(:) = BeadVAt0(:)
@@ -735,6 +747,20 @@ MODULE ClassicalEqMotion
          Acc( iStart:iEnd ) = Acc( iStart:iEnd ) / EvolData%Mass(:)       ! only potential forces 
          V = V + VBead
       END DO
+
+      IF ( PropagOption == 2 ) THEN
+         DO iBead = 1, EvolData%NBeads
+            StoreAccel(iBead, :) = Acc( (iBead-1) * EvolData%NDoF + 1 : iBead * EvolData%NDoF )
+         END DO
+         DO iDoF = 1, EvolData%NDoF
+            CALL ExecuteFFT( EvolData%RingNormalModes, StoreAccel(:, iDoF), DIRECT_FFT )
+            StoreAccel(1, iDoF) = 0.0
+            CALL ExecuteFFT( EvolData%RingNormalModes, StoreAccel(:, iDoF), INVERSE_FFT )
+         END DO
+         DO iBead = 1, EvolData%NBeads
+            Acc( (iBead-1) * EvolData%NDoF + 1 : iBead * EvolData%NDoF ) = StoreAccel(iBead, :) 
+         END DO
+      END IF
 
       IF ( PropagOption /= 1 ) THEN
       ! (5) HALF TIME STEP FOR THE VELOCITIES

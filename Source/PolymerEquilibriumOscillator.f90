@@ -86,7 +86,8 @@ MODULE PolymerEquilibriumOscillator
    REAL, DIMENSION(:), ALLOCATABLE      :: EquilibAveTvsTime      !< Average temperature at time T during equilibration
    INTEGER, PARAMETER                   :: NrOfEnergyAverages = 4 !< Nr of average values computed by the function EnergyAverages
    REAL, DIMENSION(:,:), ALLOCATABLE    :: AverageE               !< Traj averages of the energy in time
-   
+   REAL, DIMENSION(:,:), ALLOCATABLE    :: SigmaE                 !< Traj sigmas of the energy in time
+
    ! Internal state of the random number generator
    TYPE(RNGInternalState), SAVE :: RandomNr                       !< Internal state of the random number generator
    
@@ -287,8 +288,9 @@ MODULE PolymerEquilibriumOscillator
       PositionCorrelation(:)  = 0.0
 
       ! Allocate and initialize the variable for the trajectory averages of the energy
-      ALLOCATE( AverageE(NrOfEnergyAverages,0:NrOfPrintSteps) ) 
+      ALLOCATE( AverageE(NrOfEnergyAverages,0:NrOfPrintSteps), SigmaE(NrOfEnergyAverages,0:NrOfPrintSteps) ) 
       AverageE(:,:) = 0.0
+      SigmaE(:,:) = 0.0
       
       ! Average coordinates over time and power spectrum of the auto-correlation function
       IF ( PrintType >= FULL ) THEN
@@ -327,6 +329,8 @@ MODULE PolymerEquilibriumOscillator
       REAL     ::  TotalKinAverage, TotalKinVariance, TotalPotAverage, TotalPotVariance
       !> Initial coordinates for the autocorrelation function
       REAL, DIMENSION(NDim*NBeads) :: X0
+      !> Energy averages at given time and trajectory
+      REAL, DIMENSION(NrOfEnergyAverages) :: IstEnergyAver
       !> Counters
       INTEGER :: iTraj, iStep, kStep, NInit
       !> Output file name
@@ -374,7 +378,7 @@ MODULE PolymerEquilibriumOscillator
 
       !$OMP PARALLEL PRIVATE( CurrentThread, RandomNr, kStep, iStep, OutFileName, DebugUnitEn, DebugUnitCoord, DebugUnitVel,    &
       !$OMP&                  X, X0, V, A, PotEnergy, KinEnergy, IstTemperature, TempAverage, TempVariance,                     & 
-      !$OMP&                  TrajKinAverage, TrajKinVariance, TrajPotAverage, TrajPotVariance )
+      !$OMP&                  TrajKinAverage, TrajKinVariance, TrajPotAverage, TrajPotVariance, IstEnergyAver )
 
       ! Set total nr of OPENMP threads and nr of the current thread
       !$OMP MASTER
@@ -386,7 +390,7 @@ MODULE PolymerEquilibriumOscillator
       CALL SetSeed( RandomNr, -1-CurrentThread+1 )
 
       !run NrTrajs number of trajectories
-      !$OMP DO REDUCTION( + : EquilibAveTvsTime, AverageE, PositionCorrelation, AverageCoord,    &
+      !$OMP DO REDUCTION( + : EquilibAveTvsTime, AverageE, SigmaE, PositionCorrelation, AverageCoord,    &
       !$OMP&                  TotalKinAverage, TotalKinVariance, TotalPotAverage, TotalPotVariance )
       DO iTraj = 1,NrTrajs
 
@@ -473,7 +477,9 @@ MODULE PolymerEquilibriumOscillator
                           TemperUnit(InputUnits)  __OMP_OnlyMasterEND
 
          ! Compute and store expectation values of the energy
-         AverageE(:,0) = AverageE(:,0) + EnergyAverages( X, V, MassVector )
+         IstEnergyAver =  EnergyAverages( X, V, MassVector )
+         AverageE(:,0) = AverageE(:,0) + IstEnergyAver
+         SigmaE(:,0)   = SigmaE(:,0)   + IstEnergyAver**2
 
          ! Store initial coordinates
          X0 = X
@@ -544,7 +550,9 @@ MODULE PolymerEquilibriumOscillator
                TrajPotVariance = TrajPotVariance + (PotEnergy/(NDim*NBeads))**2
 
                ! Compute and store expectation values of the energy
-               AverageE(:,kStep) = AverageE(:,kStep) + EnergyAverages( X, V, MassVector ) 
+               IstEnergyAver =  EnergyAverages( X, V, MassVector )
+               AverageE(:,kStep) = AverageE(:,kStep) + IstEnergyAver
+               SigmaE(:,kStep)   = SigmaE(:,kStep)   + IstEnergyAver**2
 
                ! Compute position correlation function
                PositionCorrelation(kStep) = PositionCorrelation(kStep) + CorrelationFunction( X, X0 )
@@ -615,6 +623,8 @@ MODULE PolymerEquilibriumOscillator
       ! Normalize averages 
       PositionCorrelation(:)       =  PositionCorrelation(:)        /  real(NrTrajs)
       AverageE(:,0:NrOfPrintSteps) =  AverageE(:,0:NrOfPrintSteps)  /  real(NrTrajs)
+      SigmaE(:,:)   =  SQRT( SigmaE(:,:) / real(NrTrajs-1) - real(NrTrajs)/real(NrTrajs-1) * AverageE(:,:)**2 )
+
       IF ( PrintType >= FULL )   AverageCoord(1:NDim,:) =  AverageCoord(1:NDim,:)  /  real(NrTrajs) 
       IF ( PrintType >= FULL )   EquilibAveTvsTime(:)   =  EquilibAveTvsTime(:)    /  real(NrTrajs) 
 
@@ -632,7 +642,7 @@ MODULE PolymerEquilibriumOscillator
       ! PRINT average energy of the system, of the coupling, of the bath
       DO iStep = 0, NrOfPrintSteps
          WRITE(EnergyOutputUnit,"(F14.8,100F14.8)") TimeStep*real(PrintStepInterval*iStep)/MyConsts_fs2AU,  &
-                              AverageE(:,iStep)*MyConsts_Hartree2eV
+                     AverageE(:,iStep)*MyConsts_Hartree2eV, SigmaE(:,iStep)*MyConsts_Hartree2eV
       END DO
 
       IF ( PrintType >= FULL ) THEN

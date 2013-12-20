@@ -68,6 +68,7 @@ MODULE PolymerVibrationalRelax
 
    ! Initial conditions of the bath
    REAL    :: Temperature             !< Temperature of the simulation
+   REAL    :: InitTemp
 
    ! Variables of the propagation
    INTEGER :: NrTrajs                   !< Nr of trajectories
@@ -77,8 +78,9 @@ MODULE PolymerVibrationalRelax
    INTEGER :: PrintStepInterval         !< Nr of time steps between each printing of propagation info ( = NrOfSteps / NrOfPrintSteps )
 
    ! Time evolution dataset
-   TYPE(Evolution), DIMENSION(:), POINTER :: MolecularDynamics     !< Propagate in micro/canonical ensamble to extract results
-   TYPE(Evolution), SAVE :: InitialConditions                      !< Propagate in microcanonical ensamble to generate initial conditions
+   TYPE(Evolution), DIMENSION(:), POINTER :: MolecularDynamics   !< Propagate in micro/canonical ensamble to extract results
+   TYPE(Evolution), DIMENSION(:), POINTER :: InitialConditions   !< Propagate in microcanonical ensamble to generate initial conditions
+   TYPE(Evolution), SAVE :: MicrocanonicalInit                   !< Propagate in microcanonical ensamble to generate initial conditions
 
    ! Transform to ring normal modes 
    TYPE(FFTHalfComplexType), DIMENSION(:), POINTER  :: RingNormalModes   !< Transform ring coordinates to normal modes (and viceversa)
@@ -132,6 +134,10 @@ MODULE PolymerVibrationalRelax
       ! Temperature of the bath
       CALL SetFieldFromInput( InputData, "Temperature", Temperature, 1.0 )
       Temperature = Temperature * TemperatureConversion(InputUnits, InternalUnits)
+
+      ! Initial temperature of the system
+      CALL SetFieldFromInput( InputData, "InitTemp", InitTemp )
+      InitTemp = InitTemp * TemperatureConversion(InputUnits, InternalUnits)
 
       ! Frequency and force constant of the harmonic force between the beads
       BeadsFrequency = NBeads * Temperature
@@ -221,7 +227,7 @@ MODULE PolymerVibrationalRelax
       
       ! Propagation data is replicated, so that in the parallel region of the code
       ! each threads has its own set of variables
-      ALLOCATE( MolecularDynamics(NrOfThreads), RingNormalModes(NrOfThreads) )
+      ALLOCATE( MolecularDynamics(NrOfThreads), RingNormalModes(NrOfThreads),  InitialConditions(NrOfThreads) )
       DO iThread = 1, NrOfThreads
          ! Set variables for EOM integration in the microcanonical ensamble (system + bath)
          CALL EvolutionSetup( MolecularDynamics(iThread), NDim, MassVector, TimeStep )
@@ -230,15 +236,16 @@ MODULE PolymerVibrationalRelax
          
          ! Set transform from ring coordinates to normal modes
          CALL SetupFFT( RingNormalModes(iThread), NBeads ) 
-      END DO
-      
-      ! Set variables for EOM integration of the system only in the microcanonical ensamble 
-      ! this will be done in a serial way, so no replicated data
-      CALL EvolutionSetup( InitialConditions, NSystem, MassVector(1:NSystem), TimeStep )
-      ! Set ring polymer molecular dynamics parameter
-      CALL SetupRingPolymer( InitialConditions, NBeads, BeadsFrequency ) 
-      CALL SetupThermostat( InitialConditions, 0.001, Temperature )
 
+         ! Set variables for EOM integration of the system only in the microcanonical ensamble 
+         ! this will be done in a serial way, so no replicated data
+         CALL EvolutionSetup( InitialConditions(iThread), NSystem, MassVector(1:NSystem), TimeStep )
+         ! Set ring polymer molecular dynamics parameter
+         CALL SetupRingPolymer( InitialConditions(iThread), NBeads, BeadsFrequency ) 
+         CALL SetupThermostat( InitialConditions(iThread), 0.01, InitTemp )
+      END DO
+
+      CALL EvolutionSetup( MicrocanonicalInit, NSystem, MassVector(1:NSystem), TimeStep )
 
       ! ALLOCATE AND INITIALIZE DATA WITH THE AVERAGES OVER THE SET OF TRAJECTORIES
 
@@ -286,7 +293,7 @@ MODULE PolymerVibrationalRelax
       CHARACTER(100) :: OutFileName
       !> Centroid of positions and velocities
       REAL, DIMENSION(NDim*NBeads) :: X0
-
+      REAL, DIMENSION(NSystem*NBeads) :: InitX, InitV
       REAL, DIMENSION(NrOfInitSnapshots,NSystem*2) :: SystemInitConditions
 
       REAL, DIMENSION(NBath,NBeads) :: InitQBath, InitVBath
@@ -328,7 +335,7 @@ MODULE PolymerVibrationalRelax
       InitPotVariance = 0.0
 
       !$OMP PARALLEL PRIVATE( CurrentThread, RandomNr, iBead, iStep, kStep, InitQBath, InitVBath,            &
-      !$OMP&                  X, X0, V, A, PotEnergy, KinEnergy,                     & 
+      !$OMP&                  X, X0, V, A, PotEnergy, KinEnergy,  InitX, InitV,                   & 
       !$OMP&                        OutFileName, DebugUnitEn, DebugUnitCoord, DebugUnitVel )
 
       ! Set total nr of OPENMP threads and nr of the current thread
@@ -354,11 +361,24 @@ MODULE PolymerVibrationalRelax
          ! *************  Initial conditions of the system *****************
 
          ! Choose a random integer and choose a x,p in microcanonical distribution
+
          kStep = CEILING( UniformRandomNr(RandomNr)*real(NrOfInitSnapshots) )
+         InitX = SystemInitConditions( kStep, 1 )
+         InitV = SystemInitConditions( kStep, 2 )
+
+         IF ( InitTemp > 0.0 ) THEN
+             CALL RingPolymerInitialEquilibration(  InitX, InitV, CurrentThread )
+         END IF
+
          DO iBead = 1, NBeads
-            X((iBead-1)*NDim+1:(iBead-1)*NDim+NSystem) = SystemInitConditions( kStep, 1:NSystem )
-            V((iBead-1)*NDim+1:(iBead-1)*NDim+NSystem) = SystemInitConditions( kStep, NSystem+1:NSystem*2 )
+            X((iBead-1)*NDim+1:(iBead-1)*NDim+NSystem) = InitX((iBead-1)*NSystem+1: iBead*NSystem)
+            V((iBead-1)*NDim+1:(iBead-1)*NDim+NSystem) = InitV((iBead-1)*NSystem+1: iBead*NSystem)
          END DO
+! 
+!          DO iBead = 1, NBeads
+!             X((iBead-1)*NDim+1:(iBead-1)*NDim+NSystem) = SystemInitConditions( kStep, 1:NSystem )
+!             V((iBead-1)*NDim+1:(iBead-1)*NDim+NSystem) = SystemInitConditions( kStep, NSystem+1:NSystem*2 )
+!          END DO
 
          ! *************  Initial conditions of the bath *****************
 
@@ -376,10 +396,10 @@ MODULE PolymerVibrationalRelax
          !*************************************************************
          
          ! Increment averages of the initial conditions of the bath
-         InitKinAverage  = InitKinAverage + KinEnergy
-         InitKinVariance = InitKinVariance + KinEnergy**2
-         InitPotAverage  = InitPotAverage + PotEnergy
-         InitPotVariance = InitPotVariance + PotEnergy**2
+         InitKinAverage  = InitKinAverage + KinEnergy/real(NBath*NBeads) 
+         InitKinVariance = InitKinVariance + (KinEnergy/real(NBath*NBeads))**2
+         InitPotAverage  = InitPotAverage + PotEnergy/real(NBath*NBeads)
+         InitPotVariance = InitPotVariance + (PotEnergy/real(NBath*NBeads))**2
          
          ! PRINT INFORMATION ON INITIAL CONDITIONS of THE BATH and THE SYSTEM
 !         __OMP_OnlyMasterBEGIN
@@ -587,10 +607,10 @@ MODULE PolymerVibrationalRelax
       DO i = 1, size(MolecularDynamics)
          CALL DisposeEvolutionData( MolecularDynamics(i) )
          CALL DisposeFFT( RingNormalModes(i) )
+         CALL DisposeEvolutionData( InitialConditions(i) )
       END DO
-      CALL DisposeEvolutionData( InitialConditions )
 
-      DEALLOCATE( MolecularDynamics, RingNormalModes )
+      DEALLOCATE( MolecularDynamics, RingNormalModes, InitialConditions )
 
    END SUBROUTINE PolymerVibrationalRelax_Dispose
 
@@ -623,13 +643,13 @@ MODULE PolymerVibrationalRelax
       ForceCoupCoord = 0.0
       ForceQCoord(:) = 0.0
       IF ( MorsePotential ) THEN
-         CouplingFunc = Positions(1)
+         CouplingFunc = (exp( - MorseAlpha*Positions(1) ) - 1.0) / MorseAlpha
       ELSE 
          CouplingFunc = Positions(4) - C1Puckering
       END IF
       CALL BathPotentialAndForces( Bath, CouplingFunc, Positions( NSystem+1:NDim ), V, ForceCoupCoord, ForceQCoord(:) ) 
       IF ( MorsePotential ) THEN
-         Forces(1) = Forces(1) + ForceCoupCoord
+         Forces(1) = Forces(1) + ForceCoupCoord * ( - exp( - MorseAlpha*Positions(1) ) )
       ELSE
          Forces(4) = Forces(4) + ForceCoupCoord
       END IF
@@ -677,15 +697,14 @@ MODULE PolymerVibrationalRelax
       ! Compute potential and forces of the bath replica
       ForceCoupCoord = 0.0
       ForceQCoord(:) = 0.0
-      BathV = 0.0; CouplingV = 0.0
       IF ( MorsePotential ) THEN
-         CouplingFunc = Positions(1)
+         CouplingFunc = (exp( - MorseAlpha*Positions(1) ) - 1.0) / MorseAlpha
       ELSE 
          CouplingFunc = Positions(4) - C1Puckering
       END IF
       CALL BathPotentialAndForces( Bath, CouplingFunc, Positions(NSystem+1:NDim), BathV, ForceCoupCoord, ForceQCoord(:), CouplingV ) 
       IF ( MorsePotential ) THEN
-         Forces(1) = Forces(1) + ForceCoupCoord
+         Forces(1) = Forces(1) + ForceCoupCoord * ( - exp( - MorseAlpha*Positions(1) ) )
       ELSE
          Forces(4) = Forces(4) + ForceCoupCoord
       END IF
@@ -767,8 +786,8 @@ MODULE PolymerVibrationalRelax
             EnergyAverages(4) = EnergyAverages(4) - X((iBead-1)*NDim+iCoord) * SngForce((iBead-1)*NDim+iCoord)
          END DO
       END DO
-      EnergyAverages(1) = 0.5 * EnergyAverages(1) / real(NSystem*NBeads)
-      EnergyAverages(4) = 0.5 * EnergyAverages(4) / real(NBath*NBeads)
+      EnergyAverages(1) = 0.5 * EnergyAverages(1) / real(NBeads)
+      EnergyAverages(4) = 0.5 * EnergyAverages(4) / real(NBeads)
 
 ! 
 !       ! 2) THERMODYNAMICS TOTAL ENERGY
@@ -806,21 +825,18 @@ MODULE PolymerVibrationalRelax
    SUBROUTINE MicrocanonicalSamplingOfTheSystem( InitConditions )
       IMPLICIT NONE
       REAL, DIMENSION(:,:), INTENT(OUT) :: InitConditions
-
-      INTEGER :: NTimeStepEachSnap, iTraj, iStep, iBeads
+      REAL, DIMENSION(NSystem) :: Accel, Pos, Vel
+      INTEGER :: NTimeStepEachSnap, iTraj, iStep
       REAL :: PotEnergy
-      REAL, DIMENSION(NSystem*NBeads) :: Accel, Pos, Vel
-      REAL :: XCentroid, XGyration
-      REAL :: VCentroid, VGyration
-      REAL :: KinCentroid, PotCentroid
       REAL, DIMENSION(1) :: Dummy
 
       CALL ERROR( SIZE(InitConditions,2) /= NSystem*2, "MicrocanonicalSamplingOfTheSystem: wrong nr of dimensions"  ) 
 
       IF ( MorsePotential ) THEN
-         Pos(:) = 0.0
+         Pos(1) = 0.0
          PotEnergy = MorseV( Pos(1:1), Accel(1:1) )
-         Vel(:) = sqrt( 2.0 * (InitEnergy-PotEnergy) / MassVector(1) )
+         Vel(1) = sqrt( 2.0 * (InitEnergy-PotEnergy) / MassVector(1) )
+         Accel(1:1) = Accel(1:1) / MassVector(1)
       ELSE
          Pos(1:2) = 0.0
          Pos(3) = HZEquilibrium 
@@ -830,12 +846,11 @@ MODULE PolymerVibrationalRelax
          Vel(2) = 0.0
          Vel(3) = + sqrt( 2.0 * (InitEnergy-PotEnergy) / MassVector(3) ) * 0.958234410548192
          Vel(4) = - sqrt( 2.0 * (InitEnergy-PotEnergy) / MassVector(4) ) * 0.285983940880181 
+         Accel(1:4) = Accel(1:4) / MassVector(1:4)
       END IF
-      CALL EOM_RPMSymplectic( InitialConditions, Pos, Vel, Accel, MorseV, PotEnergy, RandomNr, 1 )
 
       ! Define when to store the dynamics snapshot
       NTimeStepEachSnap = INT( TimeBetweenSnaps / TimeStep )
-      NTimeStepEachSnap = 100
 
       ! Cycle over the nr of snapshot to store
       DO iTraj = 1, SIZE(InitConditions,1)
@@ -844,38 +859,71 @@ MODULE PolymerVibrationalRelax
          DO iStep = 1, NTimeStepEachSnap
             ! Propagate for one timestep with Velocity-Verlet
             IF ( MorsePotential ) THEN
-               CALL EOM_RPMSymplectic( InitialConditions, Pos, Vel, Accel, MorseV, PotEnergy, RandomNr, 2 )
+               CALL EOM_LangevinSecondOrder( MicrocanonicalInit, Pos, Vel, Accel, MorseV, PotEnergy, RandomNr )
             ELSE
-               CALL EOM_RPMSymplectic( InitialConditions, Pos, Vel, Accel, VHFourDimensional, PotEnergy, RandomNr, 2 )
+               CALL EOM_LangevinSecondOrder( MicrocanonicalInit, Pos, Vel, Accel, VHFourDimensional, PotEnergy, RandomNr )
             END IF
-
          END DO
-
-         XCentroid = 0.0; VCentroid = 0.0; XGyration = 0.0; VGyration = 0.0
-         PotCentroid = 0.0
-         DO iBeads = 1, NBeads
-            XCentroid = XCentroid + Pos(iBeads)
-            VCentroid = VCentroid + Vel(iBeads)
-            XGyration = XGyration + Pos(iBeads)**2
-            VGyration = VGyration + Vel(iBeads)**2
-            PotCentroid = PotCentroid + MorseV( (/ Pos(iBeads) /), Dummy )
-         END DO
-         XCentroid = XCentroid / NBeads
-         VCentroid = VCentroid / NBeads
-         XGyration = SQRT( XGyration / NBeads - XCentroid**2 )
-         VGyration = SQRT( VGyration / NBeads - VCentroid**2 )
-         PotCentroid = PotCentroid / NBeads
-         KinCentroid = 0.5 * MassVector(1) * VCentroid**2
-         WRITE(88,"(I5,10F20.8)")  iTraj, XCentroid, VCentroid, XGyration, VGyration
-         WRITE(89,"(I5,10F20.8)")  iTraj, PotCentroid, KinCentroid,  PotCentroid+KinCentroid
 
          ! Store snapshot
          InitConditions( iTraj, 1:NSystem )           = Pos(1:NSystem)
          InitConditions( iTraj, NSystem+1:2*NSystem ) = Vel(1:NSystem)
       END DO
-      STOP
 
    END SUBROUTINE MicrocanonicalSamplingOfTheSystem
+
+   SUBROUTINE RingPolymerInitialEquilibration( Pos, Vel, CurrentThread )
+      IMPLICIT NONE
+      REAL, DIMENSION(NSystem*NBeads), INTENT(INOUT) :: Pos, Vel
+      INTEGER, INTENT(IN) :: CurrentThread
+      REAL, DIMENSION(NSystem*NBeads) :: Accel
+      INTEGER :: iStep, iBead, kStep
+      REAL :: PotEnergy, KinEnergy, AverKinEnergy, VCentroid, XCentroid
+
+      CALL EOM_RPMSymplectic( InitialConditions(CurrentThread), Pos, Vel, Accel, MorseV, PotEnergy, RandomNr, 1 )
+
+      AverKinEnergy = 0.0
+      kStep = 0
+      DO iStep = 1, 3000
+
+         IF ( MOD(iStep-1, 50) == 0.0 ) THEN
+
+            kStep = kStep + 1
+
+            XCentroid = 0.0
+            DO iBead = 1, NBeads
+               XCentroid = XCentroid + Pos(iBead)
+            END DO
+            XCentroid = XCentroid / NBeads
+
+            CALL ExecuteFFT( RingNormalModes(CurrentThread), Vel, DIRECT_FFT )
+
+            KinEnergy = 0.0
+            DO iBead = 2, NBeads
+               KinEnergy = KinEnergy + Vel(iBead)**2
+            END DO
+            KinEnergy = KinEnergy * 0.5 * MassVector(1) / (NBeads-1)
+            AverKinEnergy = AverKinEnergy + KinEnergy
+
+            VCentroid = Vel(1)
+
+            CALL ExecuteFFT( RingNormalModes(CurrentThread), Vel, INVERSE_FFT )
+            WRITE(745,"(I10,10F20.8)") iStep, 2.0*AverKinEnergy/real(kStep)*TemperatureConversion(InternalUnits,InputUnits), &
+                                   XCentroid, VCentroid
+         END IF
+
+         ! Propagate for one timestep with Velocity-Verlet
+         IF ( MorsePotential ) THEN
+            CALL EOM_RPMSymplectic( InitialConditions(CurrentThread), Pos, Vel, Accel, MorseV, PotEnergy, RandomNr, 2 )
+         ELSE
+            CALL EOM_RPMSymplectic( InitialConditions(CurrentThread), Pos, Vel, Accel, VHFourDimensional, PotEnergy, RandomNr, 2 )
+         END IF
+
+      END DO
+      WRITE(745,"(/,A,/)") "# --------------------------------- "
+
+
+   END SUBROUTINE RingPolymerInitialEquilibration
 
 !*************************************************************************************************
 

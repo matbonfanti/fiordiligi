@@ -25,7 +25,7 @@ OPTLEVEL = 3
 FFTW3 = yes
 
 # OpenMP libraries
-OPENMP = yes
+OPENMP = no 
 
 # linking LAPACK and BLAS 
 LAPACK = no 
