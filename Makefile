@@ -13,7 +13,7 @@ LOGFILE = yes
 LOGNAME = jk6_v3.log
 
 # Compiler ( gfortran, ifort )
-FC = ifort    
+FC = gfortran 
 
 # Debugging options ( yes or no )
 DEBUG =  no 
@@ -25,7 +25,7 @@ OPTLEVEL = 3
 FFTW3 = yes
 
 # OpenMP libraries
-OPENMP = no 
+OPENMP = yes
 
 # linking LAPACK and BLAS 
 LAPACK = no 

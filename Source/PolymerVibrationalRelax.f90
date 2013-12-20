@@ -242,7 +242,6 @@ MODULE PolymerVibrationalRelax
          CALL EvolutionSetup( InitialConditions(iThread), NSystem, MassVector(1:NSystem), TimeStep )
          ! Set ring polymer molecular dynamics parameter
          CALL SetupRingPolymer( InitialConditions(iThread), NBeads, BeadsFrequency ) 
-         CALL SetupThermostat( InitialConditions(iThread), 0.01, InitTemp )
       END DO
 
       CALL EvolutionSetup( MicrocanonicalInit, NSystem, MassVector(1:NSystem), TimeStep )
@@ -879,44 +878,67 @@ MODULE PolymerVibrationalRelax
       REAL, DIMENSION(NSystem*NBeads) :: Accel
       INTEGER :: iStep, iBead, kStep
       REAL :: PotEnergy, KinEnergy, AverKinEnergy, VCentroid, XCentroid
+      REAL, DIMENSION(1) :: Dummy
 
+      CALL SetupThermostat( InitialConditions(CurrentThread), 0.01, InitTemp )
       CALL EOM_RPMSymplectic( InitialConditions(CurrentThread), Pos, Vel, Accel, MorseV, PotEnergy, RandomNr, 1 )
 
-      AverKinEnergy = 0.0
-      kStep = 0
       DO iStep = 1, 3000
-
-         IF ( MOD(iStep-1, 50) == 0.0 ) THEN
-
-            kStep = kStep + 1
-
-            XCentroid = 0.0
-            DO iBead = 1, NBeads
-               XCentroid = XCentroid + Pos(iBead)
-            END DO
-            XCentroid = XCentroid / NBeads
-
-            CALL ExecuteFFT( RingNormalModes(CurrentThread), Vel, DIRECT_FFT )
-
-            KinEnergy = 0.0
-            DO iBead = 2, NBeads
-               KinEnergy = KinEnergy + Vel(iBead)**2
-            END DO
-            KinEnergy = KinEnergy * 0.5 * MassVector(1) / (NBeads-1)
-            AverKinEnergy = AverKinEnergy + KinEnergy
-
-            VCentroid = Vel(1)
-
-            CALL ExecuteFFT( RingNormalModes(CurrentThread), Vel, INVERSE_FFT )
-            WRITE(745,"(I10,10F20.8)") iStep, 2.0*AverKinEnergy/real(kStep)*TemperatureConversion(InternalUnits,InputUnits), &
-                                   XCentroid, VCentroid
-         END IF
 
          ! Propagate for one timestep with Velocity-Verlet
          IF ( MorsePotential ) THEN
             CALL EOM_RPMSymplectic( InitialConditions(CurrentThread), Pos, Vel, Accel, MorseV, PotEnergy, RandomNr, 2 )
          ELSE
             CALL EOM_RPMSymplectic( InitialConditions(CurrentThread), Pos, Vel, Accel, VHFourDimensional, PotEnergy, RandomNr, 2 )
+         END IF
+
+      END DO
+
+      CALL DisposeThermostat( InitialConditions(CurrentThread) )
+
+      AverKinEnergy = 0.0
+      kStep = 0
+      DO iStep = 1, 50000
+
+         IF ( MOD(iStep-1, 500) == 0.0 ) THEN
+
+            kStep = kStep + 1
+
+            XCentroid = 0.0
+            PotEnergy = 0.0
+            KinEnergy = 0.0
+            DO iBead = 1, NBeads
+               XCentroid = XCentroid + Pos(iBead)
+               PotEnergy = PotEnergy + MorseV( Pos(iBead:iBead), Dummy )
+               KinEnergy = KinEnergy - Dummy(1)*Pos(iBead)
+            END DO
+            XCentroid = XCentroid / NBeads
+            PotEnergy = PotEnergy / NBeads
+            KinEnergy = 0.5 * KinEnergy / NBeads
+
+!            CALL ExecuteFFT( RingNormalModes(CurrentThread), Vel, DIRECT_FFT )
+
+!            KinEnergy = 0.0
+!            DO iBead = 1, NBeads
+!               KinEnergy = KinEnergy + Vel(iBead)**2
+!            END DO
+!            KinEnergy = KinEnergy * 0.5 * MassVector(1) / (NBeads-1)
+!            AverKinEnergy = AverKinEnergy + KinEnergy
+
+!            VCentroid = Vel(1)
+
+!            CALL ExecuteFFT( RingNormalModes(CurrentThread), Vel, INVERSE_FFT )
+!            WRITE(745,"(I10,10F20.8)") kStep, 2.0*AverKinEnergy/real(kStep)*TemperatureConversion(InternalUnits,InputUnits), &
+!                                   XCentroid, VCentroid
+            WRITE(746,"(I10,10F20.8)") kStep, (PotEnergy+KinEnergy)*EnergyConversion(InternalUnits,InputUnits), &
+                    PotEnergy*EnergyConversion(InternalUnits,InputUnits), KinEnergy*EnergyConversion(InternalUnits,InputUnits)
+         END IF
+
+         ! Propagate for one timestep with Velocity-Verlet
+         IF ( MorsePotential ) THEN
+            CALL EOM_RPMSymplectic( InitialConditions(CurrentThread), Pos, Vel, Accel, MorseV, PotEnergy, RandomNr )
+         ELSE
+            CALL EOM_RPMSymplectic( InitialConditions(CurrentThread), Pos, Vel, Accel, VHFourDimensional, PotEnergy, RandomNr )
          END IF
 
       END DO
