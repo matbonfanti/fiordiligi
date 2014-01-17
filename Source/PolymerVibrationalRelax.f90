@@ -233,7 +233,7 @@ MODULE PolymerVibrationalRelax
          CALL EvolutionSetup( MolecularDynamics(iThread), NDim, MassVector, TimeStep )
          ! Set ring polymer molecular dynamics parameter
          CALL SetupRingPolymer( MolecularDynamics(iThread), NBeads, BeadsFrequency ) 
-         
+
          ! Set transform from ring coordinates to normal modes
          CALL SetupFFT( RingNormalModes(iThread), NBeads ) 
 
@@ -296,6 +296,8 @@ MODULE PolymerVibrationalRelax
       REAL, DIMENSION(NrOfInitSnapshots,NSystem*2) :: SystemInitConditions
 
       REAL, DIMENSION(NBath,NBeads) :: InitQBath, InitVBath
+
+      REAL, DIMENSION(NDim,0:NrOfPrintSteps) :: GyrationAverage
 
       PosCorrelationUnit = LookForFreeUnit()
       OPEN( FILE="PositionCorrelation.dat", UNIT=PosCorrelationUnit )
@@ -362,8 +364,8 @@ MODULE PolymerVibrationalRelax
          ! Choose a random integer and choose a x,p in microcanonical distribution
 
          kStep = CEILING( UniformRandomNr(RandomNr)*real(NrOfInitSnapshots) )
-         InitX = SystemInitConditions( kStep, 1 )
-         InitV = SystemInitConditions( kStep, 2 )
+         InitX(:) = SystemInitConditions( kStep, 1 )
+         InitV(:) = SystemInitConditions( kStep, 2 )
 
          IF ( InitTemp > 0.0 ) THEN
              CALL RingPolymerInitialEquilibration(  InitX, InitV, CurrentThread )
@@ -415,7 +417,8 @@ MODULE PolymerVibrationalRelax
          AverageE(:,0) = AverageE(:,0) + EnergyAverages( X, V, MassVector ) 
 
          ! Average values of the centroid coordinates
-         IF ( PrintType >= FULL ) AverageCoord(1:NDim,0) = AverageCoord(1:NDim,0) + CentroidCoord( X )
+         IF ( PrintType >= FULL ) AverageCoord(1:NDim,0)    = AverageCoord(1:NDim,0)    + CentroidCoord( X )
+         IF ( PrintType >= FULL ) GyrationAverage(1:NDim,0) = GyrationAverage(1:NDim,0) + GyrationRadius( X )
 
         ! Open unit for massive output, with detailed info on trajectories
          IF ( PrintType == DEBUG ) THEN
@@ -477,7 +480,8 @@ MODULE PolymerVibrationalRelax
          
                ! Average values of the centroid coordinates
                IF ( PrintType >= FULL )    AverageCoord(1:NDim,kStep) = AverageCoord(1:NDim,kStep) + CentroidCoord( X )
-               
+               IF ( PrintType >= FULL ) GyrationAverage(1:NDim,kStep) = GyrationAverage(1:NDim,kStep) + GyrationRadius( X )
+
                ! If massive level of output, print traj information to std out
                IF ( PrintType == DEBUG ) THEN
                   WRITE(DebugUnitEn,800) TimeStep*real(iStep)/MyConsts_fs2AU, KinEnergy, PotEnergy, KinEnergy+PotEnergy
@@ -529,6 +533,7 @@ MODULE PolymerVibrationalRelax
       PositionCorrelation(:)  =  PositionCorrelation(:)  / real(NrTrajs)
       AverageE(:,:)           = AverageE(:,:)            / real(NrTrajs)
       IF ( PrintType >= FULL )   AverageCoord(1:NDim,:) = AverageCoord(1:NDim,:) / real(NrTrajs) 
+      IF ( PrintType >= FULL )   GyrationAverage(1:NDim,:) = GyrationAverage(1:NDim,:) / real(NrTrajs) 
 
       ! PRINT average energy of the system, of the coupling, of the bath
       DO iStep = 0, NrOfPrintSteps
@@ -547,6 +552,12 @@ MODULE PolymerVibrationalRelax
          DO iStep = 0, NrOfPrintSteps
             WRITE(AvCoordOutputUnit,"(F14.8,4F14.8)") TimeStep*real(PrintStepInterval*iStep)/MyConsts_fs2AU, &
                                        AverageCoord(1:NSystem,iStep)*MyConsts_Bohr2Ang 
+         END DO
+
+         ! PRINT gyration radius
+         DO iStep = 0, NrOfPrintSteps
+            WRITE(987,"(F14.8,10000F14.5)") TimeStep*real(PrintStepInterval*iStep)/MyConsts_fs2AU, &
+                                       GyrationAverage(1:NSystem,iStep)*(MyConsts_Bohr2Ang**2) 
          END DO
 
          ! PRINT average bath coordinates
@@ -731,6 +742,25 @@ MODULE PolymerVibrationalRelax
       CentroidCoord( 1:NDim ) = CentroidCoord( 1:NDim ) / NBeads
 
    END FUNCTION CentroidCoord
+
+   FUNCTION GyrationRadius( X ) RESULT( Gyration )
+      IMPLICIT NONE
+      REAL, DIMENSION( NDim*NBeads ), INTENT(IN) :: X
+      REAL, DIMENSION( NDim )   :: Centroid, Gyration
+      INTEGER :: iBead, iCoord
+
+      Centroid(:) = 0.0
+      Gyration(:) = 0.0
+      DO iBead = 1, NBeads
+         DO iCoord = 1, NDim
+            Centroid( iCoord ) = Centroid( iCoord ) + X( (iBead-1)*NDim + iCoord )
+            Gyration( iCoord ) = Gyration( iCoord ) + X( (iBead-1)*NDim + iCoord )**2
+         END DO
+      END DO
+      Centroid( 1:NDim ) = Centroid( 1:NDim ) / NBeads
+      Gyration( 1:NDim ) = Gyration( 1:NDim ) / NBeads - Centroid( 1:NDim )**2
+
+   END FUNCTION GyrationRadius
    
 !*************************************************************************************************
 
@@ -879,6 +909,15 @@ MODULE PolymerVibrationalRelax
       INTEGER :: iStep, iBead, kStep
       REAL :: PotEnergy, KinEnergy, AverKinEnergy, VCentroid, XCentroid
       REAL, DIMENSION(1) :: Dummy
+      REAL :: InitialPos, InitialVel
+      REAL, DIMENSION(NSystem) :: CentroidPos, CentroidVel
+
+
+!       InitialPos = Pos(1)
+!       InitialVel = Vel(1)
+! 
+!       Pos(:) = 0.0
+!       Vel(:) = 0.0
 
       CALL SetupThermostat( InitialConditions(CurrentThread), 0.01, InitTemp )
       CALL EOM_RPMSymplectic( InitialConditions(CurrentThread), Pos, Vel, Accel, MorseV, PotEnergy, RandomNr, 1 )
@@ -888,61 +927,79 @@ MODULE PolymerVibrationalRelax
          ! Propagate for one timestep with Velocity-Verlet
          IF ( MorsePotential ) THEN
             CALL EOM_RPMSymplectic( InitialConditions(CurrentThread), Pos, Vel, Accel, MorseV, PotEnergy, RandomNr, 2 )
+!             CALL EOM_RPMSymplectic( InitialConditions(CurrentThread), Pos, Vel, Accel, MorseV, PotEnergy, RandomNr )
          ELSE
             CALL EOM_RPMSymplectic( InitialConditions(CurrentThread), Pos, Vel, Accel, VHFourDimensional, PotEnergy, RandomNr, 2 )
+!             CALL EOM_RPMSymplectic( InitialConditions(CurrentThread), Pos, Vel, Accel, VHFourDimensional, PotEnergy, RandomNr )
          END IF
 
       END DO
+
+!       CentroidPos(1) = 0.0
+!       DO iBead = 1, NBeads
+!          CentroidPos(1) = CentroidPos(1) + Pos(iBead)
+!       END DO
+!       CentroidPos(1) = CentroidPos(1) / NBeads
+! 
+!       CentroidVel(1) = 0.0
+!       DO iBead = 1, NBeads
+!          CentroidVel(1) = CentroidVel(1) + Vel(iBead)
+!       END DO
+!       CentroidVel(1) = CentroidVel(1) / NBeads
+! 
+!       Pos(:) = Pos(:) - CentroidPos(1) + InitialPos
+!       Vel(:) = Vel(:) - CentroidVel(1) + InitialVel
 
       CALL DisposeThermostat( InitialConditions(CurrentThread) )
+      
 
-      AverKinEnergy = 0.0
-      kStep = 0
-      DO iStep = 1, 50000
-
-         IF ( MOD(iStep-1, 500) == 0.0 ) THEN
-
-            kStep = kStep + 1
-
-            XCentroid = 0.0
-            PotEnergy = 0.0
-            KinEnergy = 0.0
-            DO iBead = 1, NBeads
-               XCentroid = XCentroid + Pos(iBead)
-               PotEnergy = PotEnergy + MorseV( Pos(iBead:iBead), Dummy )
-               KinEnergy = KinEnergy - Dummy(1)*Pos(iBead)
-            END DO
-            XCentroid = XCentroid / NBeads
-            PotEnergy = PotEnergy / NBeads
-            KinEnergy = 0.5 * KinEnergy / NBeads
-
-!            CALL ExecuteFFT( RingNormalModes(CurrentThread), Vel, DIRECT_FFT )
-
-!            KinEnergy = 0.0
-!            DO iBead = 1, NBeads
-!               KinEnergy = KinEnergy + Vel(iBead)**2
-!            END DO
-!            KinEnergy = KinEnergy * 0.5 * MassVector(1) / (NBeads-1)
-!            AverKinEnergy = AverKinEnergy + KinEnergy
-
-!            VCentroid = Vel(1)
-
-!            CALL ExecuteFFT( RingNormalModes(CurrentThread), Vel, INVERSE_FFT )
-!            WRITE(745,"(I10,10F20.8)") kStep, 2.0*AverKinEnergy/real(kStep)*TemperatureConversion(InternalUnits,InputUnits), &
-!                                   XCentroid, VCentroid
-            WRITE(746,"(I10,10F20.8)") kStep, (PotEnergy+KinEnergy)*EnergyConversion(InternalUnits,InputUnits), &
-                    PotEnergy*EnergyConversion(InternalUnits,InputUnits), KinEnergy*EnergyConversion(InternalUnits,InputUnits)
-         END IF
-
-         ! Propagate for one timestep with Velocity-Verlet
-         IF ( MorsePotential ) THEN
-            CALL EOM_RPMSymplectic( InitialConditions(CurrentThread), Pos, Vel, Accel, MorseV, PotEnergy, RandomNr )
-         ELSE
-            CALL EOM_RPMSymplectic( InitialConditions(CurrentThread), Pos, Vel, Accel, VHFourDimensional, PotEnergy, RandomNr )
-         END IF
-
-      END DO
-      WRITE(745,"(/,A,/)") "# --------------------------------- "
+!       AverKinEnergy = 0.0
+!       kStep = 0
+!       DO iStep = 1, 50000
+! 
+!          IF ( MOD(iStep-1, 500) == 0.0 ) THEN
+! 
+!             kStep = kStep + 1
+! 
+!             XCentroid = 0.0
+!             PotEnergy = 0.0
+!             KinEnergy = 0.0
+!             DO iBead = 1, NBeads
+!                XCentroid = XCentroid + Pos(iBead)
+!                PotEnergy = PotEnergy + MorseV( Pos(iBead:iBead), Dummy )
+!                KinEnergy = KinEnergy - Dummy(1)*Pos(iBead)
+!             END DO
+!             XCentroid = XCentroid / NBeads
+!             PotEnergy = PotEnergy / NBeads
+!             KinEnergy = 0.5 * KinEnergy / NBeads
+! 
+! !            CALL ExecuteFFT( RingNormalModes(CurrentThread), Vel, DIRECT_FFT )
+! 
+! !            KinEnergy = 0.0
+! !            DO iBead = 1, NBeads
+! !               KinEnergy = KinEnergy + Vel(iBead)**2
+! !            END DO
+! !            KinEnergy = KinEnergy * 0.5 * MassVector(1) / (NBeads-1)
+! !            AverKinEnergy = AverKinEnergy + KinEnergy
+! 
+! !            VCentroid = Vel(1)
+! 
+! !            CALL ExecuteFFT( RingNormalModes(CurrentThread), Vel, INVERSE_FFT )
+! !            WRITE(745,"(I10,10F20.8)") kStep, 2.0*AverKinEnergy/real(kStep)*TemperatureConversion(InternalUnits,InputUnits), &
+! !                                   XCentroid, VCentroid
+!             WRITE(746,"(I10,10F20.8)") kStep, (PotEnergy+KinEnergy)*EnergyConversion(InternalUnits,InputUnits), &
+!                     PotEnergy*EnergyConversion(InternalUnits,InputUnits), KinEnergy*EnergyConversion(InternalUnits,InputUnits)
+!          END IF
+! 
+!          ! Propagate for one timestep with Velocity-Verlet
+!          IF ( MorsePotential ) THEN
+!             CALL EOM_RPMSymplectic( InitialConditions(CurrentThread), Pos, Vel, Accel, MorseV, PotEnergy, RandomNr )
+!          ELSE
+!             CALL EOM_RPMSymplectic( InitialConditions(CurrentThread), Pos, Vel, Accel, VHFourDimensional, PotEnergy, RandomNr )
+!          END IF
+! 
+!       END DO
+!       WRITE(745,"(/,A,/)") "# --------------------------------- "
 
 
    END SUBROUTINE RingPolymerInitialEquilibration

@@ -45,7 +45,7 @@ MODULE IndependentOscillatorsModel
    PRIVATE
    PUBLIC :: SetupIndepOscillatorsModel, SetupOhmicIndepOscillatorsModel, BathPotentialAndForces, DisposeIndepOscillatorsModel
    PUBLIC :: ThermalEquilibriumBathConditions, ZeroKelvinBathConditions, BathOfRingsThermalConditions
-   PUBLIC :: EnergyOfTheBath, GetDistorsionForce
+   PUBLIC :: EnergyOfTheBath, GetDistorsionForce, CouplingAndDistortionHessian, HessianOfTheBath
 
    PUBLIC :: BathData
 
@@ -252,13 +252,13 @@ CONTAINS
 !> 
 !> @param    
 !*******************************************************************************
-   SUBROUTINE SetupOhmicIndepOscillatorsModel( Bath, N, SetBathType, OhmicGamma, Mass, CutOffFreq )
+   SUBROUTINE SetupOhmicIndepOscillatorsModel( Bath, N, SetBathType, SysMassTimeGamma, BathMass, CutOffFreq )
       IMPLICIT NONE
       TYPE(BathData)             :: Bath
       INTEGER, INTENT(IN)        :: N
       INTEGER, INTENT(IN)        :: SetBathType
-      REAL, INTENT(IN)           :: OhmicGamma
-      REAL, INTENT(IN)           :: Mass
+      REAL, INTENT(IN)           :: SysMassTimeGamma
+      REAL, INTENT(IN)           :: BathMass
       REAL, INTENT(IN)           :: CutOffFreq
 
       REAL :: SpectralDens, D0
@@ -276,7 +276,7 @@ CONTAINS
       ! Set the type of bath
       Bath%BathType = SetBathType
       ! Set the mass of the oscillators
-      Bath%OscillatorsMass = Mass
+      Bath%OscillatorsMass = BathMass
 
       ! Allocate memory
       ALLOCATE( Bath%Frequencies(Bath%BathSize), Bath%Couplings(Bath%BathSize) )
@@ -298,7 +298,7 @@ CONTAINS
             D0 = 0.0
             DO iBath = 1,  Bath%BathSize
                Bath%Frequencies(iBath) = iBath * Bath%DeltaOmega
-               SpectralDens = Bath%OscillatorsMass * OhmicGamma * Bath%Frequencies(iBath)
+               SpectralDens = SysMassTimeGamma * Bath%Frequencies(iBath)
                Bath%Couplings(iBath) = SQRT( 2.0 * Bath%OscillatorsMass * Bath%Frequencies(iBath) * Bath%DeltaOmega *      & 
                     SpectralDens / MyConsts_PI )
                ! Compute force constant of the distorsion
@@ -316,7 +316,7 @@ CONTAINS
 #if defined(VERBOSE_OUTPUT)
       SpectralDensityUnit = LookForFreeUnit()
       OPEN( FILE="ReadSpectralDensity.dat", UNIT=SpectralDensityUnit )
-      WRITE(SpectralDensityUnit, "(A,1F15.6)") "# Ohmic Spectral Density with gamma = ", OhmicGamma
+      WRITE(SpectralDensityUnit, "(A,1F15.6)") "# Ohmic Spectral Density with mass*gamma = ", OhmicGamma
 
       IF ( Bath%BathType == CHAIN_BATH ) THEN
          WRITE(SpectralDensityUnit, "(A,/)") "# Bath in linear chain form "
@@ -639,55 +639,6 @@ CONTAINS
    END SUBROUTINE ZeroKelvinBathConditions
 
 
-!    REAL FUNCTION MinimizeBathCoords( Coords, Mask ) RESULT( Pot )
-!       IMPLICIT NONE
-!       REAL, INTENT(INOUT), DIMENSION(:)            :: Coords
-!       LOGICAL, INTENT(IN), DIMENSION(size(Coords)) :: Mask
-! 
-!       INTEGER :: NrDimension, NrOptimization
-!       INTEGER :: iIter, iCoord
-!       REAL, DIMENSION(size(Coords)) :: Gradient
-!       REAL :: Norm
-! 
-!       ! Set dimension number
-!       NrDimension = size(Coords)
-!       ! Set optimization coordinates nr
-!       NrOptimization = count( Mask )
-!       ! Check if the nr of dimension is compatible with the slab maximum size
-!       CALL ERROR( NrDimension /= BathSize + 4, "IndependentOscillatorsModel.MinimizeBathCoords: wrong number of DoFs" )
-! 
-!       ! Cycle over steepest descent iterations
-!       DO iIter = 1, MaxIter
-! 
-!          ! compute negative of the gradient
-!          Pot = PotentialIndepOscillatorsModel( Coords, Gradient )
-! 
-!          ! compute norm of the gradient
-!          Norm = 0.0
-!          DO iCoord = 1, NrDimension
-!             IF ( Mask( iCoord ) ) THEN
-!                Norm = Norm + Gradient(iCoord)**2
-!             END IF
-!          END DO
-!          Norm = SQRT( Norm / NrOptimization )
-! 
-!          ! check convergence
-!          IF (Norm < GradEps) EXIT
-!    
-!          ! move geometry along gradient
-!          DO iCoord = 1, NrDimension
-!             IF ( Mask( iCoord ) ) THEN
-!                Coords(iCoord) = Coords(iCoord) + Gradient(iCoord)
-!             END IF
-!          END DO
-! 
-!       END DO
-! 
-!       IF ( iIter == MaxIter ) PRINT*, " NOT CONVERGED !!!!!"
-! 
-!    END FUNCTION MinimizeBathCoords
-
-
 !===============================================================================================================
 
 
@@ -752,7 +703,6 @@ CONTAINS
 
 !===============================================================================================================
 
-
 !*******************************************************************************
 !                     GetDistorsionForce
 !*******************************************************************************
@@ -771,6 +721,35 @@ CONTAINS
 
 !===============================================================================================================
 
+!*******************************************************************************
+!             CouplingAndDistortionHessian
+!*******************************************************************************
+!> Give the contribution to the hessian which is due to the coupling
+!> potential and the distortion force.
+!>  NOTE THAT RESULTS ARE NOT MASS SCALED
+!>
+!> @param   Bath     Bath data type 
+!> @result  Dist     Distortion force of the bath     
+!*******************************************************************************     
+   SUBROUTINE CouplingAndDistortionHessian( Bath, CouplingHessian, DistortionHessian ) 
+      IMPLICIT NONE
+      TYPE(BathData), INTENT(IN)                    :: Bath
+      REAL, DIMENSION( Bath%BathSize ), INTENT(OUT) :: CouplingHessian
+      REAL, INTENT(OUT)                             :: DistortionHessian
+
+      DistortionHessian = Bath%DistorsionForce
+      CouplingHessian(:) = 0.0
+
+      IF ( Bath%BathType == CHAIN_BATH ) THEN
+         CouplingHessian(1) = - Bath%Couplings(1)
+      ELSE IF ( Bath%BathType == STANDARD_BATH ) THEN
+         CouplingHessian(:) = - Bath%Couplings(:)
+      END IF
+
+   END SUBROUTINE CouplingAndDistortionHessian
+
+
+!===============================================================================================================
 
 !*******************************************************************************
 !                     HessianOfTheBath
@@ -796,18 +775,18 @@ CONTAINS
       IF ( Bath%BathType == CHAIN_BATH ) THEN
          ! Diagonal elements: quadratic terms of the potential
          DO iBath = 1, Bath%BathSize
-            Hessian(iBath,iBath) = Bath%Frequencies(iBath)**2
+            Hessian(iBath,iBath) = 0.5 * Bath%Frequencies(iBath)**2
          END DO
          ! off-diagonal elements: couplings
          DO iBath = 1, Bath%BathSize-1
-            Hessian(iBath,iBath+1) = -Bath%Couplings(iBath+1) / Bath%OscillatorsMass
-            Hessian(iBath+1,iBath) = -Bath%Couplings(iBath+1) / Bath%OscillatorsMass
+            Hessian(iBath,iBath+1) = - 0.5 * Bath%Couplings(iBath+1) / Bath%OscillatorsMass
+            Hessian(iBath+1,iBath) = - 0.5 * Bath%Couplings(iBath+1) / Bath%OscillatorsMass
          END DO
 
       ELSE IF ( Bath%BathType == STANDARD_BATH ) THEN
          ! Diagonal elements: quadratic terms of the potential
          DO iBath = 1, Bath%BathSize
-            Hessian(iBath,iBath) = Bath%Frequencies(iBath)**2
+            Hessian(iBath,iBath) = 0.5 * Bath%Frequencies(iBath)**2
          END DO
       END IF
 

@@ -21,15 +21,20 @@ MODULE PotentialAnalysis
    USE MyLinearAlgebra
    USE SharedData
    USE InputField
+   USE UnitConversion
    USE PotentialModule
-!    USE ClassicalEqMotion
-!    USE IndependentOscillatorsModel
-!    USE RandomNumberGenerator
+   USE IndependentOscillatorsModel
+   USE DIfferenceDerivatives
 
    IMPLICIT NONE
 
+   REAL, PARAMETER :: SmallDelta = 1.E-04
+
    PRIVATE
    PUBLIC :: PotentialAnalysis_ReadInput, PotentialAnalysis_Initialize, PotentialAnalysis_Run, PotentialAnalysis_Dispose
+
+   !> Nr of dimension of the system + bath 
+   INTEGER :: NDim
 
 !    ! THE FOLLOWING INPUT DATA ARE RELEVANT FOR A POTENTIAL PLOT RUN 
 ! 
@@ -88,23 +93,29 @@ MODULE PotentialAnalysis
 !*******************************************************************************
    SUBROUTINE PotentialAnalysis_Initialize()
       IMPLICIT NONE
+      INTEGER :: iCoord
 
-!    ELSE IF (RunType == POTENTIALPRINT) THEN 
-! 
-!          ! Allocation of position and acceleration arrays
-!          ALLOCATE( X(nevo+3), A(nevo+3) )
-! 
-!    ELSE IF (RunType == CHAINEIGEN) THEN 
-! 
-!          ! Allocation of position and acceleration arrays
-!          ALLOCATE( X(nevo+3), A(nevo+3) )
-! 
-!          ! Allocate and define masses
-!          ALLOCATE( MassVector( nevo + 3 ) )
-!          MassVector = (/ (rmh, iCoord=1,3), rmc, (1.0*MyConsts_Uma2Au, iCoord=1,nevo-1) /)
-! 
-!    END IF
+      ! Allocate memory and initialize vectors for positions, forces and masses
 
+      IF ( BathType ==  SLAB_POTENTIAL ) THEN
+         ALLOCATE( X(3+NCarbon), A(3+NCarbon), MassVector(3+NCarbon) )
+         MassVector = (/ (MassH, iCoord=1,3), (MassC, iCoord=1,NCarbon) /)
+
+      ELSE IF ( BathType ==  NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
+         ALLOCATE( X(4+NBath), A(4+NBath), MassVector(4+NBath) )
+         MassVector = (/ (MassH, iCoord=1,3), MassC, (MassBath, iCoord=1,NBath) /)
+
+      ELSE IF ( BathType ==  DOUBLE_CHAIN ) THEN
+         ALLOCATE( X(4+2*NBath), A(4+2*NBath), MassVector(4+2*NBath) )
+         MassVector = (/ (MassH, iCoord=1,3), MassC, (MassBath, iCoord=1,2*NBath) /)
+
+      ELSE IF ( BathType == LANGEVIN_DYN ) THEN
+         ALLOCATE( X(4), A(4), MassVector(4) )
+         MassVector = (/ (MassH, iCoord=1,3), MassC /)
+      END IF
+
+      ! store the nr of dimensions
+      NDim = size(X)
 
    END SUBROUTINE PotentialAnalysis_Initialize
 
@@ -116,6 +127,160 @@ MODULE PotentialAnalysis
 !*******************************************************************************
    SUBROUTINE PotentialAnalysis_Run()
       IMPLICIT NONE
+ 
+      REAL, DIMENSION(NDim)      :: XMin, XAsy
+      REAL, DIMENSION(NDim,NDim) :: HessianAtMinimum 
+      REAL, DIMENSION(4,4)       :: HessianSystem
+
+      REAL, DIMENSION(:), ALLOCATABLE   :: EigenFreq
+      REAL, DIMENSION(:,:), ALLOCATABLE :: EigenModes
+
+      REAL :: PotEnergy
+      REAL :: ZHFreq, ZCFreq, EMin, EAsy
+
+      INTEGER :: i, j
+
+      PRINT "(2/,A)",    "***************************************************"
+      PRINT "(A,F10.5)", "               PES ANALYSIS "
+      PRINT "(A,/)" ,    "***************************************************"
+
+      ! ===================================================================================================
+      ! (1) Coordinates and energies of the asymptotic and adsorption geometries
+      ! ===================================================================================================
+
+      PRINT "(A,/)"," Fixing the asymptotic geometry and the geometry of the adsorption minimum... "
+
+      ! identify coordinates of the minimum of the PES
+      XMin(1:2) = 0.0
+      XMin(3) = HZEquilibrium
+      XMin(4) = C1Puckering
+
+      IF ( BathType ==  SLAB_POTENTIAL ) THEN
+         XMin(5:NDim) = MinSlab(1:NBath)
+      ELSE IF ( BathType ==  NORMAL_BATH .OR. BathType == CHAIN_BATH .OR. BathType ==  DOUBLE_CHAIN ) THEN
+         XMin(5:NDim) = 0.0
+      ELSE IF ( BathType == LANGEVIN_DYN ) THEN
+         ! nothing to set
+      END IF
+
+      ! Computing the energy at this geometry
+      EMin = VibrRelaxPotential( XMin, A )
+
+      ! set asymptotic coordinates for the H atom
+      XAsy(1:2) = 0.0
+      XAsy(3) = 10.0
+
+      IF ( BathType ==  SLAB_POTENTIAL ) THEN
+         XAsy(4) = 0.0
+         XAsy(5:NDim) = 0.0
+      ELSE IF ( BathType ==  NORMAL_BATH .OR. BathType == CHAIN_BATH .OR. BathType ==  DOUBLE_CHAIN ) THEN
+         XAsy(4) = C1Puckering
+         XAsy(5:NDim) = 0.0
+      ELSE IF ( BathType == LANGEVIN_DYN ) THEN
+         XAsy(4) = 0.0
+      END IF
+
+      ! Computing the energy at this geometry
+      EAsy = VibrRelaxPotential( XAsy, A )
+
+      PRINT "(A,/)"," Computing the hessian of the potential at the minimum... "
+
+      ! compute hessian at the minimum of the PES
+      HessianAtMinimum = HessianOfThePotential( XMin )
+
+      ! Write info on geometry and energy as output
+      WRITE(*,500) EAsy*EnergyConversion(InternalUnits,InputUnits), EnergyUnit(InputUnits),              &
+                   EMin*EnergyConversion(InternalUnits,InputUnits), EnergyUnit(InputUnits),              &
+                   (EMin-EAsy)*EnergyConversion(InternalUnits,InputUnits), EnergyUnit(InputUnits),       &
+                   XMin(3)*LengthConversion(InternalUnits,InputUnits), LengthUnit(InputUnits),           &
+                   XMin(4)*LengthConversion(InternalUnits,InputUnits), LengthUnit(InputUnits),           &
+                   (XMin(3)-XMin(4))*LengthConversion(InternalUnits,InputUnits), LengthUnit(InputUnits) 
+
+      ! ===================================================================================================
+      ! (2) Frequencies along the ZC and ZH cut of the potential 
+      ! ===================================================================================================
+
+      ! Set starting geometry as the geometry of the minimum
+      X = XMin 
+
+      ! ZH frequency at the minimum of the potential
+      X(3) = XMin(3) + SmallDelta
+      PotEnergy = VibrRelaxPotential( X, A )
+      ZHFreq = - A(3) / ( 2.0 * SmallDelta )
+      X(3) = XMin(3) - SmallDelta
+      PotEnergy = VibrRelaxPotential( X, A )
+      ZHFreq = ZHFreq + A(3) / ( 2.0 * SmallDelta )
+      ZHFreq = sqrt( ZHFreq /  MassVector(3) )
+      X(3) = XMin(3)
+
+      ! ZC frequency at the minimum of the potential
+      X(4) = XMin(4) + SmallDelta
+      PotEnergy = VibrRelaxPotential( X, A )
+      ZCFreq = - A(4) / ( 2.0 * SmallDelta )
+      X(4) = XMin(4) - SmallDelta
+      PotEnergy = VibrRelaxPotential( X, A )
+      ZCFreq = ZCFreq + A(4) / ( 2.0 * SmallDelta )
+      ZCFreq = sqrt( ZCFreq /  MassVector(4) )
+      X(4) = XMin(4)
+
+      ! Write info on geometry and energy as output
+      WRITE(*,501) ZHFreq*FreqConversion(InternalUnits,InputUnits), FreqUnit(InputUnits),              &
+                   ZCFreq*FreqConversion(InternalUnits,InputUnits), FreqUnit(InputUnits)
+
+      ! ===================================================================================================
+      ! (3) Frequencies and normal modes of the 4D potential 
+      ! ===================================================================================================
+
+      ! Numerical mass scaled hessian of the 4D system potential
+      ! (in general cannot be extracted from the full hessian for the distortion contribution in
+      !  the independent oscillator model cases )
+      CALL FivePointDifferenceHessian( FourDPotentialOnly, XMin(1:4), SmallDelta, HessianSystem )
+      DO j = 1, 4
+         DO i = 1, 4
+            HessianSystem(i,j) = HessianSystem(i,j) / SQRT( MassVector(i)*MassVector(j) )
+         END DO
+      END DO
+
+      ! Diagonalize the hessian
+      ALLOCATE( EigenFreq(4), EigenModes(4,4) )
+      CALL TheOneWithDiagonalization( HessianSystem, EigenModes, EigenFreq )
+
+      WRITE(*,502) SQRT(EigenFreq(1))*FreqConversion(InternalUnits,InputUnits), FreqUnit(InputUnits), &
+                   TRIM(LengthUnit(InternalUnits)), EigenModes(:, 1), &
+                   SQRT(EigenFreq(2))*FreqConversion(InternalUnits,InputUnits), FreqUnit(InputUnits), &
+                   TRIM(LengthUnit(InternalUnits)), EigenModes(:, 2), &
+                   SQRT(EigenFreq(3))*FreqConversion(InternalUnits,InputUnits), FreqUnit(InputUnits), &
+                   TRIM(LengthUnit(InternalUnits)), EigenModes(:, 3), &
+                   SQRT(EigenFreq(4))*FreqConversion(InternalUnits,InputUnits), FreqUnit(InputUnits), &
+                   TRIM(LengthUnit(InternalUnits)), EigenModes(:, 4)
+
+      DEALLOCATE( EigenFreq, EigenModes )
+
+      ! PHONON SPECTRUM OF THE BATH WITH CARBON ATOMS IN EQUILIBRIUM GEOMETRY FOR CH ADSORPTION
+      ! AND H NEAR THE SURFACE AND FAR FROM THE SURFACE 
+
+      500 FORMAT (/, " H-Graphite adsorption geometry and energy   ",/  &
+                     " * Asymptotic energy:           ",1F15.6,1X,A, /, &
+                     " * Energy at the minimum:       ",1F15.6,1X,A, /, &
+                     " * Adsorption energy:           ",1F15.6,1X,A, /, &
+                     " * ZH at the minimum:           ",1F15.6,1X,A, /, &
+                     " * ZC at the minimum:           ",1F15.6,1X,A, /, &
+                     " * C-H equilibrium distance:    ",1F15.6,1X,A     )
+
+      501 FORMAT (/, " Frequencies along Zc and Zh cuts            ",/  &
+                     " * Frequency along ZH:          ",1F15.2,1X,A, /, &
+                     " * Frequency along ZC:          ",1F15.2,1X,A     ) 
+
+      502 FORMAT (/, " 4D system potential normal modes             ",/, &
+                     " 1) Frequency:                   ",1F15.2,1X,A, /, &
+                     "    Mass Scaled Coords / ",A," : ",4F12.6,      /, &
+                     " 2) Frequency:                   ",1F15.2,1X,A, /, &
+                     "    Mass Scaled Coords / ",A," : ",4F12.6,      /, &
+                     " 3) Frequency:                   ",1F15.2,1X,A, /, &
+                     "    Mass Scaled Coords / ",A," : ",4F12.6,      /, &
+                     " 4) Frequency:                   ",1F15.2,1X,A, /, &
+                     "    Mass Scaled Coords / ",A," : ",4F12.6          )
+
 
 ! 
 ! !***************************************************************************************************
@@ -124,28 +289,6 @@ MODULE PotentialAnalysis
 ! 
 !    SUBROUTINE PotentialCuts()
 !       IMPLICIT NONE
-! 
-!       REAL, PARAMETER :: dd = 0.001
-!       
-!       INTEGER :: iZH, iZC, nPoint
-!       INTEGER :: HCurveOutputUnit
-! 
-!       REAL, DIMENSION(:), ALLOCATABLE :: PotentialArray
-!       REAL, DIMENSION(:), ALLOCATABLE :: ZCArray, ZHArray
-! 
-!       REAL :: DeltaZH, DeltaZC
-!       REAL :: MinimumZH,          MinimumZC,          MinimumE
-!       REAL :: ZHFreq, ZCFreq, Coupling
-!       REAL :: Tmp1, Tmp2
-!       
-!       LOGICAL, DIMENSION(nevo+3) :: OptimizationMask
-! 
-!       REAL, DIMENSION(:,:), ALLOCATABLE :: Hessian, EigenModes
-!       REAL, DIMENSION(:), ALLOCATABLE :: EigenFreq
-! 
-!       PRINT "(2/,A)",    "***************************************************"
-!       PRINT "(A,F10.5)", "               PES ANALYSIS "
-!       PRINT "(A,/)" ,    "***************************************************"
 ! 
 !       ! Allocate temporary array to store potential data and coord grids
 !       ALLOCATE( PotentialArray( NpointZH * NpointZC ), ZCArray( NpointZC ), ZHArray( NpointZH ) )
@@ -157,77 +300,6 @@ MODULE PotentialAnalysis
 !       ! Define coordinate grids
 !       ZCArray = (/ ( ZCmin + DeltaZC*(iZC-1), iZC=1,NpointZC) /)
 !       ZHArray = (/ ( ZHmin + DeltaZH*(iZH-1), iZH=1,NpointZH) /)
-! 
-!       !*************************************************************
-!       ! EQUILIBRIUM POSITION OF THE H-GRAPHITE POTENTIAL
-!       !*************************************************************
-! 
-!       ! minimum of the CH 4D potential
-! 
-!       ! set optimization mask
-!       IF ( FreezeGraphene == 1 ) THEN
-!          OptimizationMask = (/ (.FALSE., iCoord=1,nevo+3) /)
-!          OptimizationMask(1:4) = .TRUE.
-!       ELSE 
-!          OptimizationMask = (/ (.TRUE., iCoord=1,nevo+3) /)
-!       ENDIF
-!          
-!       ! Set guess geometry: collinear H and other Cs in ideal geometry
-!       X(:) = 0.0
-!       X(4) = C1Puckering
-!       X(3) = C1Puckering + 2.2
-! 
-!       ! Compute potential
-!       PotEnergy = MinimizePotential( X,  OptimizationMask )
-! 
-!       ! Store values, with respect to the plane defined by C2,C3 and C4
-!       Tmp1 = X(3)
-!       Tmp2 = X(4)
-!       MinimumZH = X(3) - (X(5)+X(6)+X(7))/3.0
-!       MinimumZC = X(4) - (X(5)+X(6)+X(7))/3.0
-!       MinimumE = PotEnergy
-! 
-!       ! ZH frequency at the minimum of the potential
-!       X(3) = Tmp1 + dd
-!       PotEnergy = VHSticking( X, A )
-!       ZHFreq = - A(3) / ( 2.0 * dd )
-!       X(3) = Tmp1 - dd
-!       PotEnergy =  VHSticking( X, A )
-!       ZHFreq = ZHFreq + A(3) / ( 2.0 * dd )
-!       ZHFreq = sqrt( ZHFreq /  rmh )
-! 
-!       ! ZC frequency at the minimum of the potential
-!       X(3) = Tmp1
-!       X(4) = Tmp2 + dd
-!       PotEnergy = VHSticking( X, A )
-!       ZCFreq = - A(4) / ( 2.0 * dd )
-!       X(4) = Tmp2 - dd
-!       PotEnergy =  VHSticking( X, A )
-!       ZCFreq = ZCFreq + A(4) / ( 2.0 * dd )
-!       ZCFreq = sqrt( ZCFreq /  rmc )
-!       
-!       WRITE(*,801) MinimumE*MyConsts_Hartree2eV, MinimumZH*MyConsts_Bohr2Ang, MinimumZC*MyConsts_Bohr2Ang, &
-!                    (MinimumZH-MinimumZC)*MyConsts_Bohr2Ang, ZHFreq/MyConsts_cmmin1toAU, ZCFreq/MyConsts_cmmin1toAU
-!       WRITE(*,802) (MinimumE+5*MyConsts_K2AU)*MyConsts_Hartree2eV, (MinimumE+50*MyConsts_K2AU)*MyConsts_Hartree2eV,      &
-!                    (MinimumE+100*MyConsts_K2AU)*MyConsts_Hartree2eV, (MinimumE+300*MyConsts_K2AU)*MyConsts_Hartree2eV,   &
-!                    (MinimumE+500*MyConsts_K2AU)*MyConsts_Hartree2eV
-! 
-!       801 FORMAT (/,    " * Optimization with ideal graphite surface ",/  &
-!                         "   (Z=0 defined by C2,C3 and C4 plane)",/,/      &
-!                         "   Energy at the minimum (eV)     ",1F10.4,/     &
-!                         "   Z coordinate of H atom (Ang)   ",1F10.4,/     &
-!                         "   Z coordinate of C1 atom (Ang)  ",1F10.4,/     &
-!                         "   H-C1 distance (Ang)            ",1F10.4,/     &
-!                         "   Frequency along ZH (cm-1)      ",1F10.1,/     &
-!                         "   Frequency along ZC (cm-1)      ",1F10.1           ) 
-! 
-!       802 FORMAT (/,    " * Average vibrational energy at given T (eV) ",/,  &
-!                         "   at T = 5K   :   ",1F10.4,/, & 
-!                         "   at T = 50K  :   ",1F10.4,/, &
-!                         "   at T = 100K :   ",1F10.4,/, &
-!                         "   at T = 300K :   ",1F10.4,/, & 
-!                         "   at T = 500K :   ",1F10.4,/ ) 
-! 
 ! 
 !       !*************************************************************
 !       ! PRINT H VIBRATIONAL CURVE FOR C FIXED IN PUCKERING GEOMETRY
@@ -254,7 +326,6 @@ MODULE PotentialAnalysis
 !       CLOSE( HCurveOutputUnit )
 ! 
 !       WRITE(*,"(/,A)") " * CH binding curve written to file GraphiteHBindingCurve.dat"
-! 
 ! 
 !       !*************************************************************
 !       ! PRINT 2D C-H V WITH OTHERS CARBONS IN OPTIMIZED GEOMETRY
@@ -294,86 +365,8 @@ MODULE PotentialAnalysis
 !       ! Deallocate memory
 !       DEALLOCATE( PotentialArray, ZHArray, ZCArray )
 ! 
-!       !*************************************************************
-!       !  COMPUTE HARMONIC FREQUENCIES IN THE MINIMUM
-!       !*************************************************************
-! 
-!       ALLOCATE( Hessian(2,2), EigenModes(2,2), EigenFreq(2) )
-! 
-!       CALL FivePointDifferenceHessian( CollinearOnlyV, (/ MinimumZH, MinimumZC /), 1.E-4, Hessian )
-! 
-!       Hessian(1,1) = Hessian(1,1) / rmh
-!       Hessian(2,2) = Hessian(2,2) / rmc
-!       Hessian(1,2) = Hessian(1,2) / SQRT(rmh*rmc)
-!       Hessian(2,1) = Hessian(2,1) / SQRT(rmh*rmc)
-! 
-!       CALL TheOneWithDiagonalization( Hessian, EigenModes, EigenFreq )
-! 
-!       PRINT*, " "
-!       PRINT*, " frequencies "
-!       PRINT*, SQRT(EigenFreq), " au"
-!       PRINT*, SQRT(EigenFreq)/MyConsts_cmmin1toAU, " cm-1"
-!       PRINT*, " "
-!       PRINT*, " eigenvalues "
-!       DO iZC = 1, 2
-!          PRINT*, " eig ", iZC, " : ", EigenModes(:, iZC)
-!       END DO
-!       DEALLOCATE( Hessian, EigenModes, EigenFreq )
-! 
-!       ALLOCATE( Hessian(4,4), EigenModes(4,4), EigenFreq(4) )
-! 
-!       CALL FivePointDifferenceHessian( NonCollinearOnlyV, (/ 0.0, 0.0, MinimumZH, MinimumZC /), 1.E-4, Hessian )
-! 
-!       Hessian(1:3,1:3) = Hessian(1:3,1:3) / rmh
-!       Hessian(4,4) = Hessian(4,4) / rmc
-!       Hessian(1:3,4) = Hessian(1:3,4) / SQRT(rmh*rmc)
-!       Hessian(4,1:3) = Hessian(4,1:3) / SQRT(rmh*rmc)
-! 
-!       CALL TheOneWithDiagonalization( Hessian, EigenModes, EigenFreq )
-! 
-!       PRINT*, " "
-!       PRINT*, " frequencies "
-!       WRITE(*,"(4F20.12, A)") SQRT(EigenFreq), " au"
-!       WRITE(*,"(4F20.12, A)") SQRT(EigenFreq)/MyConsts_cmmin1toAU, " cm-1"
-!       PRINT*, " "
-!       PRINT*, " eigenvalues "
-!       DO iZC = 1, 4
-!          WRITE(*,"(A,I3,A,4F20.12)") " eig ", iZC, " : ", EigenModes(:, iZC)
-!       END DO
-!       DEALLOCATE( Hessian, EigenModes, EigenFreq )
-! 
-!       ! OTHER FEATURE TO IMPLEMENT IN THIS SECTION:
-!       ! * calculation of the harmonic frequencies at the minimum by diagonalization
-!       !   of the hessian, in the 2D collinear model and the 4D non collinear model
-!       ! * by subtraction of the harmonic frequency, computation of the non harmonic coupling 
-!       !   between the normal modes
-!       ! * with respect to the minimum, plot of the energies corresponding to average
-!       !   thermic energy
-! 
-! 
 !    END SUBROUTINE PotentialCuts
 
-! 
-! !***************************************************************************************************
-! !                       CHAIN EIGEN-FREQUENCIES
-! !***************************************************************************************************
-! 
-!    SUBROUTINE ChainEigenfrequencies()
-!       IMPLICIT NONE
-! 
-!       REAL, PARAMETER :: dd = 0.0001
-! 
-!       REAL, DIMENSION(:,:), ALLOCATABLE :: Hessian, EigenModes
-!       REAL, DIMENSION(:), ALLOCATABLE :: EigenFreq
-! 
-!       INTEGER :: SpectrumOutUnit
-! 
-!       REAL :: MinimumZH, MinimumZC
-!       REAL :: Frequency, Spectrum
-!       REAL :: MaxFreq, DeltaFreq, SigmaPeak
-!       INTEGER :: NFreq, iFreq
-!       INTEGER :: iEigen
-! 
 !       PRINT "(2/,A)",    "***************************************************"
 !       PRINT "(A,F10.5)", "          CHAIN EIGENFREQUENCIES ANALYSIS "
 !       PRINT "(A,/)" ,    "***************************************************"
@@ -455,41 +448,167 @@ MODULE PotentialAnalysis
 
    END SUBROUTINE PotentialAnalysis_Dispose
 
+
 !*************************************************************************************************
 
-!*******************************************************************************
-!> 4D adiabatic H-Graphene potential, only potential computation 
-!>
-!> @param Positions    Array with 3 cartesian coordinates for the H atom and 
-!>                     1 Z coordinates for the first carbon atoms (in au)
-!> @return V           output potential in atomic units
-!*******************************************************************************   
-      REAL FUNCTION NonCollinearOnlyV( Positions ) RESULT(V) 
-         IMPLICIT NONE
-         REAL, DIMENSION(:) :: Positions
-         REAL, DIMENSION(4) :: Dummy
+   REAL FUNCTION VibrRelaxPotential( Positions, Forces )
+      REAL, DIMENSION(:), TARGET, INTENT(IN)  :: Positions
+      REAL, DIMENSION(:), TARGET, INTENT(OUT) :: Forces
+      INTEGER :: NrDOF, i       
 
-         CALL ERROR( size(Positions) /= 4, " NonCollinearOnlyV: wrong nr of dofs " )
-         ! use the full potential with the carbon atoms in the equilibrium geometry
-         V = VHFourDimensional( Positions(:), Dummy(:) ) 
-      END FUNCTION NonCollinearOnlyV
+      ! Check the number degrees of freedom
+      NrDOF = size( Positions )
+      CALL ERROR( size(Forces) /= NrDOF, "PotentialAnalysis.VibrRelaxPotential: array dimension mismatch" )
+      CALL ERROR( NrDOF /= NDim, "PotentialAnalysis.VibrRelaxPotential: wrong number of DoFs" )
 
-!*******************************************************************************
-!> 2D adiabatic H-Graphene potential, only potential computation 
-!>
-!> @param Positions    Array with 1 Z coordinate for the H atom and 
-!>                     1 Z coordinates for the first carbon atoms (in au)
-!> @return V           output potential in atomic units
-!*******************************************************************************   
-      REAL FUNCTION CollinearOnlyV( Positions ) RESULT(V) 
-         IMPLICIT NONE
-         REAL, DIMENSION(:) :: Positions
-         REAL, DIMENSION(4) :: Dummy
+      ! Initialize forces and potential
+      VibrRelaxPotential = 0.0
+      Forces(:)          = 0.0
 
-         CALL ERROR( size(Positions) /= 2, " CollinearOnlyV: wrong nr of dofs " )
-         ! use the full potential with the carbon atoms in the equilibrium geometry
-         V = VHFourDimensional( (/ 0.0, 0.0, Positions /), Dummy(:) ) 
-      END FUNCTION CollinearOnlyV
+      IF ( BathType == SLAB_POTENTIAL ) THEN 
+         ! Compute potential using the potential subroutine
+         VibrRelaxPotential = VHSticking( Positions, Forces )
 
+      ELSE IF ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
+         ! Compute potential and forces of the system
+         VibrRelaxPotential = VHFourDimensional( Positions(1:4), Forces(1:4) )
+         ! Add potential and forces of the bath and the coupling
+         CALL BathPotentialAndForces( Bath, Positions(4)-C1Puckering, Positions(5:), VibrRelaxPotential, &
+                                                                               Forces(4), Forces(5:) ) 
+
+      ELSE IF ( BathType == DOUBLE_CHAIN ) THEN
+         ! Compute potential and forces of the system
+         VibrRelaxPotential = VHFourDimensional( Positions(1:4), Forces(1:4) )
+         ! Add potential and forces of the bath and the coupling
+         CALL BathPotentialAndForces( DblBath(1), Positions(4)-C1Puckering, Positions(5:NBath+4), VibrRelaxPotential, &
+                                                                               Forces(4), Forces(5:NBath+4) ) 
+         CALL BathPotentialAndForces( DblBath(2), Positions(4)-C1Puckering, Positions(NBath+5:2*NBath+4), VibrRelaxPotential, &
+                                                                               Forces(4), Forces(NBath+5:2*NBath+4) ) 
+
+      ELSE IF ( BathType == LANGEVIN_DYN ) THEN
+         ! Compute potential using only the 4D subroutine
+         VibrRelaxPotential = VHFourDimensional( Positions, Forces )
+
+      END IF
+
+   END FUNCTION VibrRelaxPotential
+
+   ! ************************************************************************************************
+
+   REAL FUNCTION FullPotentialOnly( AtCoords )
+      REAL, DIMENSION(:) :: AtCoords
+      REAL, DIMENSION(NDim) :: Dummy
+
+      FullPotentialOnly = VHSticking( AtCoords, Dummy )
+   END FUNCTION FullPotentialOnly
+
+   REAL FUNCTION FourDPotentialOnly( AtCoords )
+      REAL, DIMENSION(:) :: AtCoords
+      REAL, DIMENSION(4) :: Dummy
+
+      FourDPotentialOnly = VHFourDimensional( AtCoords(1:4), Dummy )
+   END FUNCTION FourDPotentialOnly
+
+   ! ************************************************************************************************
+
+   FUNCTION HessianOfThePotential( AtPoint ) RESULT( Hessian )
+      REAL, DIMENSION(NDim,NDim) :: Hessian
+      REAL, DIMENSION(NDim), INTENT(IN) :: AtPoint
+      REAL, DIMENSION(NBath) :: CouplingsCoeffs
+      REAL :: DistortionCoeff
+      INTEGER :: i, j
+
+      Hessian(:,:) = 0.0
+
+      IF ( BathType == SLAB_POTENTIAL ) THEN 
+
+         ! Numerical mass scaled hessian of the full system+slab potential
+         CALL FivePointDifferenceHessian( FullPotentialOnly, AtPoint, SmallDelta, Hessian )
+         DO j = 1, NDim
+            DO i = 1, NDim
+               Hessian(i,j) = Hessian(i,j) / SQRT( MassVector(i)*MassVector(j) )
+            END DO
+         END DO
+
+      ELSE IF ( BathType == NORMAL_BATH ) THEN
+
+         ! Numerical mass scaled hessian of the 4D system potential
+         CALL FivePointDifferenceHessian( FourDPotentialOnly, AtPoint(1:4), SmallDelta, Hessian(1:4,1:4) )
+         DO j = 1, 4
+            DO i = 1, 4
+               Hessian(i,j) = Hessian(i,j) / SQRT( MassVector(i)*MassVector(j) )
+            END DO
+         END DO
+
+         ! add the part of the hessian of the independent oscillator model
+         CALL  HessianOfTheBath( Bath, Hessian(5:NDim, 5:NDim) ) 
+
+         ! add the contribution from SYSTEM-BATH coupling and from DISTORTION CORRECTION
+         CALL  CouplingAndDistortionHessian( Bath, CouplingsCoeffs, DistortionCoeff )
+         DO i = 1, NBath
+            Hessian(4,4+i) = Hessian(4,4+i) + CouplingsCoeffs(i) / SQRT( MassVector(4) * MassVector(4+i) ) 
+            Hessian(4+i,4) = Hessian(4+i,4) + CouplingsCoeffs(i) / SQRT( MassVector(4) * MassVector(4+i) ) 
+         END DO
+         Hessian(4,4) = Hessian(4,4) + DistortionCoeff / MassVector(4)
+
+      ELSE IF ( BathType == CHAIN_BATH ) THEN
+
+         ! Numerical mass scaled hessian of the 4D system potential
+         CALL FivePointDifferenceHessian( FourDPotentialOnly, AtPoint(1:4), SmallDelta, Hessian(1:4,1:4) )
+         DO j = 1, 4
+            DO i = 1, 4
+               Hessian(i,j) = Hessian(i,j) / SQRT( MassVector(i)*MassVector(j) )
+            END DO
+         END DO
+
+         ! add the part of the hessian of the independent oscillator model
+         CALL  HessianOfTheBath( Bath, Hessian(5:NDim, 5:NDim) ) 
+
+         ! add the contribution from SYSTEM-BATH coupling and from DISTORTION CORRECTION
+         CALL  CouplingAndDistortionHessian( Bath, CouplingsCoeffs, DistortionCoeff )
+         Hessian(4,5) = Hessian(4,5) + CouplingsCoeffs(1) / SQRT( MassVector(4) * MassVector(5) ) 
+         Hessian(5,4) = Hessian(5,4) + CouplingsCoeffs(1) / SQRT( MassVector(4) * MassVector(5) ) 
+         Hessian(4,4) = Hessian(4,4) + DistortionCoeff / MassVector(4)
+
+      ELSE IF ( BathType == DOUBLE_CHAIN ) THEN
+
+         ! Numerical mass scaled hessian of the 4D system potential
+         CALL FivePointDifferenceHessian( FourDPotentialOnly, AtPoint(1:4), SmallDelta, Hessian(1:4,1:4) )
+         DO j = 1, 4
+            DO i = 1, 4
+               Hessian(i,j) = Hessian(i,j) / SQRT( MassVector(i)*MassVector(j) )
+            END DO
+         END DO
+
+         ! add the part of the hessian of the independent oscillator model
+         CALL HessianOfTheBath( DblBath(1), Hessian(5:4+NBath, 5:4+NBath) ) 
+         CALL HessianOfTheBath( DblBath(2), Hessian(5+NBath:NDim, 5+NBath:NDim) ) 
+
+         ! add the contribution from SYSTEM-BATH coupling and from DISTORTION CORRECTION
+         CALL  CouplingAndDistortionHessian( DblBath(1), CouplingsCoeffs, DistortionCoeff )
+         Hessian(4,5) = Hessian(4,5) + CouplingsCoeffs(1) / SQRT( MassVector(4) * MassVector(5) ) 
+         Hessian(5,4) = Hessian(4,5) + CouplingsCoeffs(1) / SQRT( MassVector(4) * MassVector(5) ) 
+         Hessian(4,4) = Hessian(4,4) + DistortionCoeff / MassVector(4)
+         CALL  CouplingAndDistortionHessian( DblBath(2), CouplingsCoeffs, DistortionCoeff )
+         Hessian(4,5+NBath) = Hessian(4,5+NBath) + CouplingsCoeffs(1) / SQRT( MassVector(4) * MassVector(5) ) 
+         Hessian(5+NBath,4) = Hessian(5+NBath,4) + CouplingsCoeffs(1) / SQRT( MassVector(4) * MassVector(5) ) 
+         Hessian(4,4) = Hessian(4,4) + DistortionCoeff / MassVector(4)
+
+      ELSE IF ( BathType == LANGEVIN_DYN ) THEN
+
+         ! Numerical hessian of the 4D system potential
+         CALL FivePointDifferenceHessian( FourDPotentialOnly, AtPoint, SmallDelta, Hessian )
+         DO j = 1, NDim
+            DO i = 1, NDim
+               Hessian(i,j) = Hessian(i,j) / SQRT( MassVector(i)*MassVector(j) )
+            END DO
+         END DO
+
+      END IF
+
+   END FUNCTION HessianOfThePotential
+
+
+!*************************************************************************************************
 
 END MODULE PotentialAnalysis

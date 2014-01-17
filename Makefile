@@ -13,7 +13,7 @@ LOGFILE = yes
 LOGNAME = jk6_v3.log
 
 # Compiler ( gfortran, ifort )
-FC = gfortran 
+FC = ifort    
 
 # Debugging options ( yes or no )
 DEBUG =  no 
@@ -405,7 +405,8 @@ ${OBJDIR}/PolymerVibrationalRelax.o : ${SRCDIR}/PolymerVibrationalRelax.f90 ${OB
 
 # Program to compute the properties of the PES
 ${OBJDIR}/PotentialAnalysis.o : ${SRCDIR}/PotentialAnalysis.f90 ${OBJDIR}/MyLinearAlgebra.o ${OBJDIR}/SharedData.o \
-                                ${OBJDIR}/InputField.o ${OBJDIR}/PotentialModule.o ${COMMONDEP}
+                                ${OBJDIR}/InputField.o ${OBJDIR}/PotentialModule.o ${OBJDIR}/IndependentOscillatorsModel.o \
+                                ${OBJDIR}/DifferenceDerivatives.o ${COMMONDEP}
 
 # Set error and warning procedures
 ${OBJDIR}/ErrorTrap.o        : ${SRCDIR}/ErrorTrap.f90 Makefile

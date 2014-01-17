@@ -29,6 +29,7 @@ PROGRAM JK6_v3
    USE SharedData
    USE InputField
    USE UnitConversion
+   USE PotentialAnalysis
    USE VibrationalRelax
    USE PolymerVibrationalRelax
    USE PolymerEquilibriumOscillator
@@ -143,12 +144,12 @@ PROGRAM JK6_v3
       ! Nr of bath degrees of freedom
       CALL SetFieldFromInput( InputData, "NBath",  NBath ) 
       ! Read ohmic spectral density, when zero read spectral density from file
-      CALL SetFieldFromInput( InputData, "OhmicRelaxT", OhmicGamma, 0.0 )
-      IF ( OhmicGamma /= 0 ) THEN
-         OhmicGamma = 1. / ( OhmicGamma * TimeConversion(InputUnits, InternalUnits) )
+      CALL SetFieldFromInput( InputData, "OhmicGammaTimesMass", OhmicGammaTimesMass, 0.0 )
+      IF ( OhmicGammaTimesMass /= 0 ) THEN
+         OhmicGammaTimesMass = OhmicGammaTimesMass
          ! For an ohmic SD, cutoff freq is compulsory
          CALL SetFieldFromInput( InputData, "BathCutOffFreq", BathCutOffFreq )
-      ELSE IF ( OhmicGamma == 0.0 ) THEN
+      ELSE IF ( OhmicGammaTimesMass == 0.0 ) THEN
          ! Read file with spectral density
          CALL SetFieldFromInput( InputData, "SpectralDensityFile", SpectralDensityFile )
          ! Read cutoff frequency of the bath, if BathCutOffFreq is not present, it is set to zero
@@ -225,7 +226,11 @@ PROGRAM JK6_v3
    END SELECT
 
    IF ( (RunType /= HARMONICMODEL) .AND. (RunType /= RPMD_EQUILIBRIUM) ) THEN
-      IF ( Collinear )  WRITE(*,"(/,A)") " * The atom is fixed in the collinear geometry "
+      IF ( Collinear ) THEN 
+         WRITE(*,"(/,A)") " * The atom is fixed in the collinear geometry "
+      ELSE 
+         WRITE(*,"(/,A)") " * Dependence of the potential on impact parameter rho is considered "
+      END IF
       WRITE(*,898) MassH*MassConversion(InternalUnits, InputUnits), MassUnit(InputUnits), &
                    MassC*MassConversion(InternalUnits, InputUnits), MassUnit(InputUnits)
    END IF
@@ -235,14 +240,14 @@ PROGRAM JK6_v3
       CASE( SLAB_POTENTIAL )
          WRITE(*,904) NCarbon, 1.0/DynamicsGamma*TimeConversion(InternalUnits, InputUnits), TimeUnit(InputUnits)
       CASE( NORMAL_BATH ) 
-         IF ( OhmicGamma == 0.0 ) THEN
+         IF ( OhmicGammaTimesMass == 0.0 ) THEN
             WRITE(*,900) NBath, MassBath*MassConversion(InternalUnits, InputUnits), MassUnit(InputUnits), &
                          BathCutOffFreq*FreqConversion(InternalUnits, InputUnits), FreqUnit(InputUnits),  &
                          trim(adjustl(SpectralDensityFile))
          ELSE
             WRITE(*,910) NBath, MassBath*MassConversion(InternalUnits, InputUnits), MassUnit(InputUnits), &
                          BathCutOffFreq*FreqConversion(InternalUnits, InputUnits), FreqUnit(InputUnits),  &
-                         1.0/OhmicGamma*TimeConversion(InternalUnits, InputUnits), TimeUnit(InputUnits)
+                         OhmicGammaTimesMass
          END IF
       CASE( CHAIN_BATH )
          WRITE(*,901) NBath, MassBath*MassConversion(InternalUnits, InputUnits), MassUnit(InputUnits),   &
@@ -289,7 +294,7 @@ PROGRAM JK6_v3
               " * Nr of bath oscillators:                      ",I10,  /,& 
               " * Mass of the bath oscillator:                 ",F10.4,1X,A,/,& 
               " * Cutoff frequency of the bath:                ",F10.1,1X,A,/,& 
-              " * Relaxation time of the ohmic SD              ",F10.4,1X,A,/ )
+              " * Relaxation time of the ohmic SD              ",F10.4,1X,"au",/ )
 
    901 FORMAT(" * Bath is is a linear chain of harmonic oscillators ", /,&
               " * Nr of bath oscillators:                      ",I10,  /,& 
@@ -320,10 +325,10 @@ PROGRAM JK6_v3
    
    ! If needed setup bath frequencies and coupling for oscillator bath models
    IF (  BathType == NORMAL_BATH ) THEN
-         IF ( OhmicGamma == 0.0 ) THEN
+         IF ( OhmicGammaTimesMass == 0.0 ) THEN
             CALL SetupIndepOscillatorsModel( Bath, NBath, 0, SpectralDensityFile, MassBath, BathCutOffFreq )
          ELSE
-            CALL SetupOhmicIndepOscillatorsModel( Bath, NBath, 0, OhmicGamma, MassBath, BathCutOffFreq )
+            CALL SetupOhmicIndepOscillatorsModel( Bath, NBath, 0, OhmicGammaTimesMass, MassBath, BathCutOffFreq )
          END IF
    ELSE IF (  BathType == CHAIN_BATH ) THEN
          CALL SetupIndepOscillatorsModel( Bath, NBath, 1, SpectralDensityFile, MassBath, BathCutOffFreq )
@@ -357,7 +362,7 @@ PROGRAM JK6_v3
       CASE( SCATTERING )
          ! ...
       CASE( POTENTIALPRINT )
-         ! ...
+         CALL PotentialAnalysis_ReadInput( InputData )
    END SELECT
 
    CALL CloseFile( InputData )
@@ -385,7 +390,8 @@ PROGRAM JK6_v3
       CASE( SCATTERING )
          ! ...
       CASE( POTENTIALPRINT )
-         ! ...
+         CALL PotentialAnalysis_Initialize()
+         CALL PotentialAnalysis_Run()
    END SELECT
 
    !*************************************************************
@@ -406,7 +412,7 @@ PROGRAM JK6_v3
       CASE( SCATTERING )
          ! ...
       CASE( POTENTIALPRINT )
-         ! ...
+         CALL PotentialAnalysis_Dispose()
    END SELECT
 
    IF ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
@@ -419,7 +425,7 @@ PROGRAM JK6_v3
    CALL date_and_time (values=Time2)
    
    WRITE(*,*)
-   WRITE(*,*) " Execution Time : ",TimeDifference( Time2, Time1 )
+   WRITE(*,"(A,F10.1,A)") " Execution Time : ",TimeDifference( Time2, Time1 )/1000.0, " / s "
    
    
       CONTAINS

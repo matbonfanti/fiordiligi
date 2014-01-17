@@ -26,7 +26,7 @@ MODULE PotentialModule
    !> Max nr of iterations for potential optimization
    INTEGER, PARAMETER :: MaxIter = 10000
    !> Threshold for conjugate gradient convergence
-   REAL, PARAMETER :: GradEps = 1.0E-4
+   REAL, PARAMETER :: GradEps = 1.0E-6
    !> Parameter for finite difference computation
    REAL, PARAMETER :: Delta = 1.0E-4
 
@@ -58,7 +58,7 @@ MODULE PotentialModule
 !> @}
 
    ! > Coordinate of the slab in the minimum
-   REAL, DIMENSION(120), SAVE :: MinSlab
+   REAL, DIMENSION(120), SAVE, PUBLIC :: MinSlab
 
    CONTAINS
 
