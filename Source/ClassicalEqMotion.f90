@@ -54,9 +54,7 @@ MODULE ClassicalEqMotion
          REAL, DIMENSION(:), POINTER :: Mass             !< Vector with the masses of the system
          REAL  :: dt                                     !< Time step of integration
          REAL  :: Gamma                                  !< Integrated Langevin friction for one timestep
-         REAL  :: FrictionCoeff_HalfDt                   !< Coefficient including Langevin friction for half timestep
          REAL, DIMENSION(:), POINTER :: ThermalNoise     !< Vector of the thermal noise sigma
-         REAL, DIMENSION(:), POINTER :: ThermalNoise2     !< Vector of the thermal noise sigma
          LOGICAL, DIMENSION(:), POINTER :: ThermoSwitch  !< Vector to set the thermostat on or off for the dof
 
          INTEGER :: NBeads                                 !< Nr of system replicas 
@@ -152,8 +150,6 @@ MODULE ClassicalEqMotion
 
       ! Store gamma value
       EvolData%Gamma = Gamma
-      ! Set coefficient for velocity integration (in Vel-Verlet) with Langevin friction
-      EvolData%FrictionCoeff_HalfDt = 1.0 - 0.5 * Gamma * EvolData%dt
       
       ! Store the Thermostat switch array
       ALLOCATE( EvolData%ThermoSwitch(EvolData%NDoF) )
@@ -164,14 +160,12 @@ MODULE ClassicalEqMotion
       END IF
 
       ! Set standard deviations of the thermal noise
-      IF ( .NOT. EvolData%HasThermostat ) &
-                 ALLOCATE( EvolData%ThermalNoise( EvolData%NDoF ), EvolData%ThermalNoise2( EvolData%NDoF ) )
+      IF ( .NOT. EvolData%HasThermostat )  ALLOCATE( EvolData%ThermalNoise( EvolData%NDoF )  )
       EvolData%ThermalNoise(:) = 0.0
-      EvolData%ThermalNoise2(:) = 0.0
       DO iDoF = 1, EvolData%NDoF
          IF ( EvolData%ThermoSwitch(iDoF) ) THEN
-            EvolData%ThermalNoise(iDoF) = sqrt( 2.0*Temperature*EvolData%Mass(iDoF)*Gamma/EvolData%dt )
-            EvolData%ThermalNoise2(iDoF) = sqrt( 2.0*Temperature*Gamma/EvolData%Mass(iDoF) )
+!             EvolData%ThermalNoise(iDoF) = sqrt( 2.0*Temperature*EvolData%Mass(iDoF)*Gamma/EvolData%dt )
+            EvolData%ThermalNoise(iDoF) = sqrt( 2.0*Temperature*Gamma/EvolData%Mass(iDoF) )
          END IF
       END DO
 
@@ -310,7 +304,6 @@ MODULE ClassicalEqMotion
       IF ((.NOT. EvolData%IsSetup) .OR. (.NOT. EvolData%HasThermostat))  RETURN
 
       ! Set coefficient with zero friction
-      EvolData%FrictionCoeff_HalfDt = 1.0
       EvolData%Gamma = 0.0
       
       ! Deallocate standard deviations of the thermal noise
@@ -568,7 +561,7 @@ MODULE ClassicalEqMotion
                Xi(iDoF)  = GaussianRandomNr(RandomNr)
                Eta(iDoF) = GaussianRandomNr(RandomNr)
                A(iDoF) = 0.5 * EvolData%dt**2 * ( Acc(iDoF) - EvolData%Gamma*Vel(iDoF) ) + &
-                        EvolData%ThermalNoise2(iDoF) * EvolData%dt**(1.5) * ( 0.5 * Xi(iDoF) + Over2Sqrt3 * Eta(iDoF)  )
+                        EvolData%ThermalNoise(iDoF) * EvolData%dt**(1.5) * ( 0.5 * Xi(iDoF) + Over2Sqrt3 * Eta(iDoF)  )
             ELSE IF ( .NOT. EvolData%ThermoSwitch(iDoF) ) THEN
                A(iDoF) = 0.5 * EvolData%dt**2 * Acc(iDoF)
             END IF
@@ -593,7 +586,7 @@ MODULE ClassicalEqMotion
          ! (4) FINAL UPDATE OF THE VELOCITIES
          DO iDoF = 1, EvolData%NDoF
             IF ( EvolData%ThermoSwitch(iDoF) ) THEN
-               Vel(iDoF) = Vel(iDoF) + 0.5*Acc(iDoF)*EvolData%dt + SQRT(EvolData%dt) * EvolData%ThermalNoise2(iDoF) * Xi(iDoF) &
+               Vel(iDoF) = Vel(iDoF) + 0.5*Acc(iDoF)*EvolData%dt + SQRT(EvolData%dt) * EvolData%ThermalNoise(iDoF) * Xi(iDoF) &
                                     - EvolData%Gamma * A(iDoF)
             ELSE IF ( .NOT. EvolData%ThermoSwitch(iDoF) ) THEN
                Vel(iDoF) = Vel(iDoF) + 0.5*Acc(iDoF)*EvolData%dt

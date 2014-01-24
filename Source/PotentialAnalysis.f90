@@ -28,13 +28,18 @@ MODULE PotentialAnalysis
 
    IMPLICIT NONE
 
-   REAL, PARAMETER :: SmallDelta = 1.E-04
+   REAL, PARAMETER :: SmallDelta = 1.E-06
 
    PRIVATE
    PUBLIC :: PotentialAnalysis_ReadInput, PotentialAnalysis_Initialize, PotentialAnalysis_Run, PotentialAnalysis_Dispose
 
    !> Nr of dimension of the system + bath 
    INTEGER :: NDim
+
+   !> Parameters to plot spectra in the frequency domain
+   REAL :: MaxFreq              !< Maximum frequency of the spectrum
+   REAL :: DeltaFreq            !< Delta frequency of the discretization
+   REAL :: SigmaPeak            !< Width parameter of the peaks in the spectrum
 
 !    ! THE FOLLOWING INPUT DATA ARE RELEVANT FOR A POTENTIAL PLOT RUN 
 ! 
@@ -56,6 +61,15 @@ MODULE PotentialAnalysis
       IMPLICIT NONE
       TYPE(InputFile), INTENT(INOUT) :: InputData
 
+
+      CALL SetFieldFromInput( InputData, "PlotSpectrum_MaxFreq", MaxFreq )
+      MaxFreq = MaxFreq * FreqConversion(InputUnits, InternalUnits)
+
+      CALL SetFieldFromInput( InputData, "PlotSpectrum_DeltaFreq", DeltaFreq )
+      DeltaFreq = DeltaFreq * FreqConversion(InputUnits, InternalUnits)
+
+      CALL SetFieldFromInput( InputData, "PlotSpectrum_SigmaPeak", SigmaPeak )
+      SigmaPeak = SigmaPeak * FreqConversion(InputUnits, InternalUnits)
 
 !    ELSE IF (RunType == POTENTIALPRINT) THEN
 !       CALL SetFieldFromInput( InputData, "ZHmin", ZHmin, 0.8 )
@@ -127,18 +141,36 @@ MODULE PotentialAnalysis
 !*******************************************************************************
    SUBROUTINE PotentialAnalysis_Run()
       IMPLICIT NONE
+
  
-      REAL, DIMENSION(NDim)      :: XMin, XAsy
-      REAL, DIMENSION(NDim,NDim) :: HessianAtMinimum 
+      INTEGER :: AsyPhononSpectrumUnit, MinPhononSpectrumUnit, SDCouplingUnit
+
+      REAL, DIMENSION(:), ALLOCATABLE   :: OmegaK, CoeffK, IntensityK
+      INTEGER :: NrOfModes
+
+      REAL, DIMENSION(NDim)      :: XMin, XAsy, XMinWithoutH, SystemCoord, BathCoord
+      REAL, DIMENSION(NDim,NDim) :: HessianSysAndSlab
       REAL, DIMENSION(4,4)       :: HessianSystem
 
       REAL, DIMENSION(:), ALLOCATABLE   :: EigenFreq
       REAL, DIMENSION(:,:), ALLOCATABLE :: EigenModes
 
-      REAL :: PotEnergy
+      REAL :: PotEnergy, Norm
       REAL :: ZHFreq, ZCFreq, EMin, EAsy
+      REAL :: Frequency, Spectrum
 
+      INTEGER :: iFreq, iEigen
       INTEGER :: i, j
+
+      AsyPhononSpectrumUnit = LookForFreeUnit()
+      OPEN( FILE="AsymptoticPhononSpectrum.dat", UNIT=AsyPhononSpectrumUnit )
+      WRITE(AsyPhononSpectrumUnit, "(A,/)") "# Slab harmonic phonon spectrum, asymptotic geometry "
+      MinPhononSpectrumUnit = LookForFreeUnit()
+      OPEN( FILE="InteractionPhononSpectrum.dat", UNIT=MinPhononSpectrumUnit )
+      WRITE(MinPhononSpectrumUnit, "(A,/)") "# Slab harmonic phonon spectrum, adsorption minimum geometry "
+      SDCouplingUnit = LookForFreeUnit()
+      OPEN( FILE="SpectralDensityCoupling.dat", UNIT=SDCouplingUnit )
+      WRITE(SDCouplingUnit, "(A,/)") "# Spectral density of the coupling "
 
       PRINT "(2/,A)",    "***************************************************"
       PRINT "(A,F10.5)", "               PES ANALYSIS "
@@ -168,7 +200,7 @@ MODULE PotentialAnalysis
 
       ! set asymptotic coordinates for the H atom
       XAsy(1:2) = 0.0
-      XAsy(3) = 10.0
+      XAsy(3) = 30.0
 
       IF ( BathType ==  SLAB_POTENTIAL ) THEN
          XAsy(4) = 0.0
@@ -182,11 +214,6 @@ MODULE PotentialAnalysis
 
       ! Computing the energy at this geometry
       EAsy = VibrRelaxPotential( XAsy, A )
-
-      PRINT "(A,/)"," Computing the hessian of the potential at the minimum... "
-
-      ! compute hessian at the minimum of the PES
-      HessianAtMinimum = HessianOfThePotential( XMin )
 
       ! Write info on geometry and energy as output
       WRITE(*,500) EAsy*EnergyConversion(InternalUnits,InputUnits), EnergyUnit(InputUnits),              &
@@ -234,30 +261,195 @@ MODULE PotentialAnalysis
       ! Numerical mass scaled hessian of the 4D system potential
       ! (in general cannot be extracted from the full hessian for the distortion contribution in
       !  the independent oscillator model cases )
-      CALL FivePointDifferenceHessian( FourDPotentialOnly, XMin(1:4), SmallDelta, HessianSystem )
-      DO j = 1, 4
-         DO i = 1, 4
-            HessianSystem(i,j) = HessianSystem(i,j) / SQRT( MassVector(i)*MassVector(j) )
-         END DO
-      END DO
+      HessianSystem = HessianOfTheSystem( XMin )
+
+      WRITE(*,505) trim(FreqUnit(InputUnits)), HessianSystem*(FreqConversion(InternalUnits,InputUnits)**2)
 
       ! Diagonalize the hessian
       ALLOCATE( EigenFreq(4), EigenModes(4,4) )
       CALL TheOneWithDiagonalization( HessianSystem, EigenModes, EigenFreq )
 
       WRITE(*,502) SQRT(EigenFreq(1))*FreqConversion(InternalUnits,InputUnits), FreqUnit(InputUnits), &
-                   TRIM(LengthUnit(InternalUnits)), EigenModes(:, 1), &
+                   TRIM(LengthUnit(InternalUnits)), EigenModes(:,1), &
                    SQRT(EigenFreq(2))*FreqConversion(InternalUnits,InputUnits), FreqUnit(InputUnits), &
-                   TRIM(LengthUnit(InternalUnits)), EigenModes(:, 2), &
+                   TRIM(LengthUnit(InternalUnits)), EigenModes(:,2), &
                    SQRT(EigenFreq(3))*FreqConversion(InternalUnits,InputUnits), FreqUnit(InputUnits), &
-                   TRIM(LengthUnit(InternalUnits)), EigenModes(:, 3), &
+                   TRIM(LengthUnit(InternalUnits)), EigenModes(:,3), &
                    SQRT(EigenFreq(4))*FreqConversion(InternalUnits,InputUnits), FreqUnit(InputUnits), &
-                   TRIM(LengthUnit(InternalUnits)), EigenModes(:, 4)
+                   TRIM(LengthUnit(InternalUnits)), EigenModes(:,4)
 
       DEALLOCATE( EigenFreq, EigenModes )
 
-      ! PHONON SPECTRUM OF THE BATH WITH CARBON ATOMS IN EQUILIBRIUM GEOMETRY FOR CH ADSORPTION
-      ! AND H NEAR THE SURFACE AND FAR FROM THE SURFACE 
+      ! ===================================================================================================
+      ! (4) Phonon spectrum of the bath - ASYMPTOTIC GEOMETRY
+      ! ===================================================================================================
+
+      PRINT "(/,A,/)"," * Computing and diagonalizing the hessian of the potential at the asymptotic geometry... "
+
+      ! compute hessian at the asymptotic geometry of the PES
+      HessianSysAndSlab = HessianOfThePotential( XAsy )
+
+      ! Compute eigenvectors and eigevalues of the hessian
+      ALLOCATE( EigenFreq(NDim), EigenModes(NDim,NDim) )
+      CALL TheOneWithDiagonalization( HessianSysAndSlab, EigenModes, EigenFreq )
+
+      ! list eigenvalues
+      DO iEigen = 1, NDim
+         IF ( EigenFreq(iEigen) < 0.0 ) & 
+            WRITE(*,503)  iEigen, SQRT(-EigenFreq(iEigen))*FreqConversion(InternalUnits,InputUnits), FreqUnit(InputUnits)
+      END DO
+
+      DO iFreq = 1, INT( MaxFreq / DeltaFreq )
+
+         ! initialize frequency value and value of the signal
+         Frequency = REAL(iFreq)*DeltaFreq
+         Spectrum = 0.0
+
+         ! sum over eigenfreq centered gaussians
+         DO iEigen = 1, size(EigenFreq)
+            IF ( .NOT. EigenFreq(iEigen) < 0.0 ) & 
+               Spectrum = Spectrum + EXP(- (Frequency-SQRT(EigenFreq(iEigen)))**2 / 2.0 / SigmaPeak**2 )
+         END DO
+
+         ! PRINT
+         WRITE(AsyPhononSpectrumUnit,*) Frequency*FreqConversion(InternalUnits,InputUnits), Spectrum
+
+      END DO
+
+      PRINT "(/,A,/)"," Phonon spectrum written to file AsymptoticPhononSpectrum.dat"
+
+      DEALLOCATE( EigenFreq, EigenModes )
+
+      ! ===================================================================================================
+      ! (5) Phonon spectrum of the bath - INTERACTION GEOMETRY
+      ! ===================================================================================================
+
+      PRINT "(/,A,/)"," * Computing and diagonalizing the hessian of the potential at the minimum... "
+
+      ! compute hessian at the asymptotic geometry of the PES
+      HessianSysAndSlab = HessianOfThePotential( XMin )
+
+      ! Compute eigenvectors and eigevalues of the hessian
+      ALLOCATE( EigenFreq(NDim), EigenModes(NDim,NDim) )
+      CALL TheOneWithDiagonalization( HessianSysAndSlab, EigenModes, EigenFreq )
+
+      ! list eigenvalues
+      DO iEigen = 1, NDim
+         IF ( EigenFreq(iEigen) < 0.0 ) &
+            WRITE(*,503)  iEigen, SQRT(-EigenFreq(iEigen))*FreqConversion(InternalUnits,InputUnits), FreqUnit(InputUnits)
+      END DO
+
+      DO iFreq = 1, INT( MaxFreq / DeltaFreq )
+
+         ! initialize frequency value and value of the signal
+         Frequency = REAL(iFreq)*DeltaFreq
+         Spectrum = 0.0
+
+         ! sum over eigenfreq centered gaussians
+         DO iEigen = 1, size(EigenFreq)
+            IF ( EigenFreq(iEigen) > 0.0 ) & 
+               Spectrum = Spectrum + EXP(- (Frequency-SQRT(EigenFreq(iEigen)))**2 / 2.0 / SigmaPeak**2 )
+         END DO
+
+         ! PRINT
+         WRITE(MinPhononSpectrumUnit,*) Frequency*FreqConversion(InternalUnits,InputUnits), Spectrum
+
+      END DO
+
+      PRINT "(/,A,/)"," Phonon spectrum written to file InteractionPhononSpectrum.dat"
+
+      DEALLOCATE( EigenFreq, EigenModes )
+
+      ! ===================================================================================================
+      ! (6) SD of the coupling
+      ! ===================================================================================================
+
+      IF ( BathType == SLAB_POTENTIAL ) THEN 
+
+         PRINT "(/,A,/)"," * Computing the spectral density of the coupling for the zC coordinate... "
+
+         XMinWithoutH = XMin
+         XMinWithoutH(3) = 30.0 
+
+         ! compute hessian at the asymptotic geometry of the PES
+         HessianSysAndSlab = HessianOfThePotential( XMinWithoutH )
+
+         ! Compute eigenvectors and eigevalues of the hessian
+         ALLOCATE( EigenFreq(NDim), EigenModes(NDim,NDim) )
+         CALL TheOneWithDiagonalization( HessianSysAndSlab, EigenModes, EigenFreq )
+
+         ! Count positive frequencies
+         NrOfModes = 0
+         DO iEigen = 1, NDim
+            IF ( EigenFreq(iEigen) < 1.E-10 ) THEN
+               WRITE(*,504)  iEigen, EigenFreq(iEigen)*(FreqConversion(InternalUnits,InputUnits))**2, FreqUnit(InputUnits)//"^2"
+            ELSE
+               NrOfModes = NrOfModes + 1
+            END IF
+         END DO
+
+         PRINT "(/,A,I4,A,/)"," * Building spectral density with ", NrOfModes, " normal modes"
+
+         ALLOCATE( OmegaK(NrOfModes), CoeffK(NrOfModes), IntensityK(NrOfModes) )
+
+         SystemCoord(:) = 0.0
+         SystemCoord(4) = 1.0
+
+         ! Trasform normal mode definition to non mass scaled coordinate
+         DO iEigen = 1, size(EigenFreq)
+            Norm = 0.0
+            DO i = 1, 3 
+               EigenModes(i,iEigen) = EigenModes(i,iEigen) * SQRT(MassH)
+               Norm = Norm + EigenModes(i,iEigen)**2
+            END DO
+            DO i = 4, size(EigenFreq)
+               EigenModes(i,iEigen) = EigenModes(i,iEigen) * SQRT(MassC)
+               Norm = Norm + EigenModes(i,iEigen)**2
+            END DO
+            EigenModes(:,iEigen) = EigenModes(:,iEigen) / SQRT(Norm)
+         END DO
+         PRINT "(A)", " Data is written for peaks with I > 1.E-12 "
+
+         PRINT "(/,A,A,A)","  # mode   |  frequency (",TRIM(FreqUnit(InputUnits)),") |   intensity (au) "
+         i = 0
+         DO iEigen = 1, size(EigenFreq)
+            IF ( EigenFreq(iEigen) > 1.E-10 ) THEN
+               i = i+1 
+               OmegaK(i) = SQRT( EigenFreq(iEigen) )
+               CoeffK(i) = DirectionalSecondDerivative( XMin, SystemCoord, EigenModes(:,iEigen) )
+               IntensityK(i) = MyConsts_PI / 2.0  * CoeffK(i)**2 / OmegaK(i) / MassC
+               IF ( IntensityK(i) > 1.E-12 )  &
+                           WRITE(*,"(I6,1F18.2,1E25.8)") i, OmegaK(i)*FreqConversion(InternalUnits,InputUnits), IntensityK(i)
+            END IF
+         END DO
+
+         DO iFreq = 1, INT( MaxFreq / DeltaFreq )
+
+            ! initialize frequency value and value of the signal
+            Frequency = REAL(iFreq)*DeltaFreq
+            Spectrum = 0.0
+
+            ! sum over eigenfreq centered gaussians
+            DO iEigen = 1, NrOfModes
+               IF ( EigenFreq(iEigen) > 1.E-10 .AND. OmegaK(iEigen) > 50.*FreqConversion(InputUnits,InternalUnits) ) & 
+                  Spectrum = Spectrum + MyConsts_PI / 2.0  * CoeffK(iEigen)**2 / OmegaK(iEigen) / MassC * &
+                                 LorentzianFunction( Frequency, OmegaK(iEigen), SigmaPeak )
+            END DO
+
+            ! PRINT
+            WRITE(SDCouplingUnit,*) Frequency*FreqConversion(InternalUnits,InputUnits), Spectrum
+
+         END DO
+
+         PRINT "(/,A,/)"," Phonon spectrum written to file SpectralDensityCoupling.dat"
+
+         DEALLOCATE( OmegaK, CoeffK, IntensityK )
+         CLOSE(SDCouplingUnit)
+
+      END IF
+
+      CLOSE(MinPhononSpectrumUnit)
+      CLOSE(AsyPhononSpectrumUnit)
 
       500 FORMAT (/, " H-Graphite adsorption geometry and energy   ",/  &
                      " * Asymptotic energy:           ",1F15.6,1X,A, /, &
@@ -273,16 +465,21 @@ MODULE PotentialAnalysis
 
       502 FORMAT (/, " 4D system potential normal modes             ",/, &
                      " 1) Frequency:                   ",1F15.2,1X,A, /, &
-                     "    Mass Scaled Coords / ",A," : ",4F12.6,      /, &
+                     "    Mass-scaled coords of the normal mode / ",A," : ",4F12.6, /, &
                      " 2) Frequency:                   ",1F15.2,1X,A, /, &
-                     "    Mass Scaled Coords / ",A," : ",4F12.6,      /, &
+                     "    Mass-scaled coords of the normal mode / ",A," : ",4F12.6, /, &
                      " 3) Frequency:                   ",1F15.2,1X,A, /, &
-                     "    Mass Scaled Coords / ",A," : ",4F12.6,      /, &
+                     "    Mass-scaled coords of the normal mode / ",A," : ",4F12.6, /, &
                      " 4) Frequency:                   ",1F15.2,1X,A, /, &
-                     "    Mass Scaled Coords / ",A," : ",4F12.6          )
+                     "    Mass-scaled coords of the normal mode / ",A," : ",4F12.6, /)
+
+      503 FORMAT (   " Excluding normal mode # ",I5," with imag freq = ",1F12.6,1X,A )
+      504 FORMAT (   " Excluding normal mode # ",I5," with eigenvalue = ",1F12.6,1X,A )
+
+      505 FORMAT (/, " Mass-scaled Hessian of the system potential in the minimum (",A," ^2)",/, &
+                     4E20.8,/,4E20.8,/,4E20.8,/,4E20.8,/ )
 
 
-! 
 ! !***************************************************************************************************
 ! !                       PRINT POTENTIAL CUTS
 ! !***************************************************************************************************
@@ -367,73 +564,6 @@ MODULE PotentialAnalysis
 ! 
 !    END SUBROUTINE PotentialCuts
 
-!       PRINT "(2/,A)",    "***************************************************"
-!       PRINT "(A,F10.5)", "          CHAIN EIGENFREQUENCIES ANALYSIS "
-!       PRINT "(A,/)" ,    "***************************************************"
-! 
-!       ALLOCATE( Hessian(nevo+3,nevo+3), EigenModes(nevo+3,nevo+3), EigenFreq(nevo+3) )
-!       Hessian(:,:) = 0.0
-! 
-!       ! Open output file to print the spectrum
-!       SpectrumOutUnit = LookForFreeUnit()
-!       OPEN( FILE="EigenNormalModes.dat", UNIT=SpectrumOutUnit )
-!       WRITE(SpectrumOutUnit, "(A,I6,A,/)") "# ", inum, " eigenfrequency spectrum of the normal modes (cm-1 | arbitrary)"
-! 
-!       ! Compute the part of the potential related to the system potential
-!       CALL FivePointDifferenceHessian( NonCollinearOnlyV, (/ 0.0, 0.0, HZEquilibrium, C1Puckering /), dd, Hessian(1:4,1:4) )
-!       ! mass scaling
-!       Hessian(1:3,1:3) = Hessian(1:3,1:3) / rmh
-!       Hessian(4,4) = Hessian(4,4) / rmc
-!       Hessian(1:3,4) = Hessian(1:3,4) / SQRT(rmh*rmc)
-!       Hessian(4,1:3) = Hessian(4,1:3) / SQRT(rmh*rmc)
-! 
-!       ! add the part of the hessian of the independent oscillator model
-!       CALL  HessianIndepOscillatorsModel( Hessian, rmc )
-! 
-!       DO iFreq = 1, size(EigenFreq) 
-!          WRITE(*,"(100F10.6)") Hessian(iFreq,:)
-!       END DO
-! 
-!       ! Diagonalize hessian matrix
-!       CALL TheOneWithDiagonalization( Hessian, EigenModes, EigenFreq )
-! 
-!       PRINT*, " "
-!       PRINT*, " frequencies (au) "
-!       WRITE(*,"(5F20.12)") SQRT(EigenFreq)
-!       PRINT*, " "
-!       PRINT*, " frequencies (cm-1) "
-!       WRITE(*,"(5F20.12)") SQRT(EigenFreq)/MyConsts_cmmin1toAU
-!       PRINT*, " "
-! 
-!       MaxFreq = 5000.*MyConsts_cmmin1toAU
-!       DeltaFreq = 1.*MyConsts_cmmin1toAU
-!       SigmaPeak = 2.0*MyConsts_cmmin1toAU
-! 
-!       NFreq = INT( MaxFreq / DeltaFreq )
-!       DO iFreq = 1, NFreq
-! 
-!          ! initialize frequency value and value of the signal
-!          Frequency = iFreq*DeltaFreq
-!          Spectrum = 0.0
-! 
-!          ! sum over eigenfreq centered gaussians
-!          DO iEigen = 1, size(EigenFreq)
-!             Spectrum = Spectrum + EXP(- (Frequency-SQRT(EigenFreq(iEigen)))**2 / 2.0 / SigmaPeak**2 )
-!          END DO
-! 
-!          ! PRINT
-!          WRITE(SpectrumOutUnit,*) Frequency/MyConsts_cmmin1toAU, Spectrum
-! 
-!       END DO
-! 
-!       DEALLOCATE( Hessian, EigenModes, EigenFreq )
-!       
-!       ! Close output files
-!       CLOSE( SpectrumOutUnit )
-! 
-!    END SUBROUTINE ChainEigenfrequencies
-! 
-
 
    END SUBROUTINE PotentialAnalysis_Run
 
@@ -511,19 +641,143 @@ MODULE PotentialAnalysis
 
    ! ************************************************************************************************
 
+   FUNCTION HessianOfTheSystem( AtPoint ) RESULT( Hessian )
+      REAL, DIMENSION(4,4) :: Hessian
+      REAL, DIMENSION(4), INTENT(IN) :: AtPoint
+      REAL, DIMENSION(4) :: Coordinates, FirstDerivative
+      REAL :: Potential
+      INTEGER :: i, k
+
+      REAL, DIMENSION(4), PARAMETER :: Deltas = (/ -2.0,    -1.0,    +1.0,    +2.0    /)
+      REAL, DIMENSION(4), PARAMETER :: Coeffs = (/ +1./12., -8./12., +8./12., -1./12. /) 
+
+      REAL, DIMENSION(3), PARAMETER :: ForwardDeltas = (/  0.0,   +1.0,  +2.0   /)
+      REAL, DIMENSION(3), PARAMETER :: ForwardCoeffs = (/ -3./2., +2.0,  -1./2. /) 
+
+      Hessian(:,:) = 0.0
+
+      ! Compute the second derivatives for displacements of x and y
+      ! IMPORTANT!!! since rho = 0 is a singular value of the function, 
+      ! the derivative is computed slightly off the minimum, and is computed for x,y > 0
+      DO i = 1, 2
+         DO k = 1, size(ForwardDeltas)
+
+            ! Define small displacement from the point where compute the derivative
+            Coordinates(:) = AtPoint(:)
+            IF ( Coordinates(i) < 0.0 ) THEN
+               Coordinates(i) = - Coordinates(i)
+            END IF
+
+            IF ( Coordinates(i) < 0.001 ) THEN
+               Coordinates(i) = Coordinates(i) + 0.001 + ForwardDeltas(k)*SmallDelta
+            ELSE
+               Coordinates(i) = Coordinates(i) + ForwardDeltas(k)*SmallDelta
+            END IF
+
+            ! Compute potential and forces in the displaced coordinate
+            Potential = VHFourDimensional( Coordinates, FirstDerivative )
+            FirstDerivative = - FirstDerivative
+
+            ! Increment numerical derivative of the analytical derivative
+            Hessian(i,:) = Hessian(i,:) + ForwardCoeffs(k)*FirstDerivative(:)/SmallDelta
+
+         END DO
+      END DO
+
+      DO i = 3, 4
+         DO k = 1, size(Deltas)
+
+            ! Define small displacement from the point where compute the derivative
+            Coordinates(:) = AtPoint(:)
+            Coordinates(i) = Coordinates(i) + Deltas(k)*SmallDelta
+
+            ! Compute potential and forces in the displaced coordinate
+            Potential = VHFourDimensional( Coordinates, FirstDerivative )
+            FirstDerivative = - FirstDerivative
+
+            ! Increment numerical derivative of the analytical derivative
+            Hessian(i,:) = Hessian(i,:) + Coeffs(k)*FirstDerivative(:)/SmallDelta
+
+         END DO
+      END DO
+
+      DO k = 1, 4
+         DO i = 1, 4
+            Hessian(i,k) = Hessian(i,k) / SQRT( MassVector(i)*MassVector(k) )
+         END DO
+      END DO
+
+!       CALL TheOneWithMatrixPrintedLineAfterLine( Hessian )
+
+   END FUNCTION HessianOfTheSystem
+
+
+   !*************************************************************************************************
+
    FUNCTION HessianOfThePotential( AtPoint ) RESULT( Hessian )
       REAL, DIMENSION(NDim,NDim) :: Hessian
       REAL, DIMENSION(NDim), INTENT(IN) :: AtPoint
+      REAL, DIMENSION(NDim) :: Coordinates, FirstDerivative
       REAL, DIMENSION(NBath) :: CouplingsCoeffs
-      REAL :: DistortionCoeff
-      INTEGER :: i, j
+      REAL :: DistortionCoeff, Potential
+      INTEGER :: i, j, k
+
+      REAL, DIMENSION(4), PARAMETER :: Deltas = (/ -2.0,    -1.0,    +1.0,    +2.0    /)
+      REAL, DIMENSION(4), PARAMETER :: Coeffs = (/ +1./12., -8./12., +8./12., -1./12. /) 
+
+      REAL, DIMENSION(3), PARAMETER :: ForwardDeltas = (/  0.0,   +1.0,  +2.0   /)
+      REAL, DIMENSION(3), PARAMETER :: ForwardCoeffs = (/ -3./2., +2.0,  -1./2. /) 
 
       Hessian(:,:) = 0.0
 
       IF ( BathType == SLAB_POTENTIAL ) THEN 
 
+         ! Compute the second derivatives for displacements of x and y
+         ! IMPORTANT!!! since rho = 0 is a singular value of the function, 
+         ! the derivative is computed slightly off the minimum, and is computed for x,y > 0
+         DO i = 1, 2
+            DO k = 1, size(ForwardDeltas)
+
+               ! Define small displacement from the point where compute the derivative
+               Coordinates(:) = AtPoint(:)
+               IF ( Coordinates(i) < 0.0 ) THEN
+                  Coordinates(i) = - Coordinates(i)
+               END IF
+
+               IF ( Coordinates(i) < 0.001 ) THEN
+                  Coordinates(i) = Coordinates(i) + 0.001 + ForwardDeltas(k)*SmallDelta
+               ELSE
+                  Coordinates(i) = Coordinates(i) + ForwardDeltas(k)*SmallDelta
+               END IF
+
+               ! Compute potential and forces in the displaced coordinate
+               Potential = VHSticking( Coordinates, FirstDerivative )
+               FirstDerivative = - FirstDerivative
+
+               ! Increment numerical derivative of the analytical derivative
+               Hessian(i,:) = Hessian(i,:) + ForwardCoeffs(k)*FirstDerivative(:)/SmallDelta
+
+            END DO
+         END DO
+
+         DO i = 3, NDim
+            DO k = 1, size(Deltas)
+
+               ! Define small displacement from the point where compute the derivative
+               Coordinates(:) = AtPoint(:)
+               Coordinates(i) = Coordinates(i) + Deltas(k)*SmallDelta
+
+               ! Compute potential and forces in the displaced coordinate
+               Potential = VHSticking( Coordinates, FirstDerivative )
+               FirstDerivative = - FirstDerivative
+
+               ! Increment numerical derivative of the analytical derivative
+               Hessian(i,:) = Hessian(i,:) + Coeffs(k)*FirstDerivative(:)/SmallDelta
+
+            END DO
+         END DO
+
          ! Numerical mass scaled hessian of the full system+slab potential
-         CALL FivePointDifferenceHessian( FullPotentialOnly, AtPoint, SmallDelta, Hessian )
          DO j = 1, NDim
             DO i = 1, NDim
                Hessian(i,j) = Hessian(i,j) / SQRT( MassVector(i)*MassVector(j) )
@@ -532,13 +786,8 @@ MODULE PotentialAnalysis
 
       ELSE IF ( BathType == NORMAL_BATH ) THEN
 
-         ! Numerical mass scaled hessian of the 4D system potential
-         CALL FivePointDifferenceHessian( FourDPotentialOnly, AtPoint(1:4), SmallDelta, Hessian(1:4,1:4) )
-         DO j = 1, 4
-            DO i = 1, 4
-               Hessian(i,j) = Hessian(i,j) / SQRT( MassVector(i)*MassVector(j) )
-            END DO
-         END DO
+         ! Compute hessian of the system
+         Hessian(1:4,1:4) = HessianOfTheSystem( AtPoint(1:4) )
 
          ! add the part of the hessian of the independent oscillator model
          CALL  HessianOfTheBath( Bath, Hessian(5:NDim, 5:NDim) ) 
@@ -553,13 +802,8 @@ MODULE PotentialAnalysis
 
       ELSE IF ( BathType == CHAIN_BATH ) THEN
 
-         ! Numerical mass scaled hessian of the 4D system potential
-         CALL FivePointDifferenceHessian( FourDPotentialOnly, AtPoint(1:4), SmallDelta, Hessian(1:4,1:4) )
-         DO j = 1, 4
-            DO i = 1, 4
-               Hessian(i,j) = Hessian(i,j) / SQRT( MassVector(i)*MassVector(j) )
-            END DO
-         END DO
+         ! Compute hessian of the system
+         Hessian(1:4,1:4) = HessianOfTheSystem( AtPoint(1:4) )
 
          ! add the part of the hessian of the independent oscillator model
          CALL  HessianOfTheBath( Bath, Hessian(5:NDim, 5:NDim) ) 
@@ -572,13 +816,8 @@ MODULE PotentialAnalysis
 
       ELSE IF ( BathType == DOUBLE_CHAIN ) THEN
 
-         ! Numerical mass scaled hessian of the 4D system potential
-         CALL FivePointDifferenceHessian( FourDPotentialOnly, AtPoint(1:4), SmallDelta, Hessian(1:4,1:4) )
-         DO j = 1, 4
-            DO i = 1, 4
-               Hessian(i,j) = Hessian(i,j) / SQRT( MassVector(i)*MassVector(j) )
-            END DO
-         END DO
+         ! Compute hessian of the system
+         Hessian(1:4,1:4) = HessianOfTheSystem( AtPoint(1:4) )
 
          ! add the part of the hessian of the independent oscillator model
          CALL HessianOfTheBath( DblBath(1), Hessian(5:4+NBath, 5:4+NBath) ) 
@@ -596,18 +835,57 @@ MODULE PotentialAnalysis
 
       ELSE IF ( BathType == LANGEVIN_DYN ) THEN
 
-         ! Numerical hessian of the 4D system potential
-         CALL FivePointDifferenceHessian( FourDPotentialOnly, AtPoint, SmallDelta, Hessian )
-         DO j = 1, NDim
-            DO i = 1, NDim
-               Hessian(i,j) = Hessian(i,j) / SQRT( MassVector(i)*MassVector(j) )
-            END DO
-         END DO
+         ! Compute hessian of the system
+         Hessian = HessianOfTheSystem( AtPoint )
 
       END IF
 
+!       CALL TheOneWithMatrixPrintedLineAfterLine( Hessian )
+
    END FUNCTION HessianOfThePotential
 
+!*************************************************************************************************
+
+   REAL FUNCTION DirectionalSecondDerivative( AtPoint, Direction, NormalMode )
+      IMPLICIT NONE
+      REAL, DIMENSION(NDim), INTENT(IN) :: AtPoint, Direction, NormalMode
+
+      REAL, DIMENSION(4), PARAMETER :: Deltas = (/ -2.0,    -1.0,    +1.0,    +2.0    /)
+      REAL, DIMENSION(4), PARAMETER :: Coeffs = (/ +1./12., -8./12., +8./12., -1./12. /) 
+
+      REAL, DIMENSION(NDim) :: Coordinates, FirstDerivative
+      REAL :: Potential, Norm
+      INTEGER :: k
+
+      Norm = 0.0
+      DO k = 1, size(Direction)
+         Norm = Norm + Direction(k)**2
+      END DO
+      CALL ERROR( ABS(SQRT(Norm)-1.0) > 1E-12 , " DirectionalSecondDerivative: Direction is not normalized" )
+      Norm = 0.0
+      DO k = 1, size(NormalMode)
+         Norm = Norm + NormalMode(k)**2
+      END DO
+      CALL ERROR( ABS(SQRT(Norm)-1.0) > 1E-12 , " DirectionalSecondDerivative: NormalMode is not normalized" )
+
+      DirectionalSecondDerivative = 0.0
+
+      DO k = 1, size(Deltas)
+         Coordinates(:) = AtPoint(:) + SmallDelta*Deltas(k)*Direction(:)
+         Potential = VHSticking( Coordinates, FirstDerivative )
+         DirectionalSecondDerivative = DirectionalSecondDerivative + &
+                          Coeffs(k)* TheOneWithVectorDotVector(NormalMode,FirstDerivative) /SmallDelta
+      END DO
+
+   END FUNCTION DirectionalSecondDerivative
+
+!*************************************************************************************************
+
+   REAL FUNCTION LorentzianFunction( x, x0, gamma )
+      IMPLICIT NONE
+      REAL, INTENT(IN) :: x, x0, gamma
+      LorentzianFunction = ( gamma / ( (x-x0)**2 + gamma**2 ) ) / MyConsts_PI
+   END FUNCTION LorentzianFunction
 
 !*************************************************************************************************
 

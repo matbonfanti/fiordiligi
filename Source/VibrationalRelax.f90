@@ -28,6 +28,7 @@ MODULE VibrationalRelax
    USE MyLinearAlgebra
    USE SharedData
    USE InputField
+   USE UnitConversion
    USE ClassicalEqMotion
    USE PotentialModule
    USE IndependentOscillatorsModel
@@ -41,6 +42,11 @@ MODULE VibrationalRelax
 
    !> Nr of dimension of the system + bath 
    INTEGER :: NDim
+
+   !> Variables to set a model 2D harmonic potential for the system
+   LOGICAL :: ModelHarmonic                             !< Model potential is enabled
+   REAL    :: OmegaC, OmegaH, OmegaBend, CouplingCH     !< Parameters of the model potential
+   REAL, DIMENSION(4,4) :: HessianMatrix                !< Hessian matrix of the potential in the minimum
 
    ! Initial conditions
    REAL    :: InitEnergy                !< Initial energy of the system
@@ -63,8 +69,6 @@ MODULE VibrationalRelax
    REAL, DIMENSION(:), ALLOCATABLE      :: AverageECoup       !< Average coupling energy vs time
    REAL, DIMENSION(:), ALLOCATABLE      :: AverageESys        !< Average energy of the system vs time
    REAL, DIMENSION(:,:), ALLOCATABLE    :: AverageCoord       !< Average i-th coordinate vs time
-   COMPLEX, DIMENSION(:), ALLOCATABLE   :: PowerSpec          !< Autocorrelation function and its power spectrum
-   REAL, DIMENSION(:), ALLOCATABLE      :: XatT0              !< Initial position of the dynamics
    REAL, DIMENSION(:,:), ALLOCATABLE    :: OscillCorrelations !< 1-n oscillator correlations in the chain
 
    TYPE(RNGInternalState), SAVE :: RandomNr
@@ -81,18 +85,33 @@ MODULE VibrationalRelax
       IMPLICIT NONE
       TYPE(InputFile), INTENT(INOUT) :: InputData
 
+      ! Set model harmonic potential
+      IF ( BathType /=  SLAB_POTENTIAL ) THEN
+         CALL SetFieldFromInput( InputData, "ModelHarmonic", ModelHarmonic, .FALSE. )
+      END IF
+      IF ( ModelHarmonic ) THEN
+         CALL SetFieldFromInput( InputData, "OmegaC",     OmegaC     )
+         OmegaC = OmegaC * FreqConversion(InputUnits, InternalUnits)
+         CALL SetFieldFromInput( InputData, "OmegaH",     OmegaH     )
+         OmegaH = OmegaH * FreqConversion(InputUnits, InternalUnits)
+         CALL SetFieldFromInput( InputData, "OmegaBend",  OmegaBend  )
+         OmegaBend = OmegaBend * FreqConversion(InputUnits, InternalUnits)
+         CALL SetFieldFromInput( InputData, "CouplingCH", CouplingCH )
+         CouplingCH = CouplingCH * (FreqConversion(InputUnits, InternalUnits)**2)
+      END IF
+
       ! READ THE VARIABLES TO SET THE INITIAL CONDITIONS OF THE SYSTEM
 
       ! Initial energy of the system (input in eV and transform to AU)
       CALL SetFieldFromInput( InputData, "InitEnergy", InitEnergy)
-      InitEnergy = InitEnergy / MyConsts_Hartree2eV
+      InitEnergy = InitEnergy * EnergyConversion(InputUnits, InternalUnits)
 
       ! Nr of initial snapshots
       CALL SetFieldFromInput( InputData, "NrOfInitSnapshots", NrOfInitSnapshots )
 
       ! Time between each snapshots (input in fs and transform to AU)
       CALL SetFieldFromInput( InputData, "TimeBetweenSnaps", TimeBetweenSnaps)
-      TimeBetweenSnaps = TimeBetweenSnaps * MyConsts_fs2AU
+      TimeBetweenSnaps = TimeBetweenSnaps * TimeConversion(InputUnits, InternalUnits) 
 
       ! READ THE VARIABLES FOR THE RELAXATION SIMULATION 
 
@@ -101,7 +120,7 @@ MODULE VibrationalRelax
 
       ! Timestep of the propagation
       CALL SetFieldFromInput( InputData, "TimeStep", TimeStep )
-      TimeStep = TimeStep * MyConsts_fs2AU
+      TimeStep = TimeStep * TimeConversion(InputUnits, InternalUnits) 
 
       ! Nr of steps of the propagation
       CALL SetFieldFromInput( InputData, "NrOfSteps", NrOfSteps )
@@ -111,22 +130,23 @@ MODULE VibrationalRelax
       ! Accordingly set the interval between each printing step
       PrintStepInterval = NrOfSteps / NrOfPrintSteps
 
-      WRITE(*, 903) InitEnergy*MyConsts_Hartree2eV, (InitEnergy-MinimumEnergy)*MyConsts_Hartree2eV, &
-                    NrOfInitSnapshots, TimeBetweenSnaps/MyConsts_fs2AU
+      WRITE(*, 903) InitEnergy*EnergyConversion(InternalUnits,InputUnits), EnergyUnit(InputUnits),                 &
+                    (InitEnergy-MinimumEnergy)*EnergyConversion(InternalUnits,InputUnits), EnergyUnit(InputUnits), &
+                    NrOfInitSnapshots, TimeBetweenSnaps*TimeConversion(InternalUnits,InputUnits), TimeUnit(InputUnits)
 
-      WRITE(*, 904) NrTrajs, TimeStep/MyConsts_fs2AU, NrOfSteps, NrOfPrintSteps
+      WRITE(*, 904) NrTrajs, TimeStep*TimeConversion(InternalUnits,InputUnits), TimeUnit(InputUnits), NrOfSteps, NrOfPrintSteps
 
    903 FORMAT(" * Initial conditions of the atom-surface system ", /,&
-              " * Absolute initial energy (eV):                ",F10.4,/,& 
-              " *  - w.r.t. the bottom of the well (eV):       ",F10.4,/,& 
-              " * Nr of initial system snapshots:              ",I10,  /,& 
-              " * Time between snapshots (fs):                 ",F10.4,/ )
+              " * Absolute initial energy:                     ",F10.4,1X,A,/,&  
+              " *  - w.r.t. the bottom of the well:            ",F10.4,1X,A,/,&  
+              " * Nr of initial system snapshots:              ",I10,       /,& 
+              " * Time between snapshots:                      ",F10.4,1X,A,/ )
 
-   904 FORMAT(" * Dynamical simulation variables               ", /,&
-              " * Nr of trajectories:                          ",I10,  /,& 
-              " * Propagation time step (fs):                  ",F10.4,/,& 
-              " * Nr of time steps of each trajectory:         ",I10,  /,& 
-              " * Nr of print steps of each trajectory:        ",I10,  / )
+   904 FORMAT(" * Dynamical simulation variables               ",           /,&
+              " * Nr of trajectories:                          ",I10,       /,& 
+              " * Propagation time step:                       ",F10.4,1X,A,/,&  
+              " * Nr of time steps of each trajectory:         ",I10,       /,& 
+              " * Nr of print steps of each trajectory:        ",I10,       / )
 
    END SUBROUTINE VibrationalRelax_ReadInput
 
@@ -214,9 +234,8 @@ MODULE VibrationalRelax
 
       ! Average coordinates over time and power spectrum of the auto-correlation function
       IF ( PrintType >= FULL ) THEN
-         ALLOCATE( AverageCoord(NDim,0:NrOfPrintSteps), PowerSpec(0:NrOfPrintSteps), XatT0(NDim) )
+         ALLOCATE( AverageCoord(NDim,0:NrOfPrintSteps) )
          AverageCoord(1:NDim,0:NrOfPrintSteps) = 0.0
-         PowerSpec(:) = cmplx( 0.0, 0.0 )
       END IF
 
       ! Correlations in the chain bath
@@ -227,6 +246,17 @@ MODULE VibrationalRelax
 
       ! Initialize random number seed
       CALL SetSeed( RandomNr, -1 )
+
+      ! Initialize hessian matrix for the model potential
+      IF ( ModelHarmonic ) THEN
+         HessianMatrix(:,:) = 0.0
+         HessianMatrix(1,1) = OmegaBend**2
+         HessianMatrix(2,2) = OmegaBend**2
+         HessianMatrix(3,3) = OmegaH**2
+         HessianMatrix(4,4) = OmegaC**2
+         HessianMatrix(3,4) = CouplingCH
+         HessianMatrix(4,3) = CouplingCH
+      END IF
 
    END SUBROUTINE VibrationalRelax_Initialize
 
@@ -239,10 +269,10 @@ MODULE VibrationalRelax
    SUBROUTINE VibrationalRelax_Run()
       IMPLICIT NONE
       INTEGER  ::  AvEnergyOutputUnit, AvCoordOutputUnit       ! UNITs FOR OUTPUT AND DEBUG
-      INTEGER  ::  AvBathCoordUnit, OscillCorrUnit, InitialCondUnit, PowerSpectrumUnit
+      INTEGER  ::  AvBathCoordUnit, OscillCorrUnit, InitialCondUnit
       INTEGER  ::  DebugUnitEn, DebugUnitCoord, DebugUnitVel
       REAL     ::  VSys, KSys, Ecoup, VBath, KBath               ! ISTANTANEOUS ENERGY VALUES
-      REAL     ::  TotEnergy, PotEnergy, KinEnergy, dOmega, IstTemperature
+      REAL     ::  TotEnergy, PotEnergy, KinEnergy, IstTemperature
       INTEGER  ::  NTimeStepEachSnap, iCoord, iTraj, iStep,  iOmega, kStep, NInit
       CHARACTER(100) :: OutFileName
       REAL, DIMENSION(NrOfInitSnapshots,8) :: CHInitConditions
@@ -260,10 +290,6 @@ MODULE VibrationalRelax
          AvBathCoordUnit = LookForFreeUnit()
          OPEN( FILE="AverageBathCoords.dat", UNIT=AvBathCoordUnit )
          WRITE(AvBathCoordUnit, "(A,I6,A,/)") "# average Q coordinate vs time (Ang | fs) - ", NrTrajs, " trajectories "
-
-         PowerSpectrumUnit = LookForFreeUnit()
-         OPEN( FILE="PowerSpectrum.dat", UNIT=PowerSpectrumUnit )
-         WRITE(PowerSpectrumUnit, "(A,I6,A,/)") "# Power spectrum of the trajs - ", NrTrajs, " trajectories (fs | au)"
       ENDIF
 
       IF ( PrintType >= FULL .AND. BathType == CHAIN_BATH ) THEN
@@ -377,10 +403,6 @@ MODULE VibrationalRelax
          AverageECoup(0)        = AverageECoup(0) + Ecoup
          IF ( PrintType >= FULL )  AverageCoord(1:NDim,0) = AverageCoord(1:NDim,0) + X(:)
 
-         IF ( PrintType >= FULL ) THEN
-            XatT0(:) = X(:) 
-            PowerSpec(0) = PowerSpec(0) + TheOneWithVectorDotVector( XatT0(1:NDim), XatT0(1:NDim) )
-         ENDIF
          IF ( PrintType >= FULL .AND. BathType == CHAIN_BATH ) THEN
             DO iCoord = 1, NDim-4
                OscillCorrelations(iCoord, 0) = OscillCorrelations(iCoord, 0) + X(4) * X(4+iCoord) 
@@ -452,7 +474,7 @@ MODULE VibrationalRelax
 
                ! Energy of the system
                CALL IstantaneousEnergies( PotEnergy, KSys, VSys, Ecoup, VBath, KBath, iTraj, iStep )
-               
+
                ! Update averages over time
                AverageESys(kStep)            = AverageESys(kStep)  + KSys + VSys
                AverageEBath(kStep)           = AverageEBath(kStep) + KBath + VBath
@@ -461,7 +483,6 @@ MODULE VibrationalRelax
                ! store the autocorrelation function for power spectrum computation
                IF ( PrintType >= FULL )  THEN
                   AverageCoord(1:NDim,kStep) = AverageCoord(1:NDim,kStep) + X(:)
-                  PowerSpec(kStep) = PowerSpec(kStep) + TheOneWithVectorDotVector( XatT0(1:NDim), X(1:NDim) )
                END IF
                IF ( BathType == CHAIN_BATH .AND. PrintType >= FULL ) THEN
                   DO iCoord = 1, NDim-4
@@ -532,24 +553,16 @@ MODULE VibrationalRelax
             END DO
          END DO
 
-         ! normalize autocorrelation function, compute fourier transfrom and print
-         ALLOCATE( AverCoordOverTime( NDim ) )
-         AverCoordOverTime(:) = SUM ( AverageCoord, 2 ) / real( NrOfPrintSteps+1 )
-         PowerSpec(:) = ( PowerSpec(:) /  real( NrTrajs ) ) - DOT_PRODUCT(AverCoordOverTime, AverCoordOverTime )
-         dOmega =  2.*MyConsts_PI/( real(PrintStepInterval*NrOfPrintSteps) * TimeStep )
-         CALL DiscreteFourier( PowerSpec )
-         DO iOmega = 0, NrOfPrintSteps
-            WRITE( PowerSpectrumUnit,"(F20.8,3F20.8)" )  iOmega*dOmega/MyConsts_cmmin1toAU, abs(PowerSpec(iOmega)), & 
-                                                  real(PowerSpec(iOmega)), aimag( PowerSpec(iOmega))
-         END DO
          IF ( BathType == CHAIN_BATH ) THEN
+            ALLOCATE( AverCoordOverTime( NDim ) )
+            AverCoordOverTime(:) = SUM ( AverageCoord, 2 ) / real( NrOfPrintSteps+1 )
             DO iCoord = 1, NDim-4
                OscillCorrelations(iCoord,:) = OscillCorrelations(iCoord,:) - &
                                     AverCoordOverTime(3+1)*AverCoordOverTime(3+iCoord+1) 
                WRITE(OscillCorrUnit, *) iCoord, SUM( OscillCorrelations(iCoord, :) )/real(NrOfPrintSteps+1)
             END DO
+            DEALLOCATE( AverCoordOverTime )
          END IF
-         DEALLOCATE( AverCoordOverTime )
 
       ENDIF
 
@@ -558,7 +571,6 @@ MODULE VibrationalRelax
       CLOSE( AvCoordOutputUnit )
       IF ( PrintType >= FULL ) THEN
          CLOSE( AvBathCoordUnit )
-         CLOSE( PowerSpectrumUnit )
       END IF
       IF ( PrintType >= FULL .AND. BathType == CHAIN_BATH ) THEN
          CLOSE( OscillCorrUnit ) 
@@ -591,7 +603,7 @@ MODULE VibrationalRelax
       ! Deallocate memory 
       DEALLOCATE( X, V, A, MassVector )
       DEALLOCATE( AverageESys, AverageEBath, AverageECoup )
-      IF ( PrintType >= FULL ) DEALLOCATE( AverageCoord, PowerSpec, XatT0 )
+      IF ( PrintType >= FULL ) DEALLOCATE( AverageCoord  )
       IF ( PrintType >= FULL .AND. BathType == CHAIN_BATH ) DEALLOCATE( OscillCorrelations )
 
       ! Unset propagators 
@@ -622,14 +634,22 @@ MODULE VibrationalRelax
 
       ELSE IF ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
          ! Compute potential and forces of the system
-         VibrRelaxPotential = VHFourDimensional( Positions(1:4), Forces(1:4) )
+         IF ( ModelHarmonic ) THEN
+            VibrRelaxPotential = ModelFourDimensionalPotential( Positions(1:4), Forces(1:4) )
+         ELSE 
+            VibrRelaxPotential = VHFourDimensional( Positions(1:4), Forces(1:4) )
+         END IF
          ! Add potential and forces of the bath and the coupling
          CALL BathPotentialAndForces( Bath, Positions(4)-C1Puckering, Positions(5:), VibrRelaxPotential, &
                                                                                Forces(4), Forces(5:) ) 
 
       ELSE IF ( BathType == DOUBLE_CHAIN ) THEN
          ! Compute potential and forces of the system
-         VibrRelaxPotential = VHFourDimensional( Positions(1:4), Forces(1:4) )
+         IF ( ModelHarmonic ) THEN
+            VibrRelaxPotential = ModelFourDimensionalPotential( Positions(1:4), Forces(1:4) )
+         ELSE 
+            VibrRelaxPotential = VHFourDimensional( Positions(1:4), Forces(1:4) )
+         END IF
          ! Add potential and forces of the bath and the coupling
          CALL BathPotentialAndForces( DblBath(1), Positions(4)-C1Puckering, Positions(5:NBath+4), VibrRelaxPotential, &
                                                                                Forces(4), Forces(5:NBath+4) ) 
@@ -637,8 +657,12 @@ MODULE VibrationalRelax
                                                                                Forces(4), Forces(NBath+5:2*NBath+4) ) 
 
       ELSE IF ( BathType == LANGEVIN_DYN ) THEN
-         ! Compute potential using only the 4D subroutine
-         VibrRelaxPotential = VHFourDimensional( Positions, Forces )
+         ! Compute potential and forces of the system
+         IF ( ModelHarmonic ) THEN
+            VibrRelaxPotential = ModelFourDimensionalPotential( Positions(1:4), Forces(1:4) )
+         ELSE 
+            VibrRelaxPotential = VHFourDimensional( Positions(1:4), Forces(1:4) )
+         END IF
 
       END IF
 
@@ -686,49 +710,24 @@ MODULE VibrationalRelax
 
 !*************************************************************************************************
 
-   SUBROUTINE DiscreteFourier( Vector )
+   REAL FUNCTION ModelFourDimensionalPotential( Coordinates, Forces ) RESULT(V)
       IMPLICIT NONE
-      COMPLEX, DIMENSION(:), INTENT(INOUT) :: Vector
-      COMPLEX, DIMENSION(size(Vector)) :: Transform
-      INTEGER :: N, i, j
-      COMPLEX :: Factor
+      REAL, DIMENSION(4), INTENT(IN)  :: Coordinates
+      REAL, DIMENSION(4), INTENT(OUT) :: Forces
+      REAL, DIMENSION(4)  :: MassScaledX
 
-      N = size( Vector )
+      ! Shift coordinates with respect to the minimum
+      MassScaledX(1:2) = Coordinates(1:2)
+      MassScaledX(3)   = Coordinates(3) - HZEquilibrium
+      MassScaledX(4)   = Coordinates(4) - C1Puckering
+      ! Scale coordinates with masses
+      MassScaledX(:) = MassScaledX(:) * SQRT( MassVector(1:4) )
+      ! Compute potential and forces
+      V = 0.5 * TheOneWithVectorDotVector( MassScaledX , TheOneWithMatrixVectorProduct( HessianMatrix, MassScaledX ) )
+      Forces(:) = - SQRT( MassVector(1:4) ) * TheOneWithMatrixVectorProduct( HessianMatrix, MassScaledX )
 
-      Transform(:) = 0.0
+   END FUNCTION ModelFourDimensionalPotential
 
-      DO i = 0, N-1
-         Factor = 2.0 * MyConsts_I * MyConsts_PI * real(i) / real(N)
-         DO j = 0, N-1
-            Transform(i+1) = Transform(i+1) + Vector(j+1) * exp( Factor * real(j) )
-         END DO
-      END DO
-
-      Vector(:) = Transform(:)
-
-   END SUBROUTINE DiscreteFourier
-
-   SUBROUTINE DiscreteInverseFourier( Vector )
-      IMPLICIT NONE
-      COMPLEX, DIMENSION(:), INTENT(INOUT) :: Vector
-      COMPLEX, DIMENSION(size(Vector)) :: Transform
-      INTEGER :: N, i, j
-      COMPLEX :: Factor
-
-      N = size( Vector )
-
-      Transform(:) = 0.0
-
-      DO i = 0, N-1
-         Factor = - MyConsts_I * 2.0 * MyConsts_PI * real(i) / real(N)
-         DO j = 0, N-1
-            Transform(i+1) = Transform(i+1) + Vector(j+1) * exp( Factor * real(j) )
-         END DO
-      END DO
-
-      Vector(:) = Transform(:) / ( N-1 )
-
-   END SUBROUTINE DiscreteInverseFourier
 
 !*************************************************************************************************
 

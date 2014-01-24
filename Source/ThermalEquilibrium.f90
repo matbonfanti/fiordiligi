@@ -28,6 +28,7 @@ MODULE ThermalEquilibrium
    USE MyLinearAlgebra
    USE SharedData
    USE InputField
+   USE UnitConversion
    USE ClassicalEqMotion
    USE PotentialModule
    USE IndependentOscillatorsModel
@@ -42,6 +43,11 @@ MODULE ThermalEquilibrium
    !> Nr of dimension of the system + bath 
    INTEGER :: NDim
 
+   !> Variables to set a model 2D harmonic potential for the system
+   LOGICAL :: ModelHarmonic                             !< Model potential is enabled
+   REAL    :: OmegaC, OmegaH, OmegaBend, CouplingCH     !< Parameters of the model potential
+   REAL, DIMENSION(4,4) :: HessianMatrix                !< Hessian matrix of the potential in the minimum
+
    ! Variables of the propagation
    INTEGER :: NrTrajs                   !< Nr of trajectories
    INTEGER :: NrOfSteps                 !< Total nr of time step per trajectory
@@ -50,10 +56,11 @@ MODULE ThermalEquilibrium
    INTEGER :: PrintStepInterval         !< Nr of time steps between each printing of propagation info ( = NrOfSteps / NrOfPrintSteps )
 
    ! Initial conditions
-   REAL    :: Temperature          !< Temperature of the simulation
-   REAL    :: EquilTStep           !< Time step for integrating equilibration dynamics
-   REAL    :: EquilGamma           !< Friction parameter of the Langevin equation
-   INTEGER :: NrEquilibSteps       !< Nr of time step of the equilibration
+   REAL    :: Temperature               !< Temperature of the simulation
+   REAL    :: EquilTStep                !< Time step for integrating equilibration dynamics
+   REAL    :: EquilGamma                !< Friction parameter of the Langevin equation
+   INTEGER :: NrEquilibSteps            !< Nr of time step of the equilibration
+   INTEGER :: EquilibrationStepInterval !< Nr of time steps between each printing of equilibration info ( = NrEquilibSteps / NrOfPrintSteps )
 
    ! Time evolution dataset
    TYPE(Evolution),SAVE :: Equilibration         !< Propagate in macrocanonical ensamble at given T to generate init conditions
@@ -85,6 +92,21 @@ MODULE ThermalEquilibrium
       IMPLICIT NONE
       TYPE(InputFile), INTENT(INOUT) :: InputData
 
+      ! Set model harmonic potential
+      IF ( BathType /=  SLAB_POTENTIAL ) THEN
+         CALL SetFieldFromInput( InputData, "ModelHarmonic", ModelHarmonic, .FALSE. )
+      END IF
+      IF ( ModelHarmonic ) THEN
+         CALL SetFieldFromInput( InputData, "OmegaC",     OmegaC     )
+         OmegaC = OmegaC * FreqConversion(InputUnits, InternalUnits)
+         CALL SetFieldFromInput( InputData, "OmegaH",     OmegaH     )
+         OmegaH = OmegaH * FreqConversion(InputUnits, InternalUnits)
+         CALL SetFieldFromInput( InputData, "OmegaBend",  OmegaBend  )
+         OmegaBend = OmegaBend * FreqConversion(InputUnits, InternalUnits)
+         CALL SetFieldFromInput( InputData, "CouplingCH", CouplingCH )
+         CouplingCH = CouplingCH * (FreqConversion(InputUnits, InternalUnits)**2)
+      END IF
+
       ! READ THE VARIABLES FOR THE EQUILIBRIUM SIMULATION 
 
       ! Nr of the trajectories of the simulation
@@ -92,7 +114,7 @@ MODULE ThermalEquilibrium
 
       ! Timestep of the propagation
       CALL SetFieldFromInput( InputData, "TimeStep", TimeStep )
-      TimeStep = TimeStep * MyConsts_fs2AU
+      TimeStep = TimeStep * TimeConversion(InputUnits, InternalUnits) 
 
       ! Nr of steps of the propagation
       CALL SetFieldFromInput( InputData, "NrOfSteps", NrOfSteps )
@@ -100,43 +122,47 @@ MODULE ThermalEquilibrium
       ! Nr of steps in which the output is written 
       CALL SetFieldFromInput( InputData, "NrOfPrintSteps", NrOfPrintSteps )
       ! Accordingly set the interval between each printing step
-      PrintStepInterval = NrOfSteps / NrOfPrintSteps
+      PrintStepInterval = CEILING( real(NrOfSteps) / real(NrOfPrintSteps) )
 
       ! READ THE VARIABLES TO SET THE INITIAL CONDITIONS OF THE SYSTEM
 
       ! Temperature of the equilibrium simulation
       CALL SetFieldFromInput( InputData, "Temperature", Temperature )
-      Temperature = Temperature * MyConsts_K2AU
+      Temperature = Temperature * TemperatureConversion(InputUnits, InternalUnits)
 
       ! Set gamma of the equilibration Langevin dynamics
-      CALL SetFieldFromInput( InputData, "EquilGamma", EquilGamma)
-      EquilGamma = EquilGamma / MyConsts_fs2AU
+      CALL SetFieldFromInput( InputData, "EquilRelaxTime", EquilGamma)
+      EquilGamma = 1. / ( EquilGamma * TimeConversion(InputUnits, InternalUnits) )
 
       ! Set the time step of the equilibration
       CALL SetFieldFromInput( InputData, "EquilTStep",  EquilTStep, TimeStep/MyConsts_fs2AU )
-      EquilTStep = EquilTStep * MyConsts_fs2AU
+      EquilTStep = EquilTStep * TimeConversion(InputUnits, InternalUnits)
 
       ! Set nr of steps of the equilibration
       CALL SetFieldFromInput( InputData, "NrEquilibrSteps", NrEquilibSteps, int(10.0*(1.0/EquilGamma)/EquilTStep) )
+      EquilibrationStepInterval = CEILING( real(NrEquilibSteps) / real(NrOfPrintSteps) )
 
 
-      WRITE(*, 905) Temperature/MyConsts_K2AU, EquilTStep/MyConsts_fs2AU,  &
-                    EquilGamma*MyConsts_fs2AU, NrEquilibSteps
+      WRITE(*, 905) Temperature*TemperatureConversion(InternalUnits,InputUnits), TemperUnit(InputUnits), &
+                    EquilTStep*TimeConversion(InternalUnits,InputUnits), TimeUnit(InputUnits), &
+                    1./EquilGamma*TimeConversion(InternalUnits,InputUnits), TimeUnit(InputUnits), &
+                    NrEquilibSteps, EquilibrationStepInterval
 
-      WRITE(*, 904) NrTrajs, TimeStep/MyConsts_fs2AU, NrOfSteps, NrOfPrintSteps
+      WRITE(*, 904) NrTrajs, TimeStep*TimeConversion(InternalUnits,InputUnits), TimeUnit(InputUnits), NrOfSteps, NrOfPrintSteps
 
 
-   904 FORMAT(" * Dynamical simulation variables               ", /,&
-              " * Nr of trajectories:                          ",I10,  /,& 
-              " * Propagation time step (fs):                  ",F10.4,/,& 
-              " * Nr of time steps of each trajectory:         ",I10,  /,& 
-              " * Nr of print steps of each trajectory:        ",I10,  / )
+   904 FORMAT(" * Dynamical simulation variables               ",           /,&
+              " * Nr of trajectories:                          ",I10,       /,& 
+              " * Propagation time step:                       ",F10.4,1X,A,/,&  
+              " * Nr of time steps of each trajectory:         ",I10,       /,& 
+              " * Nr of print steps of each trajectory:        ",I10,       / )
 
-   905 FORMAT(" * Equilibration variables                      ", /,&
-              " * Temperature of the system+surface:           ",F10.4,/,&
-              " * Equilibration time step (fs):                ",F10.4,/,& 
-              " * Gamma of the Langevin force (fs^-1):         ",F10.4,/,& 
-              " * Nr of equilibration steps:                   ",I10,  / )
+   905 FORMAT(" * Equilibration variables                      ",           /,&
+              " * Temperature of the system+surface:           ",F10.4,1X,A,/,&  
+              " * Equilibration time step:                     ",F10.4,1X,A,/,&  
+              " * Relaxation time of the Langevin dynamics:    ",F10.4,1X,A,/,&  
+              " * Nr of equilibration steps:                   ",I10,       /,&
+              " * Print every n-th step:                       ",I10,       / )
 
    END SUBROUTINE ThermalEquilibrium_ReadInput
 
@@ -241,6 +267,17 @@ MODULE ThermalEquilibrium
       ! Initialize random number seed
       CALL SetSeed( RandomNr, -1 )
 
+      ! Initialize hessian matrix for the model potential
+      IF ( ModelHarmonic ) THEN
+         HessianMatrix(:,:) = 0.0
+         HessianMatrix(1,1) = OmegaBend**2
+         HessianMatrix(2,2) = OmegaBend**2
+         HessianMatrix(3,3) = OmegaH**2
+         HessianMatrix(4,4) = OmegaC**2
+         HessianMatrix(3,4) = CouplingCH
+         HessianMatrix(4,3) = CouplingCH
+      END IF
+
    END SUBROUTINE ThermalEquilibrium_Initialize
 
 !-********************************************************************************************
@@ -303,9 +340,11 @@ MODULE ThermalEquilibrium
 
          ! Equilibrium position of the system H and C atom
          X(1:2) = 0.0000
-         X(3) = 1.483 / MyConsts_Bohr2Ang
+         X(3) = HZEquilibrium
          X(4) = C1Puckering
-         V(1:4) = 0.0
+         DO iCoord = 1,4
+            V(1:4) = GaussianRandomNr(RandomNr) * sqrt( Temperature / MassVector(iCoord) )
+         END DO
 
          ! Set initial conditions of the bath
          IF ( BathType == SLAB_POTENTIAL ) THEN 
@@ -338,6 +377,19 @@ MODULE ThermalEquilibrium
          PotEnergy = ThermalEquilibriumPotential( X, A )
          A(:) = A(:) / MassVector(:)
 
+         ! compute kinetic energy and total energy
+         KinEnergy = EOM_KineticEnergy(Equilibration, V )
+         TotEnergy = PotEnergy + KinEnergy
+         IstTemperature = 2.0*KinEnergy/(MyConsts_K2AU*size(X))
+
+         ! write debug output
+         IF ( PrintType == DEBUG  ) THEN
+            ! Equilibration debug
+            WRITE(DebugUnitEquil,850) 0.0, PotEnergy*MyConsts_Hartree2eV, KinEnergy*MyConsts_Hartree2eV, X(1:4)
+            ! Temperature profile during equilibration
+            WRITE(TEquilUnit,"(/,/,A,I5,/)" ) "# Trajectory nr. ", iTraj
+         END IF
+
          ! Do an equilibration run
          EquilibrationCycle: DO iStep = 1, NrEquilibSteps
 
@@ -354,13 +406,12 @@ MODULE ThermalEquilibrium
             TempVariance = TempVariance + IstTemperature**2
 
             ! every PrintStepInterval steps, write debug output
-            IF ( PrintType == DEBUG .AND. mod(iStep,PrintStepInterval) == 0 ) THEN
+            IF ( PrintType == DEBUG .AND. mod(iStep,EquilibrationStepInterval) == 0 ) THEN
                ! Equilibration debug
-               IF ( mod(iStep,PrintStepInterval) == 0 )  WRITE(DebugUnitEquil,850) real(iStep)*EquilTStep/MyConsts_fs2AU, &
+               WRITE(DebugUnitEquil,850) real(iStep)*EquilTStep/MyConsts_fs2AU, &
                         PotEnergy*MyConsts_Hartree2eV, KinEnergy*MyConsts_Hartree2eV, X(1:4)
                ! Temperature profile during equilibration
-               IF (iStep == 1) WRITE(TEquilUnit,"(/,/,A,I5,/)" ) "# Trajectory nr. ", iTraj
-               IF ( mod(iStep,PrintStepInterval) == 0 ) WRITE(TEquilUnit,851)  real(iStep)*EquilTStep/MyConsts_fs2AU, &
+               IF ( mod(iStep,EquilibrationStepInterval) == 0 ) WRITE(TEquilUnit,851)  real(iStep)*EquilTStep/MyConsts_fs2AU, &
                      TempAverage/iStep, sqrt((TempVariance/iStep)-(TempAverage/iStep)**2)
             END IF
             850 FORMAT( F12.5, 6F13.6 )
@@ -665,13 +716,21 @@ MODULE ThermalEquilibrium
 
       ELSE IF ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
          ! Compute potential and forces of the system
-         ThermalEquilibriumPotential = VHFourDimensional( Positions(1:4), Forces(1:4) )
+         IF ( ModelHarmonic ) THEN
+            ThermalEquilibriumPotential = ModelFourDimensionalPotential( Positions(1:4), Forces(1:4) )
+         ELSE 
+            ThermalEquilibriumPotential = VHFourDimensional( Positions(1:4), Forces(1:4) )
+         END IF
          ! Add potential and forces of the bath and the coupling
          CALL BathPotentialAndForces( Bath, Positions(4)-C1Puckering, Positions(5:), ThermalEquilibriumPotential, &
                                                                                Forces(4), Forces(5:) ) 
       ELSE IF ( BathType == DOUBLE_CHAIN ) THEN
          ! Compute potential and forces of the system
-         ThermalEquilibriumPotential = VHFourDimensional( Positions(1:4), Forces(1:4) )
+         IF ( ModelHarmonic ) THEN
+            ThermalEquilibriumPotential = ModelFourDimensionalPotential( Positions(1:4), Forces(1:4) )
+         ELSE 
+            ThermalEquilibriumPotential = VHFourDimensional( Positions(1:4), Forces(1:4) )
+         END IF
          ! Add potential and forces of the bath and the coupling
          CALL BathPotentialAndForces( DblBath(1), Positions(4)-C1Puckering, Positions(5:NBath+4), ThermalEquilibriumPotential, &
                                                                                Forces(4), Forces(5:NBath+4) ) 
@@ -679,12 +738,36 @@ MODULE ThermalEquilibrium
                                                             ThermalEquilibriumPotential, Forces(4), Forces(NBath+5:2*NBath+4) ) 
 
       ELSE IF ( BathType == LANGEVIN_DYN ) THEN
-         ! Compute potential using only the 4D subroutine
-         ThermalEquilibriumPotential = VHFourDimensional( Positions, Forces )
+         ! Compute potential and forces of the system
+         IF ( ModelHarmonic ) THEN
+            ThermalEquilibriumPotential = ModelFourDimensionalPotential( Positions(1:4), Forces(1:4) )
+         ELSE 
+            ThermalEquilibriumPotential = VHFourDimensional( Positions(1:4), Forces(1:4) )
+         END IF
 
       END IF
 
    END FUNCTION ThermalEquilibriumPotential
+
+!*************************************************************************************************
+
+   REAL FUNCTION ModelFourDimensionalPotential( Coordinates, Forces ) RESULT(V)
+      IMPLICIT NONE
+      REAL, DIMENSION(4), INTENT(IN)  :: Coordinates
+      REAL, DIMENSION(4), INTENT(OUT) :: Forces
+      REAL, DIMENSION(4)  :: MassScaledX
+
+      ! Shift coordinates with respect to the minimum
+      MassScaledX(1:2) = Coordinates(1:2)
+      MassScaledX(3)   = Coordinates(3) - HZEquilibrium
+      MassScaledX(4)   = Coordinates(4) - C1Puckering
+      ! Scale coordinates with masses
+      MassScaledX(:) = MassScaledX(:) * SQRT( MassVector(1:4) )
+      ! Compute potential and forces
+      V = 0.5 * TheOneWithVectorDotVector( MassScaledX , TheOneWithMatrixVectorProduct( HessianMatrix, MassScaledX ) )
+      Forces(:) = - SQRT( MassVector(1:4) ) * TheOneWithMatrixVectorProduct( HessianMatrix, MassScaledX )
+
+   END FUNCTION ModelFourDimensionalPotential
 
 !*************************************************************************************************
 

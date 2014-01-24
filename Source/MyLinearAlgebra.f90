@@ -55,15 +55,30 @@ MODULE MyLinearAlgebra
    
    IMPLICIT NONE
 
-   INTERFACE TheOneWithMatrixVectorProduct
-      MODULE PROCEDURE TheOneWithMatrixVectorProduct_REAL, TheOneWithMatrixVectorProduct_CMPLX
-   END INTERFACE 
-
 
 !********************************************************************************************************
    CONTAINS
 !********************************************************************************************************
 
+!*******************************************************************************
+!          TheOneWithPrintMatrixLineAfterLine
+!*******************************************************************************
+!> Subroutine to print a generic matrix, line after line
+!>
+!> @param      Matrix to print 
+!*******************************************************************************
+   SUBROUTINE TheOneWithMatrixPrintedLineAfterLine( Matrix )
+      IMPLICIT NONE
+      REAL, DIMENSION(:,:), INTENT(IN)               :: Matrix
+      INTEGER :: i
+
+      WRITE(*,"(1X)") 
+      DO i = 1, size(Matrix,1)
+            WRITE(*,'("Line ",I5," : ",1000(F12.6))')  i, Matrix(i,:)
+      END DO
+      WRITE(*,"(1X)") 
+
+   END SUBROUTINE TheOneWithMatrixPrintedLineAfterLine
 
 
 !*******************************************************************************
@@ -156,26 +171,25 @@ MODULE MyLinearAlgebra
 !*******************************************************************************
 !          TheOneWithTransposeMatrix
 !*******************************************************************************
-!> Function giving back the transpose matrix of a given real matrix of size N 
+!> Function giving back the transpose matrix of a given real matrix of size NxM
 !>
-!> @param      N   size of the output matrix 
-!> @returns    Identity matrix of size N
+!> @param      Matrix  input matrix 
+!> @returns    TransposeM     TransposeM of input matrix
 !*******************************************************************************
-   FUNCTION TheOneWithTransposeMatrix( Matrix, N ) RESULT( TransposeM )
+   FUNCTION TheOneWithTransposeMatrix( Matrix ) RESULT( TransposeM )
       IMPLICIT NONE
-      INTEGER                            :: N
-      REAL, DIMENSION(N,N), INTENT(IN)   :: Matrix
-      REAL, DIMENSION(N,N)               :: TransposeM
+      REAL, DIMENSION(:,:), INTENT(IN)               :: Matrix
+      REAL, DIMENSION(size(Matrix,2),size(Matrix,1)) :: TransposeM
       INTEGER :: i, j
 
       ! transpose matrix
-      DO i = 1, N
-         DO j = 1, N
+      DO i = 1, size(Matrix,2)
+         DO j = 1, size(Matrix,1)
             TransposeM(i,j) = Matrix(j,i)
          END DO
       END DO
 
-   END FUNCTION TheOneWithTransposeMatrix   
+   END FUNCTION TheOneWithTransposeMatrix
 
 
 !*******************************************************************************
@@ -338,7 +352,7 @@ MODULE MyLinearAlgebra
       INTEGER               :: i, j, k
 #endif
       ! Check and define the dimension of the matrices
-      CALL ERROR( size(Matrix1,2) /= SIZE(Matrix1,1) , &
+      CALL ERROR( size(Matrix1,2) /= SIZE(Matrix2,1) , &
                        " TheOneWithMatrixMultiplication: mismatch in matrix dimensions ")
 
 #if defined(WITH_LAPACK)
@@ -379,15 +393,16 @@ MODULE MyLinearAlgebra
 !> \see http://en.wikipedia.org/wiki/Basic_Linear_Algebra_Subprograms
 !> \see http://www.netlib.org/blas/dgemv.f
 !>
-!> @param      Matrix      N x M  real/complex array with a matrix.
-!> @param      Vector      M      real/complex array with a vector.
+!> @param      Matrix      N x M  real array with a matrix.
+!> @param      Vector      M      real array with a vector.
 !> @returns    ProductV    N      array with the product Matrix * Vector.
 !*******************************************************************************
-   FUNCTION TheOneWithMatrixVectorProduct_REAL( Matrix, Vector ) RESULT( ProductV )
+   FUNCTION TheOneWithMatrixVectorProduct( Matrix, Vector ) RESULT( ProductV )
       IMPLICIT NONE
       REAL, DIMENSION(:,:), INTENT(IN) :: Matrix
       REAL, DIMENSION(:), INTENT(IN)   :: Vector
       REAL, DIMENSION(size(Matrix,1)) :: ProductV
+
 #if defined(WITH_LAPACK)
       INTEGER( SHORT_INTEGER_KIND )   :: N, M
 #endif
@@ -406,10 +421,12 @@ MODULE MyLinearAlgebra
       ! Check kind of real data
       IF ( KIND( Matrix(1,1) ) == SINGLE_PRECISION_KIND ) THEN
             ! use blas routine (single precision, general matrix, matrix vector product)
+!             CALL SGEMM ( 'N', 'N', N, 1, M, 1.0, Matrix, N, Vector, M, 0.0, ProductV, N )
              CALL SGEMV ( 'N', N, M, 1.0, Matrix, N, Vector, 1, 0.0, ProductV, 1 )
-           
+            
       ELSE IF ( KIND( Matrix(1,1) ) == DOUBLE_PRECISION_KIND ) THEN
             ! use blas routine (double precision, general matrix, matrix vector product )
+!             CALL DGEMM ( 'N', 'N', N, 1, M, 1.0, Matrix, N, Vector, M, 0.0, ProductV, N )
              CALL DGEMV ( 'N', N, M, 1.0, Matrix, N, Vector, 1, 0.0, ProductV, 1 )
       END IF
 #endif
@@ -422,48 +439,7 @@ MODULE MyLinearAlgebra
       END DO
 #endif
 
-   END FUNCTION TheOneWithMatrixVectorProduct_REAL
-
-   FUNCTION TheOneWithMatrixVectorProduct_CMPLX( Matrix, Vector ) RESULT( ProductV )
-      IMPLICIT NONE
-      COMPLEX, DIMENSION(:,:), INTENT(IN) :: Matrix
-      COMPLEX, DIMENSION(:), INTENT(IN)   :: Vector
-      COMPLEX, DIMENSION(size(Matrix,1)) :: ProductV
-#if defined(WITH_LAPACK)
-      INTEGER( SHORT_INTEGER_KIND )   :: N, M
-#endif
-#if !defined(WITH_LAPACK)
-      INTEGER                         :: i, j
-#endif
-      ! Check and define the dimension of the matrices
-      CALL ERROR( size(Matrix,2) /= SIZE(Vector) , &
-                       " TheOneWithMatrixVectorProduct: mismatch in matrix dimensions ")
-
-#if defined(WITH_LAPACK)
-      ! define dimensions
-      N = size( Matrix, 1 )
-      M = size( Matrix, 2 )
-
-      ! Check kind of real data
-      IF ( KIND( REAL(Matrix(1,1)) ) == SINGLE_PRECISION_KIND ) THEN
-            ! use blas routine (single precision, general matrix, matrix vector product)
-             CALL CGEMV ( 'N', N, M, 1.0, Matrix, N, Vector, 1, 0.0, ProductV, 1 )
-            
-      ELSE IF ( KIND( REAL(Matrix(1,1)) ) == DOUBLE_PRECISION_KIND ) THEN
-            ! use blas routine (double precision, general matrix, matrix vector product )
-             CALL ZGEMV ( 'N', N, M, 1.0, Matrix, N, Vector, 1, 0.0, ProductV, 1 )
-      END IF
-#endif
-#if !defined(WITH_LAPACK)
-      ProductV = CMPLX( 0.0, 0.0 )
-      DO j  = 1, size(Matrix,2)
-         DO i = 1, size(Matrix,1)
-               ProductV(i) = ProductV(i) + Matrix(i,j)*Vector(j)
-         END DO
-      END DO
-#endif
-
-   END FUNCTION TheOneWithMatrixVectorProduct_CMPLX
+   END FUNCTION TheOneWithMatrixVectorProduct
 
 !*******************************************************************************
 !          TheOneWithVectorDotVector
@@ -482,9 +458,10 @@ MODULE MyLinearAlgebra
       IMPLICIT NONE
       REAL, DIMENSION(:), INTENT(IN)   :: Vector1, Vector2
       REAL                             :: VDotV
-#if defined(WITH_LAPACK)
       REAL(kind=SINGLE_PRECISION_KIND) :: SDOT
       REAL(kind=DOUBLE_PRECISION_KIND) :: DDOT
+
+#if defined(WITH_LAPACK)
       INTEGER( SHORT_INTEGER_KIND )   :: N
 #endif
 #if !defined(WITH_LAPACK)
@@ -522,7 +499,9 @@ MODULE MyLinearAlgebra
 !          TheOneWithDiagonalization
 !*******************************************************************************
 !> Function giving the eigenvectors and eigenvalues of a NxN symmetric real 
-!> matrix. \n
+!> matrix. The eigenvectors are stored as the columns of the EigenVectors matrix.
+!> Hence the diagonalizaton can be written as: 
+!>  [ (EigenVectors)^T * Matrix * EigenVectors ]_ij = delta_ij EigenValues_i \n
 !> This code is a wrapper to the numerical recipe subroutines tred2 and tqli
 !> (householder reduction + QL algorithm )
 !> \see http://apps.nrbook.com/fortran/index.html
@@ -601,6 +580,94 @@ MODULE MyLinearAlgebra
 
    END SUBROUTINE TheOneWithDiagonalization
 
+!*******************************************************************************
+!          TheOneWithSVD
+!*******************************************************************************
+!> Function giving the singular value decomposition of a MxN real 
+!> matrix: \n  MATRIX = U * SIGMA * V^T. \n \n
+!> where U is a MxN column-orthogonal matrix, SIGMA is a NxN
+!> diagonal matrix !> and V^T is the transpose of a orthogonal 
+!> NxN matrix. \n
+!> This code is a wrapper to the subroutine DGESDD and SGESDD in the LAPACK
+!> library. Numerical recipe will be included at some point. 
+!> @ref http://www.netlib.no/netlib/lapack/double/dgesdd.f
+!> @ref http://www.netlib.no/netlib/lapack/double/sgesdd.f
+!>
+!> @param    Matrix         M x N  real matrix. On output is U.
+!> @returns  SingValues     N      real array with the diagonal elements of SIGMA.
+!> @returns  Orthogonal     N x N  real matrix to store the matrix V^T.
+!*******************************************************************************
+   SUBROUTINE TheOneWithSVD(Matrix,SingValues,Orthogonal)
+      IMPLICIT NONE
+      REAL, DIMENSION(:,:), INTENT(IN)  :: Matrix
+      REAL, DIMENSION(:),   INTENT(OUT) :: SingValues
+      REAL, DIMENSION(:,:), INTENT(OUT) :: Orthogonal
+#if defined(WITH_LAPACK)
+      INTEGER(SHORT_INTEGER_KIND)     :: NShort, MShort, One, MinusOne, Stat, LWork
+      REAL, DIMENSION(1,1)            :: Dummy
+      REAL, DIMENSION(1)              :: OptDim
+      INTEGER(SHORT_INTEGER_KIND), DIMENSION(8*size(SingValues)) :: IntWS 
+      REAL, DIMENSION(:), ALLOCATABLE  :: Workspace
+      INTEGER                          :: StatLong
+      CHARACTER(300)                   :: ErrMsg
+#endif
+#if defined(WITH_NR)
+      ! HERE VARIABLES FOR NR SVD
+#endif      
+      INTEGER  :: M, N
+      
+      ! Check and define the dimension of the matrices
+      M = size(Matrix,1)
+      N = size(Matrix,2)
+      CALL ERROR( size(SingValues) /= N , " TheOneWithSVD: SingValues array mismatch ")
+      CALL ERROR( size(Orthogonal,1) /= N , " TheOneWithSVD: Orthogonal array mismatch (1) ")
+      CALL ERROR( size(Orthogonal,2) /= N , " TheOneWithSVD: Orthogonal array mismatch (2) ")
+      CALL ERROR( M < N, " TheOneWithSVD: M is less than N ") 
+
+#if defined(WITH_LAPACK)
+      NShort = N
+      MShort = M
+      One = 1
+      MinusOne = -1
+      IF ( KIND( Matrix(1,1) ) == SINGLE_PRECISION_KIND ) THEN
+            CALL SGESDD( 'O', MShort, NShort, Matrix, MShort, SingValues, Dummy, One, &
+                  Orthogonal, NShort, OptDim, MinusOne, IntWS, Stat )
+            LWork = INT( OptDim(1) )
+            ALLOCATE( Workspace( LWork ) )
+            CALL SGESDD( 'O', MShort, NShort, Matrix, MShort, SingValues, Dummy, One, &
+                  Orthogonal, NShort, Workspace, LWork, IntWS, Stat )
+      ELSE IF ( KIND( Matrix(1,1) ) == DOUBLE_PRECISION_KIND ) THEN
+            CALL DGESDD( 'O', MShort, NShort, Matrix, MShort, SingValues, Dummy, One, &
+                  Orthogonal, NShort, OptDim, MinusOne, IntWS, Stat )
+            LWork = INT( OptDim(1) )
+            ALLOCATE( Workspace( LWork ) )
+            CALL DGESDD( 'O', MShort, NShort, Matrix, MShort, SingValues, Dummy, One, &
+                  Orthogonal, NShort, Workspace, LWork, IntWS, Stat )
+      END IF
+
+      StatLong = Stat
+      IF ( StatLong < 0 ) THEN
+         WRITE(ErrMsg, *) " TheOneWithSVD: the ",-StatLong,"-th argument had an illegal value."
+         CALL AbortWithError( ErrMsg )
+      END IF
+      IF ( StatLong > 0 ) THEN
+         WRITE(ErrMsg, "(A,I7,A)") " TheOneWithSVD: the algorithm failed to converge "
+         CALL ShowWarning( ErrMsg )
+      ENDIF
+      DEALLOCATE( Workspace )
+#endif
+#if !defined(WITH_LAPACK)
+#if defined(WITH_NR)
+      CALL AbortWithError( " TheOneWithSVD: SVD with NR not yet implemented ")
+#endif
+#if !defined(WITH_NR)
+      CALL AbortWithError( " TheOneWithSVD: SVD implemented only with LAPACK or NR ")
+#endif
+#endif
+
+   END SUBROUTINE TheOneWithSVD
+
+   
 !*******************************************************************************
 !          TheOneWithRankAnalysis
 !*******************************************************************************

@@ -571,9 +571,9 @@ CONTAINS
                      "IndependentOscillatorsModel.ThermalEquilibriumBathConditions: wrong bath size" )
 
       ! THE OSCILLATORS IN A CORRECT CANONICAL DISTRIBUTION FOR ZERO COUPLING
-      SigmaQ = sqrt( Temperature / Bath%OscillatorsMass )
+      SigmaV = sqrt( Temperature / Bath%OscillatorsMass )
       DO iBath = 1, Bath%BathSize
-         SigmaV = SigmaQ / Bath%Frequencies(iBath)
+         SigmaQ = SigmaV / Bath%Frequencies(iBath)
          Positions(iBath) = GaussianRandomNr(RandomNr) * SigmaQ
          Velocities(iBath) = GaussianRandomNr(RandomNr) * SigmaV
       END DO
@@ -684,6 +684,7 @@ CONTAINS
                      Bath%Couplings(iBath+1) * QBath(iBath) * QBath(iBath+1)
          END DO
          VBath = VBath + 0.5 * Bath%OscillatorsMass * ( Bath%Frequencies(Bath%BathSize) * QBath(Bath%BathSize) )**2
+         VBath = VBath + 0.5 * Bath%DistorsionForce * QCoupl**2
          IF( PRESENT( FirstEffectiveMode ) ) FirstEffectiveMode = Bath%Couplings(1)*QBath(1)
 
       ELSE IF ( Bath%BathType == STANDARD_BATH ) THEN
@@ -693,7 +694,8 @@ CONTAINS
             Coupl = Coupl +  Bath%Couplings(iBath) * QBath(iBath)
             VBath = VBath + 0.5 * Bath%OscillatorsMass * ( Bath%Frequencies(iBath) * QBath(iBath) )**2
          END DO
-         VCoupling = - Coupl * QCoupl
+         VCoupling = - Coupl * QCoupl 
+         VBath = VBath + 0.5 * Bath%DistorsionForce * QCoupl**2
          IF( PRESENT( FirstEffectiveMode ) ) FirstEffectiveMode = Coupl
 
       END IF
