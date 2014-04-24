@@ -25,7 +25,7 @@ OPTLEVEL = 3
 FFTW3 = yes
 
 # OpenMP libraries
-OPENMP = yes
+OPENMP = no 
 
 # linking LAPACK and BLAS 
 LAPACK = no 
@@ -434,7 +434,7 @@ ${OBJDIR}/UnitConversion.o : ${SRCDIR}/UnitConversion.f90 ${COMMONDEP}
 ${OBJDIR}/SharedData.o       : ${SRCDIR}/SharedData.f90 ${OBJDIR}/IndependentOscillatorsModel.o ${COMMONDEP}
 
 # Module containing the potential energy surface
-${OBJDIR}/PotentialModule.o  : ${SRCDIR}/PotentialModule.f90 ${OBJDIR}/RandomNumberGenerator.o ${COMMONDEP}
+${OBJDIR}/PotentialModule.o  : ${SRCDIR}/PotentialModule.f90 ${OBJDIR}/RandomNumberGenerator.o ${OBJDIR}/MyLinearAlgebra.o ${COMMONDEP}
 
 # Module containing the random number generator
 ${OBJDIR}/RandomNumberGenerator.o  : ${SRCDIR}/RandomNumberGenerator.f90 ${COMMONDEP}

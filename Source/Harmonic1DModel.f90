@@ -293,8 +293,8 @@ MODULE Harmonic1DModel
          !*************************************************************
 
          ! Set initial conditions of the system
-         X(1) = 0.0
-         V(1) = 0.0
+         X(1) = GaussianRandomNr(RandomNr) * sqrt( Temperature / MassVector(1) ) / QFreq
+         V(1) = GaussianRandomNr(RandomNr) * sqrt( Temperature / MassVector(1) )
 
          ! Set initial conditions of the bath
          IF ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN

@@ -60,6 +60,7 @@ MODULE IndependentOscillatorsModel
       REAL, DIMENSION(:), POINTER :: Frequencies      !< Harmonic frequencies of the bath (stored in AU)
       REAL, DIMENSION(:), POINTER :: Couplings        !< Coupling of the bath oscillators (stored in AU)
       REAL :: CutOff                                  !< Cutoff frequency of the normal bath (stored in AU)
+      REAL :: LowerCutOff                             !< Lower cutoff frequency of the normal bath (stored in AU)
       REAL :: DeltaOmega                              !< Frequency spacing of the normal bath (stored in AU)
       REAL :: OscillatorsMass                         !< Mass of the oscillators
       REAL :: DistorsionForce                         !< Force constant of the distorsion correction
@@ -84,7 +85,7 @@ CONTAINS
 !> 
 !> @param    FileName       Name of the file with the input parameters.
 !*******************************************************************************
-   SUBROUTINE SetupIndepOscillatorsModel( Bath, N, SetBathType, FileName, Mass, CutOffFreq )
+   SUBROUTINE SetupIndepOscillatorsModel( Bath, N, SetBathType, FileName, Mass, CutOffFreq, LowerCutOffFreq )
       IMPLICIT NONE
       TYPE(BathData)             :: Bath
       INTEGER, INTENT(IN)        :: N
@@ -92,6 +93,7 @@ CONTAINS
       CHARACTER(*), INTENT(IN)   :: FileName
       REAL, INTENT(IN)           :: Mass
       REAL, INTENT(IN)           :: CutOffFreq
+      REAL, OPTIONAL, INTENT(IN) :: LowerCutOffFreq
 
       INTEGER :: InpUnit, RdStatus
       INTEGER :: iBath, NData
@@ -121,6 +123,12 @@ CONTAINS
       INQUIRE( File = TRIM(ADJUSTL(FileName)), EXIST=FileIsPresent ) 
       CALL ERROR( .NOT. FileIsPresent,            &
                 "IndependentOscillatorsModel.SetupIndepOscillatorsModel: spectral density file does not exists" )
+
+      IF ( PRESENT( LowerCutOffFreq ) ) THEN
+         Bath%LowerCutOff = LowerCutOffFreq
+      ELSE
+         Bath%LowerCutOff = 0.0
+      END IF
 
       IF ( Bath%BathType == CHAIN_BATH ) THEN
 
@@ -184,7 +192,7 @@ CONTAINS
             ELSE 
                Bath%CutOff = RdSpectralDens( NData )  ! otherwise is the last freq in the input file
             ENDIF
-            Bath%DeltaOmega = Bath%CutOff / real( Bath%BathSize)
+            Bath%DeltaOmega = (Bath%CutOff - Bath%LowerCutOff) / real( Bath%BathSize)
 
             ! Spline interpolation of the input spectral density
             CALL SetupSpline( SpectralDensitySpline, RdFreq, RdSpectralDens)
@@ -195,7 +203,7 @@ CONTAINS
             ! Compute frequencies and couplings 
             D0 = 0.0
             DO iBath = 1,  Bath%BathSize
-               Bath%Frequencies(iBath) = iBath * Bath%DeltaOmega
+               Bath%Frequencies(iBath) = Bath%LowerCutOff + iBath * Bath%DeltaOmega
                Bath%Couplings(iBath) = SQRT( 2.0 * Bath%OscillatorsMass * Bath%Frequencies(iBath) * Bath%DeltaOmega *      & 
                     GetSpline( SpectralDensitySpline, Bath%Frequencies(iBath) ) / MyConsts_PI )
                ! Compute force constant of the distorsion

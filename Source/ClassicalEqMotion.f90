@@ -43,7 +43,7 @@ MODULE ClassicalEqMotion
       PUBLIC :: Evolution
       PUBLIC :: EvolutionSetup, SetupThermostat, SetupRingPolymer
       PUBLIC :: DisposeEvolutionData, DisposeThermostat, DisposeRingPolymer
-      PUBLIC :: EOM_KineticEnergy, EOM_LangevinSecondOrder, EOM_RPMSymplectic
+      PUBLIC :: EOM_KineticEnergy, EOM_LangevinSecondOrder, EOM_RPMSymplectic, EOM_VelocityVerlet
 
       REAL, PARAMETER :: Over2Sqrt3 = 1.0 / ( 2.0 * SQRT(3.0) )
 
@@ -350,84 +350,49 @@ MODULE ClassicalEqMotion
 !================================================================================================================================
 
 
-! !*******************************************************************************
-! !                          EOM_VelocityVerlet
-! !*******************************************************************************
-! !> Propagate trajectory with Velocity-Verlet algorith.
-! !> If the Langevin parameters are setup, propagation is done in the
-! !> canonical ensamble with a Langevin thermostat
-! !> NOTE: THIS INTEGRATOR IS BETTER SUITED FOR MICROCANONICAL DYNAMICS 
-! !>       in case of Langevin MD, use Beeman's algorithm!
-! !> @ref http://en.wikipedia.org/wiki/Verlet_integration#Velocity_Verlet
-! !>
-! !> @param EvolData     Evolution data type
-! !*******************************************************************************
-!    SUBROUTINE EOM_VelocityVerlet( EvolData, Pos, Vel, Acc, GetPotential, V, RandomNr )
-!       IMPLICIT NONE
-! 
-!       TYPE( Evolution ), INTENT(INOUT)                 :: EvolData
-!       REAL, DIMENSION( EvolData%NDoF ), INTENT(INOUT)  :: Pos, Vel, Acc
-!       REAL, INTENT(OUT)                                :: V
-!       TYPE(RNGInternalState), INTENT(INOUT) :: RandomNr
-! 
-!       INTERFACE
-!          REAL FUNCTION GetPotential( X, Force )
-!             REAL, DIMENSION(:), TARGET, INTENT(IN)  :: X
-!             REAL, DIMENSION(:), TARGET, INTENT(OUT) :: Force
-!          END FUNCTION GetPotential
-!       END INTERFACE
-!       
-!       INTEGER :: iDoF
-! 
-!       ! (1) FULL TIME STEP FOR THE POSITIONS
-!       Pos(:) = Pos(:) + Vel(:)*EvolData%dt + 0.5*Acc(:)*(EvolData%dt**2)
-!  
-!       IF ( .NOT. EvolData%HasThermostat ) THEN        ! Integration without Langevin thermostat
-!    
-!          ! (2) HALF TIME STEP FOR THE VELOCITIES
-!          Vel(:) = Vel(:) + 0.5*Acc(:)*EvolData%dt
-! 
-!          ! (3) NEW FORCES AND ACCELERATIONS 
-!          V = GetPotential( Pos, Acc )       ! Compute new forces and store the potential value
-!          Acc(:) = Acc(:)/EvolData%Mass(:)   ! only potential forces
-! 
-!          ! (4) HALF TIME STEP AGAIN FOR THE VELOCITIES
-!          Vel(:) = Vel(:) + 0.5*Acc(:)*EvolData%dt
-! 
-! 
-!       ELSE IF ( ( EvolData%HasThermostat ) ) THEN     ! Integration with Langevin thermostat
-!             
-!          ! (2) HALF TIME STEP FOR THE VELOCITIES
-!          DO iDoF = 1, EvolData%NDoF
-!             IF ( EvolData%ThermoSwitch(iDoF) ) THEN
-!                Vel(iDoF) = EvolData%FrictionCoeff_HalfDt*Vel(iDoF) + 0.5*Acc(iDoF)*EvolData%dt
-!             ELSE IF ( .NOT. EvolData%ThermoSwitch(iDoF) ) THEN
-!                Vel(iDoF) = Vel(iDoF) + 0.5*Acc(iDoF)*EvolData%dt
-!             END IF
-!          END DO
-! 
-!          ! (3) NEW FORCES AND ACCELERATIONS 
-!          V = GetPotential( Pos, Acc )       ! Compute new forces and store the potential value
-!          DO iDoF = 1, EvolData%NDoF
-!             IF ( EvolData%ThermoSwitch(iDoF) ) THEN
-!                Acc(iDoF) = ( Acc(iDoF)+GaussianRandomNr(RandomNr)*EvolData%ThermalNoise(iDoF) ) / EvolData%Mass(iDoF)
-!             ELSE IF ( .NOT. EvolData%ThermoSwitch(iDoF) ) THEN
-!                Acc(iDoF) = Acc(iDoF)  / EvolData%Mass(iDoF)
-!             END IF
-!          END DO
-! 
-!          ! (4) HALF TIME STEP AGAIN FOR THE VELOCITIES
-!          DO iDoF = 1, EvolData%NDoF
-!             IF ( EvolData%ThermoSwitch(iDoF) ) THEN
-!                Vel(iDoF) = EvolData%FrictionCoeff_HalfDt*Vel(iDoF) + 0.5*Acc(iDoF)*EvolData%dt
-!             ELSE IF ( .NOT. EvolData%ThermoSwitch(iDoF) ) THEN
-!                Vel(iDoF) = Vel(iDoF) + 0.5*Acc(iDoF)*EvolData%dt
-!             END IF
-!          END DO
-! 
-!       END IF
-! 
-!    END SUBROUTINE EOM_VelocityVerlet   
+!*******************************************************************************
+!                          EOM_VelocityVerlet
+!*******************************************************************************
+!> Propagate trajectory with Velocity-Verlet algorith.
+!> If the Langevin parameters are setup, propagation is done in the
+!> canonical ensamble with a Langevin thermostat
+!> NOTE: THIS INTEGRATOR IS BETTER SUITED FOR MICROCANONICAL DYNAMICS 
+!>       in case of Langevin MD, use Beeman's algorithm!
+!> @ref http://en.wikipedia.org/wiki/Verlet_integration#Velocity_Verlet
+!>
+!> @param EvolData     Evolution data type
+!*******************************************************************************
+   SUBROUTINE EOM_VelocityVerlet( EvolData, Pos, Vel, Acc, GetPotential, V, RandomNr )
+      IMPLICIT NONE
+
+      TYPE( Evolution ), INTENT(INOUT)                 :: EvolData
+      REAL, DIMENSION( EvolData%NDoF ), INTENT(INOUT)  :: Pos, Vel, Acc
+      REAL, INTENT(OUT)                                :: V
+      TYPE(RNGInternalState), INTENT(INOUT) :: RandomNr
+
+      INTERFACE
+         REAL FUNCTION GetPotential( X, Force )
+            REAL, DIMENSION(:), TARGET, INTENT(IN)  :: X
+            REAL, DIMENSION(:), TARGET, INTENT(OUT) :: Force
+         END FUNCTION GetPotential
+      END INTERFACE
+      
+      INTEGER :: iDoF
+
+      ! (1) FULL TIME STEP FOR THE POSITIONS
+      Pos(:) = Pos(:) + Vel(:)*EvolData%dt + 0.5*Acc(:)*(EvolData%dt**2)
+ 
+      ! (2) HALF TIME STEP FOR THE VELOCITIES
+      Vel(:) = Vel(:) + 0.5*Acc(:)*EvolData%dt
+
+      ! (3) NEW FORCES AND ACCELERATIONS 
+      V = GetPotential( Pos, Acc )       ! Compute new forces and store the potential value
+      Acc(:) = Acc(:)/EvolData%Mass(:)   ! only potential forces
+
+      ! (4) HALF TIME STEP AGAIN FOR THE VELOCITIES
+      Vel(:) = Vel(:) + 0.5*Acc(:)*EvolData%dt
+
+   END SUBROUTINE EOM_VelocityVerlet   
    
 
 
@@ -561,13 +526,16 @@ MODULE ClassicalEqMotion
                Xi(iDoF)  = GaussianRandomNr(RandomNr)
                Eta(iDoF) = GaussianRandomNr(RandomNr)
                A(iDoF) = 0.5 * EvolData%dt**2 * ( Acc(iDoF) - EvolData%Gamma*Vel(iDoF) ) + &
-                        EvolData%ThermalNoise(iDoF) * EvolData%dt**(1.5) * ( 0.5 * Xi(iDoF) + Over2Sqrt3 * Eta(iDoF)  )
+                         EvolData%ThermalNoise(iDoF) * EvolData%dt**(1.5) * ( 0.5 * Xi(iDoF) + Over2Sqrt3 * Eta(iDoF)  )
             ELSE IF ( .NOT. EvolData%ThermoSwitch(iDoF) ) THEN
-               A(iDoF) = 0.5 * EvolData%dt**2 * Acc(iDoF)
+                A(iDoF) = 0.5*Acc(iDoF)*(EvolData%dt**2)
             END IF
          END DO
 
-         ! (1) PARTIAL UPDATE OF THE VELOCITIES
+         ! (1) UPDATE POSITION
+         Pos(:) = Pos(:) + Vel(:)*EvolData%dt + A(:)
+
+         ! (2) PARTIAL UPDATE OF THE VELOCITIES
          DO iDoF = 1, EvolData%NDoF
             IF ( EvolData%ThermoSwitch(iDoF) ) THEN
                Vel(iDoF) = (1.0 - EvolData%Gamma*EvolData%dt) * Vel(iDoF) + 0.5*Acc(iDoF)*EvolData%dt
@@ -575,9 +543,6 @@ MODULE ClassicalEqMotion
                Vel(iDoF) = Vel(iDoF) + 0.5*Acc(iDoF)*EvolData%dt
             END IF
          END DO
-
-         ! (2) UPDATE POSITION
-         Pos(:) = Pos(:) + Vel(:)*EvolData%dt + A(:)
 
          ! (3) NEW FORCES AND ACCELERATIONS 
          V = GetPotential( Pos, Acc )       ! Compute new forces and store the potential value

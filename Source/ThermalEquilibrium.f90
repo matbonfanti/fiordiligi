@@ -93,9 +93,7 @@ MODULE ThermalEquilibrium
       TYPE(InputFile), INTENT(INOUT) :: InputData
 
       ! Set model harmonic potential
-      IF ( BathType /=  SLAB_POTENTIAL ) THEN
-         CALL SetFieldFromInput( InputData, "ModelHarmonic", ModelHarmonic, .FALSE. )
-      END IF
+      CALL SetFieldFromInput( InputData, "ModelHarmonic", ModelHarmonic, .FALSE. )
       IF ( ModelHarmonic ) THEN
          CALL SetFieldFromInput( InputData, "OmegaC",     OmegaC     )
          OmegaC = OmegaC * FreqConversion(InputUnits, InternalUnits)
@@ -343,8 +341,9 @@ MODULE ThermalEquilibrium
          X(3) = HZEquilibrium
          X(4) = C1Puckering
          DO iCoord = 1,4
-            V(1:4) = GaussianRandomNr(RandomNr) * sqrt( Temperature / MassVector(iCoord) )
+            V(iCoord) = GaussianRandomNr(RandomNr) * sqrt( Temperature / MassVector(iCoord) )
          END DO
+         IF ( Collinear )   V(1:2) = 0.0
 
          ! Set initial conditions of the bath
          IF ( BathType == SLAB_POTENTIAL ) THEN 
@@ -455,7 +454,7 @@ MODULE ThermalEquilibrium
          IF ( BathType == SLAB_POTENTIAL )    X(3:size(X)) = X(3:size(X))  - (X(5)+X(6)+X(7))/3.0
 
          ! Write the ZH coordinate in output file
-         WRITE(ZHRealizationsUnit,"(F14.8,F14.8)") 0.0, X(3)*MyConsts_Bohr2Ang
+         WRITE(ZHRealizationsUnit,"(F20.8,F20.8)") 0.0, ( X(3) - HZEquilibrium )*MyConsts_Bohr2Ang
 
          IF ( PrintType >= FULL ) THEN
             ! store initial coordinate of the trajectory 
@@ -504,7 +503,7 @@ MODULE ThermalEquilibrium
          Propagation: DO iStep = 1, NrOfSteps
 
             ! Propagate for one timestep
-            CALL EOM_LangevinSecondOrder( Equilibration, X, V, A, ThermalEquilibriumPotential, PotEnergy, RandomNr )
+            CALL EOM_LangevinSecondOrder( MolecularDynamics, X, V, A, ThermalEquilibriumPotential, PotEnergy, RandomNr )
 
             ! Compute kin energy and temperature
             KinEnergy = EOM_KineticEnergy( MolecularDynamics, V )
@@ -531,7 +530,8 @@ MODULE ThermalEquilibrium
                IF ( BathType == SLAB_POTENTIAL )    X(3:size(X)) = X(3:size(X))  - (X(5)+X(6)+X(7))/3.0
 
                ! Write the ZH coordinate in output file
-               WRITE(ZHRealizationsUnit,"(F14.8,F14.8)") TimeStep*real(iStep)/MyConsts_fs2AU, X(3)*MyConsts_Bohr2Ang
+               WRITE(ZHRealizationsUnit,"(F20.8,F20.8)") TimeStep*real(iStep)/MyConsts_fs2AU, &
+                                                                (X(3) - HZEquilibrium) *MyConsts_Bohr2Ang
 
                ! autocorrelation functions are computed only for a full output
                IF ( PrintType >= FULL ) THEN
@@ -713,6 +713,11 @@ MODULE ThermalEquilibrium
       IF ( BathType == SLAB_POTENTIAL ) THEN 
          ! Compute potential using the potential subroutine
          ThermalEquilibriumPotential = VHSticking( Positions, Forces )
+         IF ( ModelHarmonic ) THEN    ! In case, remove anharmonic terms
+            ThermalEquilibriumPotential = ThermalEquilibriumPotential - VHFourDimensional( Positions(1:4), Forces(1:4) )
+            Forces(1:4) = 0.0
+            ThermalEquilibriumPotential = ThermalEquilibriumPotential + ModelFourDimensionalPotential( Positions(1:4), Forces(1:4))
+         END IF
 
       ELSE IF ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
          ! Compute potential and forces of the system

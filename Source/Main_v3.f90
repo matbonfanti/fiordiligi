@@ -158,6 +158,9 @@ PROGRAM JK6_v3
       BathCutOffFreq = BathCutOffFreq * FreqConversion(InputUnits, InternalUnits) 
       ! Quasi-classical correction of the initial conditions of the bath (ZPE), relevant only for 0K
       CALL SetFieldFromInput( InputData, "ZPECorrection", ZPECorrection, .FALSE. )
+      ! Set lower boundary for oscillator bath frequency
+      CALL SetFieldFromInput( InputData, "BathLowerCutOffFreq", BathLowerCutOffFreq, 0.0 )
+      BathLowerCutOffFreq = BathLowerCutOffFreq * FreqConversion(InputUnits, InternalUnits) 
 
    ELSE IF ( BathType == CHAIN_BATH ) THEN
       ! Langevin relaxation at the end of the chain
@@ -243,6 +246,7 @@ PROGRAM JK6_v3
          IF ( OhmicGammaTimesMass == 0.0 ) THEN
             WRITE(*,900) NBath, MassBath*MassConversion(InternalUnits, InputUnits), MassUnit(InputUnits), &
                          BathCutOffFreq*FreqConversion(InternalUnits, InputUnits), FreqUnit(InputUnits),  &
+                         BathLowerCutOffFreq*FreqConversion(InternalUnits, InputUnits), FreqUnit(InputUnits),  &
                          trim(adjustl(SpectralDensityFile))
          ELSE
             WRITE(*,910) NBath, MassBath*MassConversion(InternalUnits, InputUnits), MassUnit(InputUnits), &
@@ -288,6 +292,7 @@ PROGRAM JK6_v3
               " * Nr of bath oscillators:                      ",I10,  /,& 
               " * Mass of the bath oscillator:                 ",F10.4,1X,A,/,& 
               " * Cutoff frequency of the bath:                ",F10.1,1X,A,/,& 
+              " * Lower cutoff frequency:                      ",F10.1,1X,A,/,& 
               " * File with the spectral density:  "            ,A22,/ )
 
    910 FORMAT(" * Bath is a set of independent HO coupled to the system, ohmic SD ",/,&
@@ -321,12 +326,12 @@ PROGRAM JK6_v3
    !*************************************************************
 
    ! Setup potential energy surface
-   CALL SetupPotential( Collinear )
+   CALL SetupPotential(  MassH, MassC, Collinear )
    
    ! If needed setup bath frequencies and coupling for oscillator bath models
    IF (  BathType == NORMAL_BATH ) THEN
          IF ( OhmicGammaTimesMass == 0.0 ) THEN
-            CALL SetupIndepOscillatorsModel( Bath, NBath, 0, SpectralDensityFile, MassBath, BathCutOffFreq )
+            CALL SetupIndepOscillatorsModel( Bath, NBath, 0, SpectralDensityFile, MassBath, BathCutOffFreq, BathLowerCutOffFreq )
          ELSE
             CALL SetupOhmicIndepOscillatorsModel( Bath, NBath, 0, OhmicGammaTimesMass, MassBath, BathCutOffFreq )
          END IF

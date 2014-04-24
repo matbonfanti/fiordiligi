@@ -28,7 +28,7 @@ MODULE PotentialAnalysis
 
    IMPLICIT NONE
 
-   REAL, PARAMETER :: SmallDelta = 1.E-06
+   REAL, PARAMETER :: SmallDelta = 1.E-04
 
    PRIVATE
    PUBLIC :: PotentialAnalysis_ReadInput, PotentialAnalysis_Initialize, PotentialAnalysis_Run, PotentialAnalysis_Dispose
@@ -157,7 +157,7 @@ MODULE PotentialAnalysis
 
       REAL :: PotEnergy, Norm
       REAL :: ZHFreq, ZCFreq, EMin, EAsy
-      REAL :: Frequency, Spectrum
+      REAL :: Frequency, Spectrum, D0
 
       INTEGER :: iFreq, iEigen
       INTEGER :: i, j
@@ -261,7 +261,7 @@ MODULE PotentialAnalysis
       ! Numerical mass scaled hessian of the 4D system potential
       ! (in general cannot be extracted from the full hessian for the distortion contribution in
       !  the independent oscillator model cases )
-      HessianSystem = HessianOfTheSystem( XMin )
+      HessianSystem = HessianOfTheSystem( XMin, MassH, MassC )
 
       WRITE(*,505) trim(FreqUnit(InputUnits)), HessianSystem*(FreqConversion(InternalUnits,InputUnits)**2)
 
@@ -295,8 +295,13 @@ MODULE PotentialAnalysis
 
       ! list eigenvalues
       DO iEigen = 1, NDim
-         IF ( EigenFreq(iEigen) < 0.0 ) & 
+         IF ( EigenFreq(iEigen) < 0.0 ) THEN
             WRITE(*,503)  iEigen, SQRT(-EigenFreq(iEigen))*FreqConversion(InternalUnits,InputUnits), FreqUnit(InputUnits)
+         ELSE
+            WRITE(742,*) 0.0, SQRT(EigenFreq(iEigen))*FreqConversion(InternalUnits,InputUnits)
+            WRITE(742,*) 1.0, SQRT(EigenFreq(iEigen))*FreqConversion(InternalUnits,InputUnits)
+            WRITE(742,*) " "   
+         END IF
       END DO
 
       DO iFreq = 1, INT( MaxFreq / DeltaFreq )
@@ -308,7 +313,7 @@ MODULE PotentialAnalysis
          ! sum over eigenfreq centered gaussians
          DO iEigen = 1, size(EigenFreq)
             IF ( .NOT. EigenFreq(iEigen) < 0.0 ) & 
-               Spectrum = Spectrum + EXP(- (Frequency-SQRT(EigenFreq(iEigen)))**2 / 2.0 / SigmaPeak**2 )
+               Spectrum = Spectrum + LorentzianFunction( Frequency, SQRT(EigenFreq(iEigen)), SigmaPeak )
          END DO
 
          ! PRINT
@@ -335,8 +340,13 @@ MODULE PotentialAnalysis
 
       ! list eigenvalues
       DO iEigen = 1, NDim
-         IF ( EigenFreq(iEigen) < 0.0 ) &
+         IF ( EigenFreq(iEigen) < 0.0 ) THEN
             WRITE(*,503)  iEigen, SQRT(-EigenFreq(iEigen))*FreqConversion(InternalUnits,InputUnits), FreqUnit(InputUnits)
+         ELSE
+            WRITE(743,*) 1.0, SQRT(EigenFreq(iEigen))*FreqConversion(InternalUnits,InputUnits)
+            WRITE(743,*) 2.0, SQRT(EigenFreq(iEigen))*FreqConversion(InternalUnits,InputUnits)
+            WRITE(743,*) " "   
+         END IF
       END DO
 
       DO iFreq = 1, INT( MaxFreq / DeltaFreq )
@@ -348,7 +358,7 @@ MODULE PotentialAnalysis
          ! sum over eigenfreq centered gaussians
          DO iEigen = 1, size(EigenFreq)
             IF ( EigenFreq(iEigen) > 0.0 ) & 
-               Spectrum = Spectrum + EXP(- (Frequency-SQRT(EigenFreq(iEigen)))**2 / 2.0 / SigmaPeak**2 )
+               Spectrum = Spectrum + + LorentzianFunction( Frequency, SQRT(EigenFreq(iEigen)), SigmaPeak )
          END DO
 
          ! PRINT
@@ -412,6 +422,7 @@ MODULE PotentialAnalysis
 
          PRINT "(/,A,A,A)","  # mode   |  frequency (",TRIM(FreqUnit(InputUnits)),") |   intensity (au) "
          i = 0
+         D0 = 0.0
          DO iEigen = 1, size(EigenFreq)
             IF ( EigenFreq(iEigen) > 1.E-10 ) THEN
                i = i+1 
@@ -420,8 +431,11 @@ MODULE PotentialAnalysis
                IntensityK(i) = MyConsts_PI / 2.0  * CoeffK(i)**2 / OmegaK(i) / MassC
                IF ( IntensityK(i) > 1.E-12 )  &
                            WRITE(*,"(I6,1F18.2,1E25.8)") i, OmegaK(i)*FreqConversion(InternalUnits,InputUnits), IntensityK(i)
+               D0 = D0 + IntensityK(i)
             END IF
          END DO
+
+         WRITE(*,"(/,A,1E16.8,/)") " The sum of the peak intensities is ", D0
 
          DO iFreq = 1, INT( MaxFreq / DeltaFreq )
 
@@ -431,7 +445,7 @@ MODULE PotentialAnalysis
 
             ! sum over eigenfreq centered gaussians
             DO iEigen = 1, NrOfModes
-               IF ( EigenFreq(iEigen) > 1.E-10 .AND. OmegaK(iEigen) > 50.*FreqConversion(InputUnits,InternalUnits) ) & 
+               IF ( EigenFreq(iEigen) > 1.E-10 .AND. OmegaK(iEigen) > 30.*FreqConversion(InputUnits,InternalUnits) ) & 
                   Spectrum = Spectrum + MyConsts_PI / 2.0  * CoeffK(iEigen)**2 / OmegaK(iEigen) / MassC * &
                                  LorentzianFunction( Frequency, OmegaK(iEigen), SigmaPeak )
             END DO
@@ -639,78 +653,6 @@ MODULE PotentialAnalysis
       FourDPotentialOnly = VHFourDimensional( AtCoords(1:4), Dummy )
    END FUNCTION FourDPotentialOnly
 
-   ! ************************************************************************************************
-
-   FUNCTION HessianOfTheSystem( AtPoint ) RESULT( Hessian )
-      REAL, DIMENSION(4,4) :: Hessian
-      REAL, DIMENSION(4), INTENT(IN) :: AtPoint
-      REAL, DIMENSION(4) :: Coordinates, FirstDerivative
-      REAL :: Potential
-      INTEGER :: i, k
-
-      REAL, DIMENSION(4), PARAMETER :: Deltas = (/ -2.0,    -1.0,    +1.0,    +2.0    /)
-      REAL, DIMENSION(4), PARAMETER :: Coeffs = (/ +1./12., -8./12., +8./12., -1./12. /) 
-
-      REAL, DIMENSION(3), PARAMETER :: ForwardDeltas = (/  0.0,   +1.0,  +2.0   /)
-      REAL, DIMENSION(3), PARAMETER :: ForwardCoeffs = (/ -3./2., +2.0,  -1./2. /) 
-
-      Hessian(:,:) = 0.0
-
-      ! Compute the second derivatives for displacements of x and y
-      ! IMPORTANT!!! since rho = 0 is a singular value of the function, 
-      ! the derivative is computed slightly off the minimum, and is computed for x,y > 0
-      DO i = 1, 2
-         DO k = 1, size(ForwardDeltas)
-
-            ! Define small displacement from the point where compute the derivative
-            Coordinates(:) = AtPoint(:)
-            IF ( Coordinates(i) < 0.0 ) THEN
-               Coordinates(i) = - Coordinates(i)
-            END IF
-
-            IF ( Coordinates(i) < 0.001 ) THEN
-               Coordinates(i) = Coordinates(i) + 0.001 + ForwardDeltas(k)*SmallDelta
-            ELSE
-               Coordinates(i) = Coordinates(i) + ForwardDeltas(k)*SmallDelta
-            END IF
-
-            ! Compute potential and forces in the displaced coordinate
-            Potential = VHFourDimensional( Coordinates, FirstDerivative )
-            FirstDerivative = - FirstDerivative
-
-            ! Increment numerical derivative of the analytical derivative
-            Hessian(i,:) = Hessian(i,:) + ForwardCoeffs(k)*FirstDerivative(:)/SmallDelta
-
-         END DO
-      END DO
-
-      DO i = 3, 4
-         DO k = 1, size(Deltas)
-
-            ! Define small displacement from the point where compute the derivative
-            Coordinates(:) = AtPoint(:)
-            Coordinates(i) = Coordinates(i) + Deltas(k)*SmallDelta
-
-            ! Compute potential and forces in the displaced coordinate
-            Potential = VHFourDimensional( Coordinates, FirstDerivative )
-            FirstDerivative = - FirstDerivative
-
-            ! Increment numerical derivative of the analytical derivative
-            Hessian(i,:) = Hessian(i,:) + Coeffs(k)*FirstDerivative(:)/SmallDelta
-
-         END DO
-      END DO
-
-      DO k = 1, 4
-         DO i = 1, 4
-            Hessian(i,k) = Hessian(i,k) / SQRT( MassVector(i)*MassVector(k) )
-         END DO
-      END DO
-
-!       CALL TheOneWithMatrixPrintedLineAfterLine( Hessian )
-
-   END FUNCTION HessianOfTheSystem
-
 
    !*************************************************************************************************
 
@@ -787,7 +729,7 @@ MODULE PotentialAnalysis
       ELSE IF ( BathType == NORMAL_BATH ) THEN
 
          ! Compute hessian of the system
-         Hessian(1:4,1:4) = HessianOfTheSystem( AtPoint(1:4) )
+         Hessian(1:4,1:4) = HessianOfTheSystem( AtPoint(1:4), MassH, MassC )
 
          ! add the part of the hessian of the independent oscillator model
          CALL  HessianOfTheBath( Bath, Hessian(5:NDim, 5:NDim) ) 
@@ -803,7 +745,7 @@ MODULE PotentialAnalysis
       ELSE IF ( BathType == CHAIN_BATH ) THEN
 
          ! Compute hessian of the system
-         Hessian(1:4,1:4) = HessianOfTheSystem( AtPoint(1:4) )
+         Hessian(1:4,1:4) = HessianOfTheSystem( AtPoint(1:4), MassH, MassC )
 
          ! add the part of the hessian of the independent oscillator model
          CALL  HessianOfTheBath( Bath, Hessian(5:NDim, 5:NDim) ) 
@@ -817,7 +759,7 @@ MODULE PotentialAnalysis
       ELSE IF ( BathType == DOUBLE_CHAIN ) THEN
 
          ! Compute hessian of the system
-         Hessian(1:4,1:4) = HessianOfTheSystem( AtPoint(1:4) )
+         Hessian(1:4,1:4) = HessianOfTheSystem( AtPoint(1:4), MassH, MassC )
 
          ! add the part of the hessian of the independent oscillator model
          CALL HessianOfTheBath( DblBath(1), Hessian(5:4+NBath, 5:4+NBath) ) 
@@ -836,7 +778,7 @@ MODULE PotentialAnalysis
       ELSE IF ( BathType == LANGEVIN_DYN ) THEN
 
          ! Compute hessian of the system
-         Hessian = HessianOfTheSystem( AtPoint )
+         Hessian = HessianOfTheSystem( AtPoint, MassH, MassC )
 
       END IF
 
@@ -871,10 +813,10 @@ MODULE PotentialAnalysis
       DirectionalSecondDerivative = 0.0
 
       DO k = 1, size(Deltas)
-         Coordinates(:) = AtPoint(:) + SmallDelta*Deltas(k)*Direction(:)
+         Coordinates(:) = AtPoint(:) + SmallDelta*Deltas(k)*NormalMode(:)
          Potential = VHSticking( Coordinates, FirstDerivative )
-         DirectionalSecondDerivative = DirectionalSecondDerivative + &
-                          Coeffs(k)* TheOneWithVectorDotVector(NormalMode,FirstDerivative) /SmallDelta
+         DirectionalSecondDerivative = DirectionalSecondDerivative - &
+                          Coeffs(k)* TheOneWithVectorDotVector(Direction,FirstDerivative) /SmallDelta
       END DO
 
    END FUNCTION DirectionalSecondDerivative

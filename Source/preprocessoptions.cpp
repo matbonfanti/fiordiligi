@@ -13,6 +13,22 @@
 #define __CLOSE_LOG_FILE        CLOSE( UNIT=19 )
 #endif
 
+/*==============================================================================*
+ * Define/undefine printing of graphene slab for vhsticking 3D function.        *
+ *==============================================================================*/
+
+#undef __PRINT_VHSTICKING_FUNCTION
+#if defined(__PRINT_VHSTICKING_FUNCTION) 
+#define __VHSTICKING_UNIT              55
+#define __OPEN_VHSTICKING_FILE         OPEN( UNIT=55, FILE="vhsticking.f90", ACTION="write" )
+#define __CLOSE_VHSTICKING_FILE        CLOSE( UNIT=55 )
+#endif
+
+
+/*==============================================================================*
+ * Define alias for OMP parallelization.                                        *
+ *==============================================================================*/
+
 #if defined(WITH_OPENMP)
 #define __OMP_TotalNrOfThreads      OMP_GET_NUM_THREADS()
 #define __OMP_CurrentThreadNum      OMP_GET_THREAD_NUM() + 1
@@ -24,6 +40,10 @@
 #define __OMP_OnlyMasterBEGIN   
 #define __OMP_OnlyMasterEND     
 #endif
+
+/*==============================================================================*
+ * Load common modules.                                                         *
+ *==============================================================================*/
 
    /* These are modules that are used in most parts of the code */
    USE ErrorTrap

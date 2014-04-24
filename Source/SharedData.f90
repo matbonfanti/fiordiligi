@@ -71,6 +71,7 @@ MODULE SharedData
    INTEGER        :: NBath                     !< Nr of bath degrees of freedom
    REAL           :: MassBath                  !< Mass of the HO in the bath
    REAL           :: BathCutOffFreq            !< cutoff frequency of the bath
+   REAL           :: BathLowerCutOffFreq       !< lower cutoff frequency of the bath
    CHARACTER(100) :: SpectralDensityFile       !< spectral density file name
    CHARACTER(100) :: SpectralDensityFile2      !< spectral density file name
    TYPE(BathData), SAVE :: Bath                      !< derived datatype to define a single bath

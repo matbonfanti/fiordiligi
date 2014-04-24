@@ -50,6 +50,7 @@ MODULE VibrationalRelax
 
    ! Initial conditions
    REAL    :: InitEnergy                !< Initial energy of the system
+   INTEGER :: NInitNormalMode           !< Initial vibrational normal mode
    REAL    :: TimeBetweenSnaps          !< Nr of initial snapshots to randomize initial conditions
    INTEGER :: NrOfInitSnapshots         !< Time between each initial snapshot
 
@@ -101,6 +102,9 @@ MODULE VibrationalRelax
       END IF
 
       ! READ THE VARIABLES TO SET THE INITIAL CONDITIONS OF THE SYSTEM
+
+      ! Normal mode to be initially excited
+      CALL SetFieldFromInput( InputData, "NInitNormalMode", NInitNormalMode )
 
       ! Initial energy of the system (input in eV and transform to AU)
       CALL SetFieldFromInput( InputData, "InitEnergy", InitEnergy)
@@ -311,14 +315,21 @@ MODULE VibrationalRelax
       PRINT "(A,I5,A)"," Running ", NrTrajs, " trajectories ... "
 
       ! Define the set of initial conditions for CH
-      ! atoms in the equilibrium geometry, energy in the stretching normal mode
+      ! atoms in the equilibrium geometry, energy in the given normal mode
+
+      WRITE(*,700) SQRT(NormalModes4D_Freq(NInitNormalMode))*FreqConversion(InternalUnits,InputUnits), FreqUnit(InputUnits), &
+                   NormalModes4D_Vecs(1,NInitNormalMode)*LengthConversion(InternalUnits,InputUnits), LengthUnit(InputUnits), &
+                   NormalModes4D_Vecs(2,NInitNormalMode)*LengthConversion(InternalUnits,InputUnits), LengthUnit(InputUnits), &
+                   NormalModes4D_Vecs(3,NInitNormalMode)*LengthConversion(InternalUnits,InputUnits), LengthUnit(InputUnits), &
+                   NormalModes4D_Vecs(4,NInitNormalMode)*LengthConversion(InternalUnits,InputUnits), LengthUnit(InputUnits)
 
       X(1:2) = 0.0
-      V(1:2) = 0.0
       X(3) = HZEquilibrium 
       X(4) = C1Puckering  
-      V(3) = + sqrt( 2.0 * ( InitEnergy-MinimumEnergy ) / MassH ) * 0.958234410548192
-      V(4) = - sqrt( 2.0 * ( InitEnergy-MinimumEnergy ) / MassC ) * 0.285983940880181 
+      V(1) = sqrt( 2.0 * ( InitEnergy-MinimumEnergy ) / MassH ) * NormalModes4D_Vecs(1,NInitNormalMode)
+      V(2) = sqrt( 2.0 * ( InitEnergy-MinimumEnergy ) / MassH ) * NormalModes4D_Vecs(2,NInitNormalMode)
+      V(3) = sqrt( 2.0 * ( InitEnergy-MinimumEnergy ) / MassH ) * NormalModes4D_Vecs(3,NInitNormalMode)
+      V(4) = sqrt( 2.0 * ( InitEnergy-MinimumEnergy ) / MassC ) * NormalModes4D_Vecs(4,NInitNormalMode)
 
       ! Define when to store the dynamics snapshot
       NTimeStepEachSnap = INT( TimeBetweenSnaps / TimeStep )
@@ -588,6 +599,12 @@ MODULE VibrationalRelax
                      " * Energy of the system (eV)        ",1F10.4,/    &
                      " * Kinetic Energy of the bath (eV)  ",1F10.4,/    &
                      " * Istantaneous temperature (K)     ",1F10.4,/ ) 
+      700 FORMAT (/, " Info on initially excited normal mode ",             /, &
+                     " * Frequency of the normal mode        ",1F15.6,1X,A, /, &
+                     " * 1st component of mass-scaled coords ",1F15.6,1X,A, /, &
+                     " * 2nd component of mass-scaled coords ",1F15.6,1X,A, /, &
+                     " * 3rd component of mass-scaled coords ",1F15.6,1X,A, /, &
+                     " * 4th component of mass-scaled coords ",1F15.6,1X,A, /   ) 
 
    END SUBROUTINE VibrationalRelax_Run
 

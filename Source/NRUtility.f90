@@ -96,7 +96,7 @@ MODULE NRUtility
      MODULE PROCEDURE array_copy_r, array_copy_d, array_copy_i 
   END INTERFACE
   INTERFACE swap 
-     MODULE PROCEDURE swap_i,swap_r,swap_rv,swap_c, &
+     MODULE PROCEDURE swap_i,swap_r,swap_rv,swap_d,swap_dv,swap_c, &
       swap_cv,swap_cm,swap_z,swap_zv,swap_zm, & 
        masked_swap_rs,masked_swap_rv,masked_swap_rm 
   END INTERFACE
@@ -157,7 +157,7 @@ MODULE NRUtility
      MODULE PROCEDURE diagadd_rv,diagadd_r 
   END INTERFACE
   INTERFACE diagmult 
-     MODULE PROCEDURE diagmult_rv,diagmult_r 
+     MODULE PROCEDURE diagmult_rv,diagmult_r, diagmult_d, diagmult_dv 
   END INTERFACE
   INTERFACE get_diag 
      MODULE PROCEDURE get_diag_rv, get_diag_dv 
@@ -226,7 +226,23 @@ CONTAINS
     a=b 
     b=dum 
   END SUBROUTINE swap_rv
+  
+  SUBROUTINE swap_d(a,b) 
+    REAL(DP), INTENT(INOUT) :: a,b 
+    REAL(DP) :: dum 
+    dum=a 
+    a=b 
+    b=dum 
+  END SUBROUTINE swap_d
 
+  SUBROUTINE swap_dv(a,b) 
+    REAL(DP), DIMENSION(:), INTENT(INOUT) :: a,b 
+    REAL(DP), DIMENSION(SIZE(a)) :: dum 
+    dum=a 
+    a=b 
+    b=dum 
+  END SUBROUTINE swap_dv
+  
   SUBROUTINE swap_c(a,b) 
     COMPLEX(SPC), INTENT(INOUT) :: a,b 
     COMPLEX(SPC) :: dum 
@@ -1203,6 +1219,27 @@ CONTAINS
        mat(j,j)=mat(j,j)*diag 
     END do
   END SUBROUTINE diagmult_r
+  
+  SUBROUTINE diagmult_dv(mat,diag) 
+    !Multiplies vector or scalar diag into the diagonal of matrix mat. 
+    REAL(DP), DIMENSION(:,:), INTENT(INOUT) :: mat 
+    REAL(DP), DIMENSION(:), INTENT(IN) :: diag 
+    INTEGER(I4B) :: j,n 
+    n = assert_eq2(size(diag),min(size(mat,1),size(mat,2)),"diagmult_rv") 
+    do j=1,n 
+       mat(j,j)=mat(j,j)*diag(j) 
+    end do
+  END SUBROUTINE diagmult_dv
+
+  SUBROUTINE diagmult_d(mat,diag) 
+    REAL(DP), DIMENSION(:,:), INTENT(INOUT) :: mat 
+    REAL(DP), INTENT(IN) :: diag 
+    INTEGER(I4B) :: j,n 
+    n = min(size(mat,1),size(mat,2))
+    do j=1,n 
+       mat(j,j)=mat(j,j)*diag 
+    END do
+  END SUBROUTINE diagmult_d
 
   FUNCTION get_diag_rv(mat) 
     !Return as a vector the diagonal of matrix mat. 

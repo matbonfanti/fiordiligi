@@ -1,15 +1,17 @@
 MODULE PotentialModule
-   USE MyConsts
-   USE ErrorTrap
+#include "preprocessoptions.cpp"
    USE RandomNumberGenerator
+   USE MyLinearAlgebra
 
    PRIVATE
-   PUBLIC :: SetupPotential, VHSticking, VHFourDimensional, MinimizePotential
+   PUBLIC :: SetupPotential, VHSticking, VHFourDimensional, MinimizePotential, HessianOfTheSystem
    PUBLIC :: ThermalEquilibriumConditions, ScatteringConditions, ZeroKelvinSlabConditions
    PUBLIC :: CarbonForceConstant, GraphiteLatticeConstant
 
+   REAL, PARAMETER :: SmallDelta = 1.E-04
+
    !> Setup variable for the potential
-   LOGICAL :: PotentialModuleIsSetup = .FALSE.
+   LOGICAL, SAVE :: PotentialModuleIsSetup = .FALSE.
 
    !> Fix the collinear geometry
    LOGICAL :: CollinearPES = .FALSE.
@@ -20,8 +22,10 @@ MODULE PotentialModule
    REAL, PUBLIC :: HZEquilibrium = 1.4811 / MyConsts_Bohr2Ang
    !> Energy of the minimum
    REAL, PUBLIC :: MinimumEnergy = 0.0000
-   !> H Z vibration frequency at the minimum
-   REAL, PUBLIC :: HZForceConst = 0.0000
+   !> Frequencies of the normal modes
+   REAL, DIMENSION(4), PUBLIC :: NormalModes4D_Freq         ! squared frequencies of the normal modes
+   !> Frequencies of the normal modes
+   REAL, DIMENSION(4,4), PUBLIC :: NormalModes4D_Vecs       ! columns are normal modes of the potential in the minimum
 
    !> Max nr of iterations for potential optimization
    INTEGER, PARAMETER :: MaxIter = 10000
@@ -66,13 +70,14 @@ MODULE PotentialModule
 ! ************************************************************************************
 
 
-      SUBROUTINE SetupPotential( Collinear )
+      SUBROUTINE SetupPotential( MassHydro, MassCarb, Collinear )
          IMPLICIT NONE
+         REAL, INTENT(IN)     :: MassHydro, MassCarb
          LOGICAL, OPTIONAL    :: Collinear
          REAL, DIMENSION(124) :: Positions
          INTEGER :: iCoord
          REAL    :: Value
-         REAL, DIMENSION(size(Positions)) :: Gradient
+         REAL, DIMENSION(4,4)       :: HessianSystem
 
          ! exit if module is setup
          IF ( PotentialModuleIsSetup ) RETURN
@@ -93,7 +98,7 @@ MODULE PotentialModule
 
          ! Set guess starting coordinate for the minimization of the slab potential
          Positions(1:124) = 0.0
-         Positions(3) = C1Puckering + 2.0   ! reasonable guess for H Z coordinate
+         Positions(3) = HZEquilibrium   ! reasonable guess for H Z coordinate
          Positions(4) = C1Puckering
 
          ! Minimize potential
@@ -112,36 +117,50 @@ MODULE PotentialModule
          C1Puckering = Positions(4)
          HZEquilibrium = Positions(3)
 
-         ! HZFrequency initialization
-         HZForceConst = - 2. * MinimumEnergy
-         ! add displacement in +delta
-         Positions(3) = HZEquilibrium + Delta
-         HZForceConst = HZForceConst + VHSticking( Positions, Gradient )
-         ! add displacement in -delta
-         Positions(3) = HZEquilibrium - Delta
-         HZForceConst = HZForceConst + VHSticking( Positions, Gradient )
-         ! normalize force constant
-         HZForceConst = HZForceConst / Delta**2
+         ! Set the normal modes of the 4D potential
 
-!       PRINT*, " "
-!       DO iBath = 1,8
-!          WRITE(*,500) iBath+1, MinSlab(iBath)
-!       END DO
-!       DO iBath = 9,98
-!          WRITE(*,501) iBath+1, MinSlab(iBath)
-!       END DO
-!       DO iBath = 99,120
-!          WRITE(*,502) iBath+1, MinSlab(iBath)
-!       END DO
-!       500 FORMAT( " z(",I1,")=",F13.10, " * MyConsts_Bohr2Ang " ) 
-!       501 FORMAT( " z(",I2,")=",F13.10, " * MyConsts_Bohr2Ang " ) 
-!       502 FORMAT( " z(",I3,")=",F13.10, " * MyConsts_Bohr2Ang " ) 
-!       PRINT*, " "
-!       STOP
+         ! compute the hessian
+         HessianSystem = HessianOfTheSystem( Positions, MassHydro, MassCarb )
+
+         ! Diagonalize the hessian
+         CALL TheOneWithDiagonalization( HessianSystem, NormalModes4D_Vecs, NormalModes4D_Freq )
+
+
+#if defined(__PRINT_VHSTICKING_FUNCTION)
+         __OPEN_VHSTICKING_FILE
+
+         ! Write comment with ZH and ZC equilibrium positions
+         WRITE(__VHSTICKING_UNIT,*) "      ! ZH equilibrium position (Ang): ",Positions(3)* MyConsts_Bohr2Ang
+         WRITE(__VHSTICKING_UNIT,*) "      ! ZC equilibrium position (Ang): ",Positions(4)* MyConsts_Bohr2Ang
+
+         ! Write definitions of C slab positions
+         DO  iCoord = 1, 120
+            WRITE(__VHSTICKING_UNIT,502) iCoord+1, MinSlab(iCoord)
+         END DO
+
+         __CLOSE_VHSTICKING_FILE
+         502 FORMAT( "      z(",I3,")=",F14.10, " * MyConsts_Bohr2Ang " ) 
+#endif
+
 
 #if defined(VERBOSE_OUTPUT)
-            WRITE(*,*) " Potential has been setup"
-            WRITE(*,*) " "
+         WRITE(*,502) SQRT(NormalModes4D_Freq(1)), "au", "au", NormalModes4D_Vecs(:,1), &
+                      SQRT(NormalModes4D_Freq(2)), "au", "au", NormalModes4D_Vecs(:,2), &
+                      SQRT(NormalModes4D_Freq(3)), "au", "au", NormalModes4D_Vecs(:,3), &
+                      SQRT(NormalModes4D_Freq(4)), "au", "au", NormalModes4D_Vecs(:,4)
+
+         502 FORMAT (/, " 4D system potential normal modes             ",/, &
+                        " 1) Frequency:                   ",1F15.2,1X,A, /, &
+                        "    Mass-scaled coords of the normal mode / ",A," : ",4F12.6, /, &
+                        " 2) Frequency:                   ",1F15.2,1X,A, /, &
+                        "    Mass-scaled coords of the normal mode / ",A," : ",4F12.6, /, &
+                        " 3) Frequency:                   ",1F15.2,1X,A, /, &
+                        "    Mass-scaled coords of the normal mode / ",A," : ",4F12.6, /, &
+                        " 4) Frequency:                   ",1F15.2,1X,A, /, &
+                        "    Mass-scaled coords of the normal mode / ",A," : ",4F12.6, 2/)
+
+         WRITE(*,*) " Potential has been setup"
+         WRITE(*,*) " "
 #endif
       END SUBROUTINE
 
@@ -391,6 +410,82 @@ MODULE PotentialModule
 
       END FUNCTION MinimizePotential
 
+   ! ************************************************************************************************
+
+   FUNCTION HessianOfTheSystem( AtPoint, MassHydro, MassCarb ) RESULT( Hessian )
+      IMPLICIT NONE
+      REAL, DIMENSION(4,4) :: Hessian
+      REAL, INTENT(IN)     :: MassHydro, MassCarb
+      REAL, DIMENSION(4), INTENT(IN) :: AtPoint
+      REAL, DIMENSION(4) :: Coordinates, FirstDerivative, MassVector
+      REAL :: Potential
+      INTEGER :: i, k
+
+      REAL, DIMENSION(4), PARAMETER :: Deltas = (/ -2.0,    -1.0,    +1.0,    +2.0    /)
+      REAL, DIMENSION(4), PARAMETER :: Coeffs = (/ +1./12., -8./12., +8./12., -1./12. /) 
+
+      REAL, DIMENSION(3), PARAMETER :: ForwardDeltas = (/  0.0,   +1.0,  +2.0   /)
+      REAL, DIMENSION(3), PARAMETER :: ForwardCoeffs = (/ -3./2., +2.0,  -1./2. /) 
+
+      MassVector(1:3) = MassHydro
+      MassVector(4)   = MassCarb
+
+      Hessian(:,:) = 0.0
+
+      ! Compute the second derivatives for displacements of x and y
+      ! IMPORTANT!!! since rho = 0 is a singular value of the function, 
+      ! the derivative is computed slightly off the minimum, and is computed for x,y > 0
+      DO i = 1, 2
+         DO k = 1, size(ForwardDeltas)
+
+            ! Define small displacement from the point where compute the derivative
+            Coordinates(:) = AtPoint(:)
+            IF ( Coordinates(i) < 0.0 ) THEN
+               Coordinates(i) = - Coordinates(i)
+            END IF
+
+            IF ( Coordinates(i) < 0.001 ) THEN
+               Coordinates(i) = Coordinates(i) + 0.001 + ForwardDeltas(k)*SmallDelta
+            ELSE
+               Coordinates(i) = Coordinates(i) + ForwardDeltas(k)*SmallDelta
+            END IF
+
+            ! Compute potential and forces in the displaced coordinate
+            Potential = VHFourDimensional( Coordinates, FirstDerivative )
+            FirstDerivative = - FirstDerivative
+
+            ! Increment numerical derivative of the analytical derivative
+            Hessian(i,:) = Hessian(i,:) + ForwardCoeffs(k)*FirstDerivative(:)/SmallDelta
+
+         END DO
+      END DO
+
+      DO i = 3, 4
+         DO k = 1, size(Deltas)
+
+            ! Define small displacement from the point where compute the derivative
+            Coordinates(:) = AtPoint(:)
+            Coordinates(i) = Coordinates(i) + Deltas(k)*SmallDelta
+
+            ! Compute potential and forces in the displaced coordinate
+            Potential = VHFourDimensional( Coordinates, FirstDerivative )
+            FirstDerivative = - FirstDerivative
+
+            ! Increment numerical derivative of the analytical derivative
+            Hessian(i,:) = Hessian(i,:) + Coeffs(k)*FirstDerivative(:)/SmallDelta
+
+         END DO
+      END DO
+
+      DO k = 1, 4
+         DO i = 1, 4
+            Hessian(i,k) = Hessian(i,k) / SQRT( MassVector(i)*MassVector(k) )
+         END DO
+      END DO
+
+!       CALL TheOneWithMatrixPrintedLineAfterLine( Hessian )
+
+   END FUNCTION HessianOfTheSystem
 
 ! ******************************************************************************************      
 

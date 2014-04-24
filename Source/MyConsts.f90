@@ -100,8 +100,8 @@ MODULE MyConsts
    ! and analogously for the other parameters
    INTEGER, PARAMETER           :: SINGLE_PRECISION_KIND = SELECTED_REAL_KIND(5,20)
    INTEGER, PARAMETER           :: DOUBLE_PRECISION_KIND = SELECTED_REAL_KIND(10,40)
-   INTEGER, PARAMETER           :: LONG_INTEGER_KIND     = SELECTED_INT_KIND( 8 )
-   INTEGER, PARAMETER           :: SHORT_INTEGER_KIND    = SELECTED_INT_KIND( 16 )
+   INTEGER, PARAMETER           :: LONG_INTEGER_KIND     = SELECTED_INT_KIND( 16 )
+   INTEGER, PARAMETER           :: SHORT_INTEGER_KIND    = SELECTED_INT_KIND( 8 )
    !> @}
 
 
@@ -333,6 +333,28 @@ END SUBROUTINE RemoveDups2D_r
       DEALLOCATE(Mask)
 
    END SUBROUTINE  Sort
+
+! --------------------------------------------------------------------
+!>  SUBROUTINE  Order():
+!>  This subroutine receives an array x() and gives an integer array
+!>  of the same dimension with the ordinal numer of the array element
+! --------------------------------------------------------------------
+   FUNCTION Order(x)
+      IMPLICIT  NONE
+      REAL, DIMENSION(:), INTENT(INOUT)        :: x
+      INTEGER, DIMENSION(size(x))              :: Order
+      LOGICAL, DIMENSION(size(x)) :: Mask
+      INTEGER    :: i,  Location
+      REAL       :: Temp
+
+      Mask = .TRUE.
+      DO i = 1, SIZE(x)                  ! except for the last
+         Location = MINLOC( x, 1, Mask )    ! find min from this to last
+         Order(Location) = i
+         Mask(Location)  = .FALSE.
+      END DO
+
+   END FUNCTION  Order
 
 END MODULE MyConsts
 
