@@ -41,13 +41,10 @@ MODULE PotentialAnalysis
    REAL :: DeltaFreq            !< Delta frequency of the discretization
    REAL :: SigmaPeak            !< Width parameter of the peaks in the spectrum
 
-!    ! THE FOLLOWING INPUT DATA ARE RELEVANT FOR A POTENTIAL PLOT RUN 
-! 
-!    INTEGER :: FreezeGraphene            !< Freeze graphene in planar geometry ( 1 = yes, 0 = no )
-!    REAL    :: ZHmin, ZHmax              !< range of the ZH grid in the plots
-!    REAL    :: ZCmin, ZCmax              !< range of the ZC grid in the plots
-!    INTEGER :: NpointZH                  !< Nr of points in ZH
-!    INTEGER :: NpointZC                  !< Nr of points in ZC
+   !> Parameters to plot potential cuts
+   REAL :: GridSpacing          !< Spacing of the grid to plot the potential
+   INTEGER :: NGridPoint        !< Nr of points around the equilibrium value
+
 
    CONTAINS
 
@@ -71,30 +68,10 @@ MODULE PotentialAnalysis
       CALL SetFieldFromInput( InputData, "PlotSpectrum_SigmaPeak", SigmaPeak )
       SigmaPeak = SigmaPeak * FreqConversion(InputUnits, InternalUnits)
 
-!    ELSE IF (RunType == POTENTIALPRINT) THEN
-!       CALL SetFieldFromInput( InputData, "ZHmin", ZHmin, 0.8 )
-!       ZHmin = ZHmin / MyConsts_Bohr2Ang
-!       CALL SetFieldFromInput( InputData, "ZHmax", ZHmax, 4.0 )
-!       ZHmax = ZHmax / MyConsts_Bohr2Ang
-!       CALL SetFieldFromInput( InputData, "ZCmin", ZCmin, -0.5 )
-!       ZCmin = ZCmin / MyConsts_Bohr2Ang
-!       CALL SetFieldFromInput( InputData, "ZCmax", ZCmax, 1.0 )
-!       ZCmax = ZCmax / MyConsts_Bohr2Ang
-!       CALL SetFieldFromInput( InputData, "NpointZH", NpointZH, 400 )
-!       CALL SetFieldFromInput( InputData, "NpointZC", NpointZC, 100 )
-!       CALL SetFieldFromInput( InputData, "FreezeGraphene", FreezeGraphene, 1 )
-! 
-!    ELSE IF (RunType == CHAINEIGEN) THEN 
-! 
-!       ! Read cutoff frequency of the bath, if BathCutOffFreq is not present, it is set to zero
-!       BathCutOffFreq = 0.0
-!       CALL SetFieldFromInput( InputData, "BathCutOffFreq", BathCutOffFreq, BathCutOffFreq )
-!       BathCutOffFreq = BathCutOffFreq * MyConsts_cmmin1toAU
-!       ! Read file with spectral density / normal modes freq and couplings
-!       CALL SetFieldFromInput( InputData, "SpectralDensityFile", SpectralDensityFile )
-! 
-!    END IF
-! 
+      CALL SetFieldFromInput( InputData, "PlotSpectrum_NGridPoint", NGridPoint )
+
+      CALL SetFieldFromInput( InputData, "PlotSpectrum_GridSpacing", GridSpacing )
+      GridSpacing = GridSpacing * LengthConversion(InputUnits, InternalUnits)
 
    END SUBROUTINE PotentialAnalysis_ReadInput
 
@@ -142,8 +119,8 @@ MODULE PotentialAnalysis
    SUBROUTINE PotentialAnalysis_Run()
       IMPLICIT NONE
 
- 
       INTEGER :: AsyPhononSpectrumUnit, MinPhononSpectrumUnit, SDCouplingUnit
+      INTEGER :: NormalModeCutsUnit, CartesianCutsUnit
 
       REAL, DIMENSION(:), ALLOCATABLE   :: OmegaK, CoeffK, IntensityK
       INTEGER :: NrOfModes
@@ -155,6 +132,7 @@ MODULE PotentialAnalysis
       REAL, DIMENSION(:), ALLOCATABLE   :: EigenFreq
       REAL, DIMENSION(:,:), ALLOCATABLE :: EigenModes
 
+      REAL, DIMENSION(4) :: Dummy, XSysMin
       REAL :: PotEnergy, Norm
       REAL :: ZHFreq, ZCFreq, EMin, EAsy
       REAL :: Frequency, Spectrum, D0
@@ -171,6 +149,14 @@ MODULE PotentialAnalysis
       SDCouplingUnit = LookForFreeUnit()
       OPEN( FILE="SpectralDensityCoupling.dat", UNIT=SDCouplingUnit )
       WRITE(SDCouplingUnit, "(A,/)") "# Spectral density of the coupling "
+
+      NormalModeCutsUnit = LookForFreeUnit()
+      OPEN( FILE="NormalModeCuts.dat", UNIT=NormalModeCutsUnit )
+      WRITE(NormalModeCutsUnit, "(A,/)") "# Potential cuts along the normal modes "
+      CartesianCutsUnit = LookForFreeUnit()
+      OPEN( FILE="CartesianCuts.dat", UNIT=CartesianCutsUnit )
+      WRITE(CartesianCutsUnit, "(A,/)") "# Potential cuts along the cartesian coordinates "
+
 
       PRINT "(2/,A)",    "***************************************************"
       PRINT "(A,F10.5)", "               PES ANALYSIS "
@@ -460,10 +446,62 @@ MODULE PotentialAnalysis
          DEALLOCATE( OmegaK, CoeffK, IntensityK )
          CLOSE(SDCouplingUnit)
 
+      ! ===================================================================================================
+      ! (7) Cuts of the 4D potential
+      ! ===================================================================================================
+
+         PRINT "(/,A,/)"," * Writing 4D potential energy cuts to output files ... "
+
+         XSysMin(:) = 0.0
+         XSysMin(3) = HZEquilibrium
+         XSysMin(4) = C1Puckering
+
+         WRITE(CartesianCutsUnit, "(/,A,I6,A)") "# Cut along zH at equilibrium slab geom - ", 2*NGridPoint+1, " pts (Ang | eV)"
+         X(1:4) = XSysMin(1:4)
+         DO i = -NGridPoint, NGridPoint
+            X(3) = HZEquilibrium + REAL(i) * GridSpacing
+            WRITE(CartesianCutsUnit,*) X(3)*LengthConversion(InternalUnits,InputUnits), &
+                                       VHFourDimensional( X(1:4), Dummy )*EnergyConversion(InternalUnits,InputUnits)
+         END DO
+         PRINT "(A)"," Written cut along zH to file NormalModeCuts.dat "
+
+         X(1:4) = XSysMin(1:4)
+         WRITE(CartesianCutsUnit, "(/,A,I6,A)") "# Cut along zC at equilibrium slab geom - ", 2*NGridPoint+1, " pts (Ang | eV)"
+         X(:) = XMin(:) 
+         DO i = -NGridPoint, NGridPoint
+            X(4) = C1Puckering + REAL(i) * GridSpacing
+            WRITE(CartesianCutsUnit,*) X(4)*LengthConversion(InternalUnits,InputUnits), &
+                                       VHFourDimensional( X(1:4), Dummy )*EnergyConversion(InternalUnits,InputUnits)
+         END DO
+         PRINT "(A)"," Written cut along zH to file CartesianCuts.dat "
+
+
+         WRITE(NormalModeCutsUnit, "(/,A,I6,A)") "# Cut along normal mode 3 - ", 2*NGridPoint+1, " pts (Ang | eV)"
+         X(1:4) = XSysMin(1:4)
+         DO i = -NGridPoint, NGridPoint
+            X(1:4) = XSysMin(1:4) + NormalModes4D_Vecs(:,3) * REAL(i) * GridSpacing / SQRT( MassVector(1:4 ))
+            WRITE(NormalModeCutsUnit,*) REAL(i) * GridSpacing, & !*LengthConversion(InternalUnits,InputUnits), &
+                                        VHFourDimensional( X(1:4), Dummy ), &!*EnergyConversion(InternalUnits,InputUnits), &
+            ( MinimumEnergy + 0.5 * NormalModes4D_Freq(3) * (REAL(i) * GridSpacing)**2 )!*EnergyConversion(InternalUnits,InputUnits) 
+         END DO
+         PRINT "(A)"," Written cut along 3rd normal mode to file NormalModeCuts.dat "
+
+         WRITE(NormalModeCutsUnit, "(/,A,I6,A)") "# Cut along normal mode 4 - ", 2*NGridPoint+1, " pts (Ang | eV)"
+         X(1:4) = XSysMin(1:4)
+         DO i = -NGridPoint, NGridPoint
+            X(1:4) = XSysMin(1:4) + NormalModes4D_Vecs(:,4) * REAL(i) * GridSpacing / SQRT( MassVector(1:4 ))
+            WRITE(NormalModeCutsUnit,*) REAL(i) * GridSpacing, & !*LengthConversion(InternalUnits,InputUnits), &
+                                        VHFourDimensional( X(1:4), Dummy ), & !*EnergyConversion(InternalUnits,InputUnits), &
+            ( MinimumEnergy + 0.5 * NormalModes4D_Freq(4) * (REAL(i) * GridSpacing)**2 )!*EnergyConversion(InternalUnits,InputUnits) 
+         END DO
+         PRINT "(A)"," Written cut along 4th normal mode to file NormalModeCuts.dat "
+
       END IF
 
       CLOSE(MinPhononSpectrumUnit)
       CLOSE(AsyPhononSpectrumUnit)
+      CLOSE(CartesianCutsUnit)
+      CLOSE(NormalModeCutsUnit)
 
       500 FORMAT (/, " H-Graphite adsorption geometry and energy   ",/  &
                      " * Asymptotic energy:           ",1F15.6,1X,A, /, &
@@ -519,7 +557,6 @@ MODULE PotentialAnalysis
 !       ! Open output file to print the H vibrational curve with fixed carbons
 !       HCurveOutputUnit = LookForFreeUnit()
 !       OPEN( FILE="GraphiteHBindingCurve.dat", UNIT=HCurveOutputUnit )
-!       WRITE(HCurveOutputUnit, "(A,I6,A,/)") "# H-Graphite binding at C fixed puckered geometry - ", NpointZH, " points (Ang | eV)"
 ! 
 !       ! Set collinear H, C1 puckered and other Cs in ideal geometry
 !       X(:) = 0.0
@@ -636,23 +673,6 @@ MODULE PotentialAnalysis
       END IF
 
    END FUNCTION VibrRelaxPotential
-
-   ! ************************************************************************************************
-
-   REAL FUNCTION FullPotentialOnly( AtCoords )
-      REAL, DIMENSION(:) :: AtCoords
-      REAL, DIMENSION(NDim) :: Dummy
-
-      FullPotentialOnly = VHSticking( AtCoords, Dummy )
-   END FUNCTION FullPotentialOnly
-
-   REAL FUNCTION FourDPotentialOnly( AtCoords )
-      REAL, DIMENSION(:) :: AtCoords
-      REAL, DIMENSION(4) :: Dummy
-
-      FourDPotentialOnly = VHFourDimensional( AtCoords(1:4), Dummy )
-   END FUNCTION FourDPotentialOnly
-
 
    !*************************************************************************************************
 

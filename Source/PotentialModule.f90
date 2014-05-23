@@ -64,6 +64,9 @@ MODULE PotentialModule
    ! > Coordinate of the slab in the minimum
    REAL, DIMENSION(120), SAVE, PUBLIC :: MinSlab
 
+   INTEGER, DIMENSION(27), PARAMETER, PUBLIC :: EdgeCarbons = (/ 112, 96, 82, 97, 113, 117, 107, 105, 121, 111, 101, 84, 99, 115, &
+                                                 119, 109, 108, 118, 114, 98, 83, 100, 110, 120, 104, 106, 116 /) 
+
    CONTAINS
 
 
@@ -261,6 +264,10 @@ MODULE PotentialModule
             Velocities(nCarbon) = GaussianRandomNr( RandomNr ) * SigmaCarbonVelocity 
          END DO
 !         Velocities(4) = 0.0      ! TO FIX EVEN C1 ATOM
+
+!          DO nCarbon = 1, Size( EdgeCarbons ) 
+!             Velocities(EdgeCarbons(nCarbon)+3) = 0.0
+!          END DO
 
       END SUBROUTINE ThermalEquilibriumConditions
 
@@ -2059,6 +2066,10 @@ MODULE PotentialModule
 
          ! Transform forces in atomic units (from eV Ang^-1 to Hartree Bohr^-1) 
          Forces(:) = Forces(:) * MyConsts_Bohr2Ang / MyConsts_Hartree2eV
+
+!          DO nn = 1, Size( EdgeCarbons ) 
+!             Forces(EdgeCarbons(nn)+3) = 0.0
+!          END DO
 
       END FUNCTION VHSticking
       

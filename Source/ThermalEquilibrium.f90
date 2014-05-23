@@ -140,7 +140,6 @@ MODULE ThermalEquilibrium
       CALL SetFieldFromInput( InputData, "NrEquilibrSteps", NrEquilibSteps, int(10.0*(1.0/EquilGamma)/EquilTStep) )
       EquilibrationStepInterval = CEILING( real(NrEquilibSteps) / real(NrOfPrintSteps) )
 
-
       WRITE(*, 905) Temperature*TemperatureConversion(InternalUnits,InputUnits), TemperUnit(InputUnits), &
                     EquilTStep*TimeConversion(InternalUnits,InputUnits), TimeUnit(InputUnits), &
                     1./EquilGamma*TimeConversion(InternalUnits,InputUnits), TimeUnit(InputUnits), &
@@ -205,6 +204,9 @@ MODULE ThermalEquilibrium
       IF ( BathType == SLAB_POTENTIAL .AND. DynamicsGamma /= 0.0 ) THEN 
          LangevinSwitchOn = .TRUE.
          LangevinSwitchOn( 1: MIN( 73, NCarbon )+3 ) = .FALSE.
+         DO iCoord = 1, size(EdgeCarbons)
+            LangevinSwitchOn( EdgeCarbons(iCoord)+3 ) = .FALSE.
+         END DO
          CALL SetupThermostat( MolecularDynamics, DynamicsGamma, Temperature, LangevinSwitchOn )
       END IF
 
@@ -230,6 +232,9 @@ MODULE ThermalEquilibrium
       ! Set variables for EOM integration with Langevin thermostat, during initial equilibration
       CALL EvolutionSetup( Equilibration, NDim, MassVector, EquilTStep )
       LangevinSwitchOn = (/ (.FALSE., iCoord=1,3), (.TRUE., iCoord=4,NDim ) /)
+      DO iCoord = 1, size(EdgeCarbons)
+         LangevinSwitchOn( EdgeCarbons(iCoord)+3 ) = .FALSE.
+      END DO
       CALL SetupThermostat( Equilibration, EquilGamma, Temperature, LangevinSwitchOn )
 
       DEALLOCATE( LangevinSwitchOn )
@@ -700,6 +705,7 @@ MODULE ThermalEquilibrium
       REAL, DIMENSION(:), TARGET, INTENT(IN)  :: Positions
       REAL, DIMENSION(:), TARGET, INTENT(OUT) :: Forces
       INTEGER :: NrDOF, i       
+      REAL, DIMENSION(4) :: tmpForces1, tmpForces2
 
       ! Check the number degrees of freedom
       NrDOF = size( Positions )
@@ -710,13 +716,17 @@ MODULE ThermalEquilibrium
       ThermalEquilibriumPotential = 0.0
       Forces(:)                   = 0.0
 
+      tmpForces1 = 0.0
+      tmpForces2 = 0.0
+
       IF ( BathType == SLAB_POTENTIAL ) THEN 
          ! Compute potential using the potential subroutine
          ThermalEquilibriumPotential = VHSticking( Positions, Forces )
          IF ( ModelHarmonic ) THEN    ! In case, remove anharmonic terms
-            ThermalEquilibriumPotential = ThermalEquilibriumPotential - VHFourDimensional( Positions(1:4), Forces(1:4) )
-            Forces(1:4) = 0.0
-            ThermalEquilibriumPotential = ThermalEquilibriumPotential + ModelFourDimensionalPotential( Positions(1:4), Forces(1:4))
+            ThermalEquilibriumPotential = ThermalEquilibriumPotential - VHFourDimensional( Positions(1:4), tmpForces1 )
+            ThermalEquilibriumPotential = ThermalEquilibriumPotential + ModelFourDimensionalPotential( Positions(1:4), tmpForces2 )
+            Forces(1:3) = tmpForces2(1:3)
+            Forces(4) = Forces(4) + ( tmpForces2(4) - tmpForces1(4) )
          END IF
 
       ELSE IF ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN

@@ -54,6 +54,13 @@ MODULE VibrationalRelax
    REAL    :: TimeBetweenSnaps          !< Nr of initial snapshots to randomize initial conditions
    INTEGER :: NrOfInitSnapshots         !< Time between each initial snapshot
 
+   ! Initial equilibration
+   REAL    :: Temperature               !< Temperature of the simulation
+   REAL    :: EquilTStep                !< Time step for integrating equilibration dynamics
+   REAL    :: EquilGamma                !< Friction parameter of the Langevin equation
+   INTEGER :: NrEquilibSteps            !< Nr of time step of the equilibration
+   INTEGER :: EquilibrationStepInterval !< Nr of time steps between each printing of equilibration info ( = NrEquilibSteps / NrOfPrintSteps )
+
    ! Variables of the propagation
    INTEGER :: NrTrajs                   !< Nr of trajectories
    INTEGER :: NrOfSteps                 !< Total nr of time step per trajectory
@@ -64,6 +71,7 @@ MODULE VibrationalRelax
    ! Time evolution dataset
    TYPE(Evolution),SAVE :: MolecularDynamics     !< Propagate in micro/macrocanonical ensamble to extract results
    TYPE(Evolution),SAVE :: InitialConditions     !< Propagate in microcanonical ensamble to generate initial conditions
+   TYPE(Evolution),SAVE :: Equilibration         !< Propagate in macrocanonical ensamble at given T to generate init conditions
 
    ! Averages computed during propagation
    REAL, DIMENSION(:), ALLOCATABLE      :: AverageEBath       !< Average energy of the bath vs time
@@ -133,6 +141,28 @@ MODULE VibrationalRelax
       CALL SetFieldFromInput( InputData, "NrOfPrintSteps", NrOfPrintSteps )
       ! Accordingly set the interval between each printing step
       PrintStepInterval = NrOfSteps / NrOfPrintSteps
+
+      IF ( BathType ==  SLAB_POTENTIAL ) THEN
+
+      ! READ THE VARIABLES TO SET THE INITIAL CONDITIONS OF THE SYSTEM
+
+         ! Temperature of the equilibrium simulation
+         CALL SetFieldFromInput( InputData, "Temperature", Temperature )
+         Temperature = Temperature * TemperatureConversion(InputUnits, InternalUnits)
+
+         ! Set gamma of the equilibration Langevin dynamics
+         CALL SetFieldFromInput( InputData, "EquilRelaxTime", EquilGamma)
+         EquilGamma = 1. / ( EquilGamma * TimeConversion(InputUnits, InternalUnits) )
+
+         ! Set the time step of the equilibration
+         CALL SetFieldFromInput( InputData, "EquilTStep",  EquilTStep, TimeStep/MyConsts_fs2AU )
+         EquilTStep = EquilTStep * TimeConversion(InputUnits, InternalUnits)
+
+         ! Set nr of steps of the equilibration
+         CALL SetFieldFromInput( InputData, "NrEquilibrSteps", NrEquilibSteps, int(10.0*(1.0/EquilGamma)/EquilTStep) )
+         EquilibrationStepInterval = CEILING( real(NrEquilibSteps) / real(NrOfPrintSteps) )
+
+      END IF
 
       WRITE(*, 903) InitEnergy*EnergyConversion(InternalUnits,InputUnits), EnergyUnit(InputUnits),                 &
                     (InitEnergy-MinimumEnergy)*EnergyConversion(InternalUnits,InputUnits), EnergyUnit(InputUnits), &
@@ -219,6 +249,13 @@ MODULE VibrationalRelax
 
       ! Set variables for EOM integration of the 4D system only in the microcanonical ensamble 
       CALL EvolutionSetup( InitialConditions, 4, MassVector(1:4), TimeStep )
+      
+      IF ( BathType ==  SLAB_POTENTIAL ) THEN
+         ! Set variables for EOM integration with Langevin thermostat, during initial equilibration
+         CALL EvolutionSetup( Equilibration, NDim, MassVector, EquilTStep )
+         LangevinSwitchOn = (/ (.FALSE., iCoord=1,3), (.TRUE., iCoord=4,NDim ) /)
+         CALL SetupThermostat( Equilibration, EquilGamma, Temperature, LangevinSwitchOn )
+      END IF
 
       DEALLOCATE( LangevinSwitchOn )
 
@@ -273,24 +310,26 @@ MODULE VibrationalRelax
    SUBROUTINE VibrationalRelax_Run()
       IMPLICIT NONE
       INTEGER  ::  AvEnergyOutputUnit, AvCoordOutputUnit       ! UNITs FOR OUTPUT AND DEBUG
-      INTEGER  ::  AvBathCoordUnit, OscillCorrUnit, InitialCondUnit
+      INTEGER  ::  AvBathCoordUnit, OscillCorrUnit, InitialCondUnit, NormalModesUnit
       INTEGER  ::  DebugUnitEn, DebugUnitCoord, DebugUnitVel
       REAL     ::  VSys, KSys, Ecoup, VBath, KBath               ! ISTANTANEOUS ENERGY VALUES
       REAL     ::  TotEnergy, PotEnergy, KinEnergy, IstTemperature
+      REAL     ::  TempAverage, TempVariance
       INTEGER  ::  NTimeStepEachSnap, iCoord, iTraj, iStep,  iOmega, kStep, NInit
       CHARACTER(100) :: OutFileName
       REAL, DIMENSION(NrOfInitSnapshots,8) :: CHInitConditions
       REAL, DIMENSION(:), ALLOCATABLE      :: AverCoordOverTime
+      REAL, DIMENSION(4) :: NormalModes
 
       AvEnergyOutputUnit = LookForFreeUnit()
       OPEN( FILE="AverageEnergy.dat", UNIT=AvEnergyOutputUnit )
       WRITE(AvEnergyOutputUnit, "(A,I6,A,/)") "# average energy vs time (fs | eV) - ", NrTrajs, " trajectories "
 
-      AvCoordOutputUnit = LookForFreeUnit()
-      OPEN( FILE="AverageCoords.dat", UNIT=AvCoordOutputUnit )
-      WRITE(AvCoordOutputUnit, "(A,I6,A,/)") "# average coordinate vs time (fs | Ang) - ", NrTrajs, " trajectories "
-
       IF ( PrintType >= FULL ) THEN
+         AvCoordOutputUnit = LookForFreeUnit()
+         OPEN( FILE="AverageCoords.dat", UNIT=AvCoordOutputUnit )
+         WRITE(AvCoordOutputUnit, "(A,I6,A,/)") "# average coordinate vs time (fs | Ang) - ", NrTrajs, " trajectories "
+
          AvBathCoordUnit = LookForFreeUnit()
          OPEN( FILE="AverageBathCoords.dat", UNIT=AvBathCoordUnit )
          WRITE(AvBathCoordUnit, "(A,I6,A,/)") "# average Q coordinate vs time (Ang | fs) - ", NrTrajs, " trajectories "
@@ -306,6 +345,10 @@ MODULE VibrationalRelax
          InitialCondUnit = LookForFreeUnit()
          OPEN( FILE="InitialConditionsCH.dat", UNIT=InitialCondUnit )
          WRITE(InitialCondUnit, "(A,I6,A,/)") "# Initial Conditions of the system: X_H, Y_H, Z_H, Z_C and velocities (au)"
+
+         NormalModesUnit = LookForFreeUnit()
+         OPEN( FILE="NormalModesSystem.dat", UNIT=NormalModesUnit )
+         WRITE(NormalModesUnit, "(A,I6,A,/)") "# normal modes of the system vs time: Q1, Q2, Q3 and Q4 (au)"
       ENDIF
 
       PRINT "(2/,A)",    "***************************************************"
@@ -351,6 +394,7 @@ MODULE VibrationalRelax
             ! compute kinetic energy and total energy
             KinEnergy = EOM_KineticEnergy(InitialConditions, V(1:4) )
             TotEnergy = PotEnergy + KinEnergy
+
          END DO
 
          ! Store snapshot
@@ -395,6 +439,50 @@ MODULE VibrationalRelax
                X(1:4) = CHInitConditions( NInit, 1:4 )
                V(1:4) = CHInitConditions( NInit, 5:8 )
          END IF
+
+         IF ( BathType == SLAB_POTENTIAL ) THEN 
+
+            PRINT "(/,A,F6.1)"," Equilibrating the initial conditions at T = ", Temperature / MyConsts_K2AU
+
+            ! Initialize temperature average and variance
+            TempAverage = 0.0
+            TempVariance = 0.0
+
+            ! Compute starting potential and forces
+            A(:) = 0.0
+            PotEnergy = VibrRelaxPotential( X, A )
+            A(:) = A(:) / MassVector(:)
+
+            ! compute kinetic energy and total energy
+            KinEnergy = EOM_KineticEnergy(Equilibration, V )
+            TotEnergy = PotEnergy + KinEnergy
+            IstTemperature = 2.0*KinEnergy/(MyConsts_K2AU*size(X))
+
+            ! Do an equilibration run
+            EquilibrationCycle: DO iStep = 1, NrEquilibSteps
+
+               ! PROPAGATION for ONE TIME STEP
+               CALL EOM_LangevinSecondOrder( Equilibration, X, V, A, VibrRelaxPotential, PotEnergy, RandomNr )
+
+               ! compute kinetic energy and total energy
+               KinEnergy = EOM_KineticEnergy(Equilibration, V )
+               TotEnergy = PotEnergy + KinEnergy
+               IstTemperature = 2.0*KinEnergy/(MyConsts_K2AU*size(X))
+
+               ! store temperature average and variance
+               TempAverage = TempAverage + IstTemperature
+               TempVariance = TempVariance + IstTemperature**2
+
+            END DO EquilibrationCycle
+
+            PRINT "(A)", " Equilibration completed! "
+
+            X(3:NDim) = X(3:NDim)  - (X(5)+X(6)+X(7))/3.0
+            NInit = CEILING( UniformRandomNr(RandomNr)*real(NrOfInitSnapshots) )
+            X(1:4) = CHInitConditions( NInit, 1:4 )
+            V(1:4) = CHInitConditions( NInit, 5:8 )
+
+         END IF 
 
          !*************************************************************
          ! INFORMATION ON INITIAL CONDITIONS, INITIALIZATION, OTHER...
@@ -465,11 +553,18 @@ MODULE VibrationalRelax
             A(iCoord) = A(iCoord) / MassVector(iCoord)
          END DO
 
+         WRITE(883,*)
+
          ! cycle over nstep velocity verlet iterations
          DO iStep = 1,NrOfSteps
 
             ! Propagate for one timestep
             CALL EOM_LangevinSecondOrder( MolecularDynamics, X, V, A, VibrRelaxPotential, PotEnergy, RandomNr )
+
+            ! for atomistic model of the bath, move the slab so that C2-C3-C4 plane has z=0
+            IF ( BathType == SLAB_POTENTIAL ) THEN 
+               X(3:NDim) = X(3:NDim)  - (X(5)+X(6)+X(7))/3.0
+            ENDIF
 
             ! output to write every nprint steps 
             IF ( mod(iStep,PrintStepInterval) == 0 ) THEN
@@ -477,11 +572,6 @@ MODULE VibrationalRelax
                ! increment counter for printing steps
                kStep = kStep+1
                IF ( kStep > NrOfPrintSteps ) CYCLE 
-
-               ! for atomistic model of the bath, move the slab so that C2-C3-C4 plane has z=0
-               IF ( BathType == SLAB_POTENTIAL ) THEN 
-                  X(3:NDim) = X(3:NDim)  - (X(5)+X(6)+X(7))/3.0
-               ENDIF
 
                ! Energy of the system
                CALL IstantaneousEnergies( PotEnergy, KSys, VSys, Ecoup, VBath, KBath, iTraj, iStep )
@@ -500,6 +590,17 @@ MODULE VibrationalRelax
                      OscillCorrelations(iCoord, kStep) = OscillCorrelations(iCoord, kStep) + X(4) * X(4+iCoord) 
                   END DO
                END IF
+
+               ! If massive level of output, print information on normal modes
+               IF ( PrintType == DEBUG ) THEN
+                  IF ( kStep == 1 ) WRITE(NormalModesUnit,*) " "
+                  NormalModes(1:4) = X(1:4)
+                  NormalModes(3) = NormalModes(3) - HZEquilibrium
+                  NormalModes(4) = NormalModes(4) - C1Puckering
+                  NormalModes(:) = NormalModes(:) * SQRT(MassVector(1:4))
+                  NormalModes = TheOneWithMatrixVectorProduct( NormalModes4D_Vecs, NormalModes )
+                  WRITE(NormalModesUnit,"(10F15.6)") TimeStep*real(iStep)/MyConsts_fs2AU, NormalModes(1:4)
+               END IF 
 
                ! If massive level of output, print traj information to std out
                IF ( PrintType == DEBUG ) THEN
@@ -579,8 +680,8 @@ MODULE VibrationalRelax
 
       ! Close output files
       CLOSE( AvEnergyOutputUnit )
-      CLOSE( AvCoordOutputUnit )
       IF ( PrintType >= FULL ) THEN
+         CLOSE( AvCoordOutputUnit )
          CLOSE( AvBathCoordUnit )
       END IF
       IF ( PrintType >= FULL .AND. BathType == CHAIN_BATH ) THEN
@@ -691,7 +792,7 @@ MODULE VibrationalRelax
       IMPLICIT NONE
       REAL, INTENT(IN)  :: PotEnergy
       REAL, INTENT(OUT) :: KSys, VSys, Ecoup, VBath, KBath
-      REAL, DIMENSION(4) :: Dummy
+      REAL, DIMENSION(4) :: Dummy, TraslCoord
       INTEGER :: iTraj, iStep
       REAL :: KinEnergy, VBath1, VBath2, ECoup1, ECoup2
 
@@ -700,7 +801,13 @@ MODULE VibrationalRelax
 
       ! Energy of the system
       KSys = EOM_KineticEnergy( InitialConditions, V(1:4) )
-      VSys = VHFourDimensional( X(1:4), Dummy )
+      IF ( BathType == SLAB_POTENTIAL ) THEN 
+         TraslCoord(1:2) = X(1:2)
+         TraslCoord(3:4) = X(3:4) - (X(5)+X(6)+X(7))/3.0
+         VSys = VHFourDimensional( TraslCoord(1:4), Dummy )
+      ELSE
+         VSys = VHFourDimensional( X(1:4), Dummy )
+      END IF
 
       ! Coupling energy and energy of the bath
       IF ( BathType == SLAB_POTENTIAL ) THEN 

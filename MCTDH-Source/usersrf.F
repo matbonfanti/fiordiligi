@@ -58,6 +58,8 @@ C        hopilab=2
         hopilab=2
        else if (label(1:ll) .eq. 'vhcollinear') then
         hopilab=3
+       else if (label(1:ll) .eq. 'vhcartesian') then
+        hopilab=4
 
 C-----------------------------------------------------------------------
 C end of if loop
@@ -96,7 +98,7 @@ C##########################################################################
       integer ifunc,ndof1,hopipar(*)
       real*8  gpoint(ndof1),hoprpar(*)
       real*8  v, r1, r2, theta, phi
-      real*8  rho, zc, zh
+      real*8  rho, zc, zh, xh, yh
 
 C Decide which surface to call, accroding to ifunc
 
@@ -118,6 +120,12 @@ C ----   add the code for calling another surface here.
            call vhsticking( rho, 0.0d0, zh, zc, v )
         else if(ifunc .eq. 3) then
            call vhsticking( 0.d0, 0.d0, gpoint(1),gpoint(2) ,v)
+        else if(ifunc .eq. 4) then
+           zh  = gpoint(1)
+           zc  = gpoint(2)
+           xh = gpoint(3)
+           yh = gpoint(4)
+           call vhsticking( xh, yh, zh, zc, v )
 
       else
          routine='uvpoint (opfuncs/usersrf.F)'
@@ -175,6 +183,15 @@ C        jj=3   ! This is dimension+1
         write(ilog,'(2a)') '1. zH  : ',mlabel(1)
         write(ilog,'(2a)') '2. zC  : ',mlabel(2)
         jj=3   ! This is dimension+1
+
+       else if (hopilab .eq. 4) then
+        write(ilog,'(a)')
+     + 'VHCARTESIAN (Jackson PES for Gr-H sticking, 3D).'
+        write(ilog,'(2a)') '1. zH  : ',mlabel(1)
+        write(ilog,'(2a)') '2. zC  : ',mlabel(2)
+        write(ilog,'(2a)') '3. xH  : ',mlabel(3)
+        write(ilog,'(2a)') '4. yH  : ',mlabel(4)
+        jj=5   ! This is dimension+1
 
       else
          routine='usersurfinfo (opfuncs/usersrf.F)'
