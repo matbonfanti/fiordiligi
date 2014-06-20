@@ -324,7 +324,7 @@ CONTAINS
 #if defined(VERBOSE_OUTPUT)
       SpectralDensityUnit = LookForFreeUnit()
       OPEN( FILE="ReadSpectralDensity.dat", UNIT=SpectralDensityUnit )
-      WRITE(SpectralDensityUnit, "(A,1F15.6)") "# Ohmic Spectral Density with mass*gamma = ", OhmicGamma
+      WRITE(SpectralDensityUnit, "(A,1F15.6)") "# Ohmic Spectral Density with mass*gamma = ", SysMassTimeGamma
 
       IF ( Bath%BathType == CHAIN_BATH ) THEN
          WRITE(SpectralDensityUnit, "(A,/)") "# Bath in linear chain form "

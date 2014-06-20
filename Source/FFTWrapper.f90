@@ -116,8 +116,8 @@ MODULE FFTWrapper
       CALL C_F_POINTER( PlanData%WorkIn, PlanData%In, [ PlanData%NData ] )
       CALL C_F_POINTER( PlanData%WorkOut, PlanData%Out, [ PlanData%NData ] )
 
-      PlanData%DirectPlan  = FFTW_PLAN_DFT_1D( N, PlanData%In, PlanData%Out, FFTW_FORWARD, FFTW_ESTIMATE)
-      PlanData%InversePlan = FFTW_PLAN_DFT_1D( N, PlanData%In, PlanData%Out, FFTW_BACKWARD, FFTW_ESTIMATE)
+      PlanData%DirectPlan  = FFTW_PLAN_DFT_1D( N, PlanData%In, PlanData%Out, FFTW_FORWARD, FFTW_MEASURE )
+      PlanData%InversePlan = FFTW_PLAN_DFT_1D( N, PlanData%In, PlanData%Out, FFTW_BACKWARD, FFTW_MEASURE )
 #endif
 #if defined(WITH_DFT_MATRIX)
       ALLOCATE( PlanData%DirectDFT( PlanData%NData, PlanData%NData ), PlanData%InverseDFT( PlanData%NData, PlanData%NData ) )
@@ -152,8 +152,8 @@ MODULE FFTWrapper
       CALL C_F_POINTER( PlanData%WorkIn, PlanData%In, [ PlanData%NData ] )
       CALL C_F_POINTER( PlanData%WorkOut, PlanData%Out, [ PlanData%NData ] )
 
-      PlanData%DirectPlan  = FFTW_PLAN_R2R_1D ( N, PlanData%In, PlanData%Out, FFTW_R2HC, FFTW_ESTIMATE)
-      PlanData%InversePlan = FFTW_PLAN_R2R_1D ( N, PlanData%In, PlanData%Out, FFTW_HC2R, FFTW_ESTIMATE)
+      PlanData%DirectPlan  = FFTW_PLAN_R2R_1D ( N, PlanData%In, PlanData%Out, FFTW_R2HC, FFTW_MEASURE )
+      PlanData%InversePlan = FFTW_PLAN_R2R_1D ( N, PlanData%In, PlanData%Out, FFTW_HC2R, FFTW_MEASURE )
 
       ALLOCATE( PlanData%NormalizationDir( N ), PlanData%NormalizationInv( N ) )
       DO i = 0, N-1

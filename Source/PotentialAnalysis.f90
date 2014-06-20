@@ -372,7 +372,10 @@ MODULE PotentialAnalysis
 
          ! Compute eigenvectors and eigevalues of the hessian
          ALLOCATE( EigenFreq(NDim), EigenModes(NDim,NDim) )
-         CALL TheOneWithDiagonalization( HessianSysAndSlab, EigenModes, EigenFreq )
+         EigenFreq = 0.0
+         EigenModes = 0.0
+         CALL TheOneWithDiagonalization( HessianSysAndSlab(5:NDim,5:NDim), EigenModes(5:NDim,5:NDim), EigenFreq(5:NDim) )
+!          CALL TheOneWithDiagonalization( HessianSysAndSlab, EigenModes, EigenFreq )
 
          ! Count positive frequencies
          NrOfModes = 0
@@ -392,18 +395,18 @@ MODULE PotentialAnalysis
          SystemCoord(4) = 1.0
 
          ! Trasform normal mode definition to non mass scaled coordinate
-         DO iEigen = 1, size(EigenFreq)
-            Norm = 0.0
-            DO i = 1, 3 
-               EigenModes(i,iEigen) = EigenModes(i,iEigen) * SQRT(MassH)
-               Norm = Norm + EigenModes(i,iEigen)**2
-            END DO
-            DO i = 4, size(EigenFreq)
-               EigenModes(i,iEigen) = EigenModes(i,iEigen) * SQRT(MassC)
-               Norm = Norm + EigenModes(i,iEigen)**2
-            END DO
-            EigenModes(:,iEigen) = EigenModes(:,iEigen) / SQRT(Norm)
-         END DO
+!          DO iEigen = 1, size(EigenFreq)
+!             Norm = 0.0
+!             DO i = 1, 3 
+!                EigenModes(i,iEigen) = EigenModes(i,iEigen) * SQRT(MassH)
+!                Norm = Norm + EigenModes(i,iEigen)**2
+!             END DO
+!             DO i = 4, size(EigenFreq)
+!                EigenModes(i,iEigen) = EigenModes(i,iEigen) * SQRT(MassC)
+!                Norm = Norm + EigenModes(i,iEigen)**2
+!             END DO
+!             IF ( Norm > 1.E-12 )  EigenModes(:,iEigen) = EigenModes(:,iEigen) / SQRT(Norm)
+!          END DO
          PRINT "(A)", " Data is written for peaks with I > 1.E-12 "
 
          PRINT "(/,A,A,A)","  # mode   |  frequency (",TRIM(FreqUnit(InputUnits)),") |   intensity (au) "
@@ -415,7 +418,7 @@ MODULE PotentialAnalysis
                OmegaK(i) = SQRT( EigenFreq(iEigen) )
                CoeffK(i) = DirectionalSecondDerivative( XMin, SystemCoord, EigenModes(:,iEigen) )
                IntensityK(i) = MyConsts_PI / 2.0  * CoeffK(i)**2 / OmegaK(i) / MassC
-               IF ( IntensityK(i) > 1.E-12 )  &
+!                IF ( IntensityK(i) > 1.E-12 )  &
                            WRITE(*,"(I6,1F18.2,1E25.8)") i, OmegaK(i)*FreqConversion(InternalUnits,InputUnits), IntensityK(i)
                D0 = D0 + IntensityK(i)
             END IF

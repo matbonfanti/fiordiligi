@@ -291,7 +291,7 @@ MODULE ThermalEquilibrium
 !*******************************************************************************
    SUBROUTINE ThermalEquilibrium_Run()
       IMPLICIT NONE
-      INTEGER :: ZHRealizationsUnit, TEquilUnit
+      INTEGER :: ZHRealizationsUnit, VZHRealizationsUnit, TEquilUnit
       INTEGER :: ZHSpectralDensUnit, CHSpectralDensUnit, FullSpectralDensUnit
       INTEGER :: DebugUnitEn, DebugUnitCoord, DebugUnitVel, DebugUnitEquil
       INTEGER :: iTraj, iCoord, iStep, iOmega, kStep
@@ -302,6 +302,11 @@ MODULE ThermalEquilibrium
       ZHRealizationsUnit = LookForFreeUnit()
       OPEN( FILE="Trajectories_Zh.dat", UNIT=ZHRealizationsUnit )
       WRITE(ZHRealizationsUnit, "(A,I6,A,/)") "# ", NrTrajs, " realizations of zH equilibrium dynamics (fs | Angstrom)"
+
+      ! Open output file to print the brownian realizations of V_ZH vs time
+      VZHRealizationsUnit = LookForFreeUnit()
+      OPEN( FILE="Trajectories_VZh.dat", UNIT=VZHRealizationsUnit )
+      WRITE(VZHRealizationsUnit, "(A,I6,A,/)") "# ", NrTrajs, " realizations of V_zH equilibrium dynamics (fs | Angstrom/fs)"
 
       IF ( PrintType >= FULL ) THEN
          ! Open output file to print the spectral density of the ZH autocorrelation function
@@ -460,6 +465,7 @@ MODULE ThermalEquilibrium
 
          ! Write the ZH coordinate in output file
          WRITE(ZHRealizationsUnit,"(F20.8,F20.8)") 0.0, ( X(3) - HZEquilibrium )*MyConsts_Bohr2Ang
+         WRITE(VZHRealizationsUnit,"(F20.8,F20.8)") 0.0, V(3)*MyConsts_Bohr2Ang*MyConsts_fs2AU
 
          IF ( PrintType >= FULL ) THEN
             ! store initial coordinate of the trajectory 
@@ -537,6 +543,8 @@ MODULE ThermalEquilibrium
                ! Write the ZH coordinate in output file
                WRITE(ZHRealizationsUnit,"(F20.8,F20.8)") TimeStep*real(iStep)/MyConsts_fs2AU, &
                                                                 (X(3) - HZEquilibrium) *MyConsts_Bohr2Ang
+               WRITE(VZHRealizationsUnit,"(F20.8,F20.8)") TimeStep*real(iStep)/MyConsts_fs2AU, &
+                                                                 V(3)*MyConsts_Bohr2Ang*MyConsts_fs2AU
 
                ! autocorrelation functions are computed only for a full output
                IF ( PrintType >= FULL ) THEN
@@ -576,6 +584,7 @@ MODULE ThermalEquilibrium
 
          ! Add while line to the realizations output to separate each traj
          WRITE(ZHRealizationsUnit,*)  " "
+         WRITE(VZHRealizationsUnit,*)  " "
 
          PRINT "(A)", " Time propagation completed! "
 

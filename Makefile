@@ -16,7 +16,7 @@ LOGNAME = jk6_v3.log
 FC = ifort    
 
 # Debugging options ( yes or no )
-DEBUG =  no 
+DEBUG =  no  
 
 # Optimization level
 OPTLEVEL = 3
@@ -28,7 +28,7 @@ FFTW3 = yes
 OPENMP = no 
 
 # linking LAPACK and BLAS 
-LAPACK = no 
+LAPACK = yes
 
 # Compile with standard real 8 (see details about the flags for each compiler...)
 REAL8 = yes
@@ -308,7 +308,8 @@ EXEDIR  = Executables
 
 # Define list of object from the list of all f90 files in the directory
 OBJSWITHMAIN =$(patsubst Source/%,Objects/%,$(patsubst %.f90,%.o,$(wildcard ${SRCDIR}/*.f90)))
-OBJS2 =$(patsubst %/Main.o,,${OBJSWITHMAIN})
+OBJS3 =$(patsubst %/Main.o,,${OBJSWITHMAIN})
+OBJS2 =$(patsubst %/NewWiener.o,,${OBJS3})
 OBJS =$(patsubst %/Main_v3.o,,${OBJS2})
 
 #----------------------------------------------------------------------------
@@ -344,6 +345,13 @@ JK6_v2 : ${SRCDIR}/Main.f90 ${OBJS}
 	${COMPILE} ${PPDIR}/Main.f90 
 	${LINK} ${EXEDIR}/$@ Main.o $(OBJS) ${LIBFLG}
 	rm Main.o
+
+# Link objects to produce NewWiener executable file ( NewWiener )
+NewWiener : ${SRCDIR}/NewWiener.f90 ${OBJS}
+	${PREPROCESS} ${SRCDIR}/NewWiener.f90 ${PPDIR}/NewWiener.f90
+	${COMPILE} ${PPDIR}/NewWiener.f90 
+	${LINK} ${EXEDIR}/$@ NewWiener.o $(OBJS) ${LIBFLG}
+	rm NewWiener.o
 
 # Make target to build all the object files and assemble them
 all : ${OBJS}
