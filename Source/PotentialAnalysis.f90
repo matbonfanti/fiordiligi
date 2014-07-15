@@ -25,6 +25,7 @@ MODULE PotentialAnalysis
    USE PotentialModule
    USE IndependentOscillatorsModel
    USE DIfferenceDerivatives
+   USE PrintTools
 
    IMPLICIT NONE
 
@@ -45,6 +46,12 @@ MODULE PotentialAnalysis
    REAL :: GridSpacing          !< Spacing of the grid to plot the potential
    INTEGER :: NGridPoint        !< Nr of points around the equilibrium value
 
+   !> Parameters to plot 2D potential
+   REAL, DIMENSION(:), ALLOCATABLE :: PotentialArray        !< array to store 2D potential
+   REAL, DIMENSION(:), ALLOCATABLE :: ZCArray, ZHArray      !< array with coordinates grid
+   REAL :: ZHmin, ZHmax, ZCmin, ZCmax                       !< boundaries of the grid
+   INTEGER :: NpointZH, NpointZC                            !< nr of points of the grid
+   TYPE(VTKInfo) :: PotentialCH
 
    CONTAINS
 
@@ -72,6 +79,15 @@ MODULE PotentialAnalysis
 
       CALL SetFieldFromInput( InputData, "PlotSpectrum_GridSpacing", GridSpacing )
       GridSpacing = GridSpacing * LengthConversion(InputUnits, InternalUnits)
+
+      CALL SetFieldFromInput( InputData, "PlotSpectrum_ZHmin", ZHmin )
+      ZHmin = ZHmin * LengthConversion(InputUnits, InternalUnits)
+      CALL SetFieldFromInput( InputData, "PlotSpectrum_ZHmax", ZHmax )
+      ZHmax = ZHmax * LengthConversion(InputUnits, InternalUnits)
+      CALL SetFieldFromInput( InputData, "PlotSpectrum_ZCmin", ZCmin )
+      ZCmin = ZCmin * LengthConversion(InputUnits, InternalUnits)
+      CALL SetFieldFromInput( InputData, "PlotSpectrum_ZCmax", ZCmax )
+      ZCmax = ZCmax * LengthConversion(InputUnits, InternalUnits)
 
    END SUBROUTINE PotentialAnalysis_ReadInput
 
@@ -138,7 +154,7 @@ MODULE PotentialAnalysis
       REAL :: Frequency, Spectrum, D0
 
       INTEGER :: iFreq, iEigen
-      INTEGER :: i, j
+      INTEGER :: i, j, nPoint
 
       AsyPhononSpectrumUnit = LookForFreeUnit()
       OPEN( FILE="AsymptoticPhononSpectrum.dat", UNIT=AsyPhononSpectrumUnit )
@@ -501,6 +517,55 @@ MODULE PotentialAnalysis
 
       END IF
 
+      ! ===================================================================================================
+      ! (8) 2D pes in VTK format
+      ! ===================================================================================================
+
+      ! Set grid dimensions
+      NpointZH = INT((ZHmax-ZHmin)/GridSpacing) + 1
+      NpointZC = INT((ZCmax-ZCmin)/GridSpacing) + 1
+
+      ! Allocate temporary array to store potential data and coord grids
+      ALLOCATE( PotentialArray( NpointZH * NpointZC ), ZCArray( NpointZC ), ZHArray( NpointZH ) )
+    
+      ! Define coordinate grids
+      ZCArray = (/ ( ZCmin + GridSpacing*(i-1), i=1,NpointZC) /)
+      ZHArray = (/ ( ZHmin + GridSpacing*(j-1), j=1,NpointZH) /)
+
+      ! fix other coordinates 
+      X(1:2) = 0.0
+      IF ( BathType ==  SLAB_POTENTIAL ) THEN
+         X(5:NDim) = MinSlab(1:NBath)
+      ELSE IF ( BathType ==  NORMAL_BATH .OR. BathType == CHAIN_BATH .OR. BathType ==  DOUBLE_CHAIN ) THEN
+         X(5:NDim) = 0.0
+      ELSE IF ( BathType == LANGEVIN_DYN ) THEN
+         ! nothing to set
+      END IF
+
+      nPoint = 0
+      ! Cycle over the ZC coordinate values
+      DO i = 1, NpointZC
+         ! Cycle over the ZH coordinate values
+         DO j = 1, NpointZH
+            nPoint = nPoint + 1
+            ! Set collinear H and other Cs in ideal geometry
+            X(4) = ZCArray(i)
+            X(3) = ZHArray(j)
+            ! Compute potential at optimized geometry
+            PotentialArray(nPoint) = VibrRelaxPotential( X, A )
+         END DO
+      END DO
+
+      ! Print the potential to vtk file
+      CALL VTK_NewRectilinearSnapshot ( PotentialCH, X=ZHArray*MyConsts_Bohr2Ang,  & 
+                                Y=ZCArray*MyConsts_Bohr2Ang, FileName="GraphiteHSticking" )
+      CALL VTK_AddScalarField (PotentialCH, Name="CHPotential", Field=PotentialArray*MyConsts_Hartree2eV )
+
+      WRITE(*,"(/,A)") " * PES as a func of ZC and ZH with reference graphite geom written as VTR to file GraphiteHSticking.vtr"
+
+      ! Deallocate memory
+      DEALLOCATE( PotentialArray, ZHArray, ZCArray )
+
       CLOSE(MinPhononSpectrumUnit)
       CLOSE(AsyPhononSpectrumUnit)
       CLOSE(CartesianCutsUnit)
@@ -534,89 +599,6 @@ MODULE PotentialAnalysis
       505 FORMAT (/, " Mass-scaled Hessian of the system potential in the minimum (",A," ^2)",/, &
                      4E20.8,/,4E20.8,/,4E20.8,/,4E20.8,/ )
 
-
-! !***************************************************************************************************
-! !                       PRINT POTENTIAL CUTS
-! !***************************************************************************************************
-! 
-!    SUBROUTINE PotentialCuts()
-!       IMPLICIT NONE
-! 
-!       ! Allocate temporary array to store potential data and coord grids
-!       ALLOCATE( PotentialArray( NpointZH * NpointZC ), ZCArray( NpointZC ), ZHArray( NpointZH ) )
-!    
-!       ! Define grid spacings
-!       DeltaZH = (ZHmax-ZHmin)/(NpointZH-1)
-!       DeltaZC = (ZCmax-ZCmin)/(NpointZC-1)
-! 
-!       ! Define coordinate grids
-!       ZCArray = (/ ( ZCmin + DeltaZC*(iZC-1), iZC=1,NpointZC) /)
-!       ZHArray = (/ ( ZHmin + DeltaZH*(iZH-1), iZH=1,NpointZH) /)
-! 
-!       !*************************************************************
-!       ! PRINT H VIBRATIONAL CURVE FOR C FIXED IN PUCKERING GEOMETRY
-!       !*************************************************************
-! 
-!       ! Open output file to print the H vibrational curve with fixed carbons
-!       HCurveOutputUnit = LookForFreeUnit()
-!       OPEN( FILE="GraphiteHBindingCurve.dat", UNIT=HCurveOutputUnit )
-! 
-!       ! Set collinear H, C1 puckered and other Cs in ideal geometry
-!       X(:) = 0.0
-!       X(4) = MinimumZC
-! 
-!       ! Cycle over the ZH coordinate values
-!       DO iZH = 1, NpointZH
-!          ! Define the H Z coordinate
-!          X(3) = ZHArray(iZH)
-!          ! Compute potential
-!          PotEnergy = VHSticking( X, A )
-!          ! Print energy to dat file
-!          WRITE(HCurveOutputUnit,*) X(3)*MyConsts_Bohr2Ang, PotEnergy*MyConsts_Hartree2eV
-!       END DO
-!       CLOSE( HCurveOutputUnit )
-! 
-!       WRITE(*,"(/,A)") " * CH binding curve written to file GraphiteHBindingCurve.dat"
-! 
-!       !*************************************************************
-!       ! PRINT 2D C-H V WITH OTHERS CARBONS IN OPTIMIZED GEOMETRY
-!       !*************************************************************
-! 
-!       ! set optimization mask
-!       IF ( FreezeGraphene == 1 ) THEN
-!          OptimizationMask = (/ (.TRUE., iCoord=1,2), (.FALSE., iCoord=1,nevo+1) /)
-!       ELSE 
-!          OptimizationMask = (/ (.TRUE., iCoord=1,2), (.FALSE., iCoord=1,2), (.TRUE., iCoord=1,nevo-4) /)
-!       ENDIF
-! 
-!       nPoint = 0
-!       ! Cycle over the ZC coordinate values
-!       DO iZC = 1, NpointZC
-!          ! Cycle over the ZH coordinate values
-!          DO iZH = 1, NpointZH
-!             nPoint = nPoint + 1
-! 
-!             ! Set collinear H and other Cs in ideal geometry
-!             X(:) = 0.0
-!             X(4) = ZCArray(iZC)
-!             X(3) = ZHArray(iZH)
-! 
-!             ! Compute potential at optimized geometry
-!             PotentialArray(nPoint) = MinimizePotential( X,  OptimizationMask )
-!          END DO
-!       END DO
-!       
-!       ! Print the potential to vtk file
-!       CALL VTK_NewRectilinearSnapshot ( PotentialCH, X=ZHArray*MyConsts_Bohr2Ang,  & 
-!                                 Y=ZCArray*MyConsts_Bohr2Ang, FileName="GraphiteHSticking" )
-!       CALL VTK_AddScalarField (PotentialCH, Name="CHPotential", Field=PotentialArray*MyConsts_Hartree2eV )
-! 
-!       WRITE(*,"(/,A)") " * PES as a func of ZC and ZH with optim puckered graphite written as VTR to file GraphiteHSticking_.vtr"
-! 
-!       ! Deallocate memory
-!       DEALLOCATE( PotentialArray, ZHArray, ZCArray )
-! 
-!    END SUBROUTINE PotentialCuts
 
 
    END SUBROUTINE PotentialAnalysis_Run

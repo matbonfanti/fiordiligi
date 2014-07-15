@@ -308,7 +308,8 @@ EXEDIR  = Executables
 
 # Define list of object from the list of all f90 files in the directory
 OBJSWITHMAIN =$(patsubst Source/%,Objects/%,$(patsubst %.f90,%.o,$(wildcard ${SRCDIR}/*.f90)))
-OBJS3 =$(patsubst %/Main.o,,${OBJSWITHMAIN})
+OBJS4 =$(patsubst %/Main.o,,${OBJSWITHMAIN})
+OBJS3 =$(patsubst %/CFuncAnalyse.o,,${OBJS4})
 OBJS2 =$(patsubst %/NewWiener.o,,${OBJS3})
 OBJS =$(patsubst %/Main_v3.o,,${OBJS2})
 
@@ -352,6 +353,13 @@ NewWiener : ${SRCDIR}/NewWiener.f90 ${OBJS}
 	${COMPILE} ${PPDIR}/NewWiener.f90 
 	${LINK} ${EXEDIR}/$@ NewWiener.o $(OBJS) ${LIBFLG}
 	rm NewWiener.o
+
+# Link objects to produce NewWiener executable file ( NewWiener )
+CFuncAnalyse : ${SRCDIR}/CFuncAnalyse.f90 ${OBJS}
+	${PREPROCESS} ${SRCDIR}/CFuncAnalyse.f90 ${PPDIR}/CFuncAnalyse.f90
+	${COMPILE} ${PPDIR}/CFuncAnalyse.f90 
+	${LINK} ${EXEDIR}/$@ CFuncAnalyse.o $(OBJS) ${LIBFLG}
+	rm CFuncAnalyse.o
 
 # Make target to build all the object files and assemble them
 all : ${OBJS}
