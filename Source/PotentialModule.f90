@@ -2028,6 +2028,10 @@ MODULE PotentialModule
          ! Total Potential 
          vv=vt+vlatt-0.5*rkc*(z(1)-qqq)**2
 
+!     Upper and lower energy cutoff
+      if ( vv < -1.0 ) vv = -1.0
+      if ( vv > 20.0 ) vv = 20.0
+
          ! Convert total potential to AU
          vv = vv / MyConsts_Hartree2eV
 

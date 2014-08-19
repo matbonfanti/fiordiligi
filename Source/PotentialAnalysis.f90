@@ -26,6 +26,7 @@ MODULE PotentialAnalysis
    USE IndependentOscillatorsModel
    USE DIfferenceDerivatives
    USE PrintTools
+   USE SplineInterpolator
 
    IMPLICIT NONE
 
@@ -48,10 +49,11 @@ MODULE PotentialAnalysis
 
    !> Parameters to plot 2D potential
    REAL, DIMENSION(:), ALLOCATABLE :: PotentialArray        !< array to store 2D potential
-   REAL, DIMENSION(:), ALLOCATABLE :: ZCArray, ZHArray      !< array with coordinates grid
+   REAL, DIMENSION(:), ALLOCATABLE :: ZCArray, ZHArray, OptZC    !< array with coordinates grid
    REAL :: ZHmin, ZHmax, ZCmin, ZCmax                       !< boundaries of the grid
    INTEGER :: NpointZH, NpointZC                            !< nr of points of the grid
    TYPE(VTKInfo) :: PotentialCH
+   TYPE(SplineType) :: SplineData                           !< Data for spline interpolation
 
    CONTAINS
 
@@ -136,7 +138,7 @@ MODULE PotentialAnalysis
       IMPLICIT NONE
 
       INTEGER :: AsyPhononSpectrumUnit, MinPhononSpectrumUnit, SDCouplingUnit
-      INTEGER :: NormalModeCutsUnit, CartesianCutsUnit
+      INTEGER :: NormalModeCutsUnit, CartesianCutsUnit, ZHZCPathUnit
 
       REAL, DIMENSION(:), ALLOCATABLE   :: OmegaK, CoeffK, IntensityK
       INTEGER :: NrOfModes
@@ -144,13 +146,14 @@ MODULE PotentialAnalysis
       REAL, DIMENSION(NDim)      :: XMin, XAsy, XMinWithoutH, SystemCoord, BathCoord
       REAL, DIMENSION(NDim,NDim) :: HessianSysAndSlab
       REAL, DIMENSION(4,4)       :: HessianSystem
+      LOGICAL, DIMENSION(NDim)   :: Mask
 
       REAL, DIMENSION(:), ALLOCATABLE   :: EigenFreq
       REAL, DIMENSION(:,:), ALLOCATABLE :: EigenModes
 
       REAL, DIMENSION(4) :: Dummy, XSysMin
       REAL :: PotEnergy, Norm
-      REAL :: ZHFreq, ZCFreq, EMin, EAsy
+      REAL :: ZHFreq, ZCFreq, ZCAsyFreq, EMin, EAsy, ZCeq, ZH, Rho
       REAL :: Frequency, Spectrum, D0
 
       INTEGER :: iFreq, iEigen
@@ -173,6 +176,9 @@ MODULE PotentialAnalysis
       OPEN( FILE="CartesianCuts.dat", UNIT=CartesianCutsUnit )
       WRITE(CartesianCutsUnit, "(A,/)") "# Potential cuts along the cartesian coordinates "
 
+      ZHZCPathUnit = LookForFreeUnit()
+      OPEN( FILE="ZHZCPathUnit.dat", UNIT=ZHZCPathUnit )
+      WRITE(ZHZCPathUnit, "(A,/)") "# ZC of the minimum potential for fixed ZH "
 
       PRINT "(2/,A)",    "***************************************************"
       PRINT "(A,F10.5)", "               PES ANALYSIS "
@@ -252,9 +258,61 @@ MODULE PotentialAnalysis
       ZCFreq = sqrt( ZCFreq /  MassVector(4) )
       X(4) = XMin(4)
 
+      ! Set starting geometry as the geometry of the asymptote
+      X = XAsy
+
+      ! ZC frequency with H far from the surface
+      X(4) = XAsy(4) + SmallDelta
+      PotEnergy = VibrRelaxPotential( X, A )
+      ZCAsyFreq = - A(4) / ( 2.0 * SmallDelta )
+      X(4) = XAsy(4) - SmallDelta
+      PotEnergy = VibrRelaxPotential( X, A )
+      ZCAsyFreq = ZCAsyFreq + A(4) / ( 2.0 * SmallDelta )
+      ZCAsyFreq = sqrt( ZCAsyFreq /  MassVector(4) )
+      X(4) = XAsy(4)
+
       ! Write info on geometry and energy as output
       WRITE(*,501) ZHFreq*FreqConversion(InternalUnits,InputUnits), FreqUnit(InputUnits),              &
-                   ZCFreq*FreqConversion(InternalUnits,InputUnits), FreqUnit(InputUnits)
+                   ZCFreq*FreqConversion(InternalUnits,InputUnits), FreqUnit(InputUnits),              &
+                   ZCAsyFreq*FreqConversion(InternalUnits,InputUnits), FreqUnit(InputUnits)
+
+      ! ===================================================================================================
+      ! (2b) Parameters of the 4D potential with C slab at the minimum 
+      ! ===================================================================================================
+
+      IF ( BathType ==  SLAB_POTENTIAL ) THEN
+
+         ! Set starting geometry as the geometry of the minimum
+         X = XMin 
+         ! set asymptotic coordinates for the H atom
+         X(1:2) = 0.0
+         X(3) = 30.0
+
+         ! Set mask for optimization
+         Mask = .FALSE.
+         Mask(4) = .TRUE.
+
+         ! Computing the energy at this geometry
+         EMin = MinimizePotential( X, Mask ) 
+         ZCeq = X(4)
+
+         ! Computing the C1 frequency at this geometry
+         X(4) = ZCeq + SmallDelta
+         PotEnergy = VibrRelaxPotential( X, A )
+         ZCAsyFreq = - A(4) / ( 2.0 * SmallDelta )
+         X(4) = ZCeq - SmallDelta
+         PotEnergy = VibrRelaxPotential( X, A )
+         ZCAsyFreq = ZCAsyFreq + A(4) / ( 2.0 * SmallDelta )
+         ZCAsyFreq = sqrt( ZCAsyFreq /  MassVector(4) )
+         X(4) = ZCeq
+
+         ! Write info  as output
+         WRITE(*,506)   ZCeq*LengthConversion(InternalUnits,InputUnits), LengthUnit(InputUnits),      &
+                        EMin*EnergyConversion(InternalUnits,InputUnits), EnergyUnit(InputUnits),      &
+                        ZCAsyFreq*FreqConversion(InternalUnits,InputUnits), FreqUnit(InputUnits),     &
+                        MassVector(4)*ZCAsyFreq**2, "au"
+
+      END IF
 
       ! ===================================================================================================
       ! (3) Frequencies and normal modes of the 4D potential 
@@ -542,6 +600,10 @@ MODULE PotentialAnalysis
          ! nothing to set
       END IF
 
+      ! Open VTK file
+      CALL VTK_NewRectilinearSnapshot ( PotentialCH, X=ZHArray*MyConsts_Bohr2Ang,  & 
+                                Y=ZCArray*MyConsts_Bohr2Ang, FileName="GraphiteHSticking" )
+
       nPoint = 0
       ! Cycle over the ZC coordinate values
       DO i = 1, NpointZC
@@ -553,23 +615,125 @@ MODULE PotentialAnalysis
             X(3) = ZHArray(j)
             ! Compute potential at optimized geometry
             PotentialArray(nPoint) = VibrRelaxPotential( X, A )
+            ! Remove asymptotic contributions of the energy
+            PotentialArray(nPoint) = PotentialArray(nPoint)
          END DO
       END DO
-
       ! Print the potential to vtk file
-      CALL VTK_NewRectilinearSnapshot ( PotentialCH, X=ZHArray*MyConsts_Bohr2Ang,  & 
-                                Y=ZCArray*MyConsts_Bohr2Ang, FileName="GraphiteHSticking" )
-      CALL VTK_AddScalarField (PotentialCH, Name="CHPotential", Field=PotentialArray*MyConsts_Hartree2eV )
+      CALL VTK_AddScalarField (PotentialCH, Name="CHPotential", Field=PotentialArray*MyConsts_Hartree2eV, LetFileOpen=.TRUE. )
+
+      nPoint = 0
+      ! Cycle over the ZC coordinate values
+      DO i = 1, NpointZC
+         ! Cycle over the ZH coordinate values
+         DO j = 1, NpointZH
+            nPoint = nPoint + 1
+            ! Set collinear H and other Cs in ideal geometry
+            X(4) = ZCArray(i)
+            X(3) = ZHArray(j)
+            ! Compute potential at optimized geometry
+            PotentialArray(nPoint) = VibrRelaxPotential( X, A )
+            ! Remove asymptotic contributions of the energy
+            PotentialArray(nPoint) = PotentialArray(nPoint) - 0.5 * MassVector(4) * ZCAsyFreq**2 * (X(4)-ZCeq)**2 - EMin
+         END DO
+      END DO
+      ! Print the potential to vtk file
+      CALL VTK_AddScalarField (PotentialCH, Name="CouplingOnly", Field=PotentialArray*MyConsts_Hartree2eV )
 
       WRITE(*,"(/,A)") " * PES as a func of ZC and ZH with reference graphite geom written as VTR to file GraphiteHSticking.vtr"
 
       ! Deallocate memory
       DEALLOCATE( PotentialArray, ZHArray, ZCArray )
 
+      ! ===================================================================================================
+      ! (9) ZCarbon - ZHydrogen PATH
+      ! ===================================================================================================
+
+      Rho = 0.0
+
+      ! Set grid dimensions
+      NpointZH = INT((ZHmax-ZHmin)/GridSpacing) + 1
+      NpointZC = INT((0.8-0.0)/0.001) + 1
+
+      ! Allocate temporary array to store potential data and coord grids
+      ALLOCATE( PotentialArray( NpointZC ), ZCArray( NpointZC ), OptZC( NpointZH ), ZHArray( NpointZH ) )
+    
+      ! Define coordinate grids
+      ZCArray = (/ ( 0.0 + 0.001*(i-1), i=1,NpointZC) /)
+      ZHArray = (/ ( ZHmin + GridSpacing*(j-1), j=1,NpointZH) /)
+
+      DO i = 1, NpointZH
+
+         DO j = 1, NpointZC
+            ! Set current geometry
+            X = Xmin
+            X(1) = Rho
+            X(2) = 0.0
+            X(4) = ZCArray(j) 
+            X(3) = SQRT(ZHArray(i)**2 - Rho**2) + ZCArray(j)
+            ! Compute potential at current geometry
+            PotentialArray(j) = VibrRelaxPotential( X, A )
+         END DO
+
+         j = MINLOC( PotentialArray, 1 )
+         OptZC(i) = ZCArray(j)
+
+          WRITE(ZHZCPathUnit, *) SQRT((ZHArray(i)+OptZC(i))**2 + Rho**2)*LengthConversion(InternalUnits,InputUnits), &
+                                OptZC(i)*LengthConversion(InternalUnits,InputUnits), &
+                                PotentialArray(j)*EnergyConversion(InternalUnits,InputUnits)
+
+      END DO
+
+!       ! At each fixed sqrt(rho^2 + zH^2), find minimum of the potential along ZC
+! 
+!       ! Set ZH grid dimensions
+!       NpointZH = INT((ZHmax-ZHmin)/GridSpacing) + 1
+!       ! Allocate temporary array to store the ZH grid and the ZC of the minimum of the potential
+!       ALLOCATE( ZCArray( NpointZH ), ZHArray( NpointZH ) )
+!       ! Define coordinate grids
+!       ZHArray = (/ ( ZHmin + GridSpacing*(j-1), j=1,NpointZH) /)
+! 
+!       DO i = 1, NpointZH
+! 
+!          ! Set starting geometry as the geometry of the minimum
+!          X = XMin 
+!          ! set coordinates for the H atom
+!          X(1:2) = 0.0
+!          X(3) = ZHArray(i)
+!          ! Set mask for optimization
+!          Mask = .FALSE.
+!          Mask(4) = .TRUE.
+! 
+!          ! Computing the energy at this geometry
+!          EMin = MinimizePotential( X, Mask ) 
+!          ZCArray(i) = X(4)
+! 
+!          WRITE(ZHZCPathUnit, *) ZHArray(i)*LengthConversion(InternalUnits,InputUnits), &
+!                                 ZCArray(i)*LengthConversion(InternalUnits,InputUnits), &
+!                                 Emin*EnergyConversion(InternalUnits,InputUnits)
+! 
+!       END DO
+
+      ! Set spline interpolant through the points
+      CALL SetupSpline( SplineData, ZHArray(:)+OptZC(:), OptZC )
+
+      ! Print spline interpolant
+      WRITE(ZHZCPathUnit, "(/,A)") "# Spline interpolant "
+      DO i = -2*NpointZH, NpointZH*10
+         ZH = ZHmin + REAL(i)*GridSpacing/2.0
+         
+         WRITE(ZHZCPathUnit, *) SQRT(ZH**2+Rho**2)*LengthConversion(InternalUnits,InputUnits), &
+                                GetSpline( SplineData, ZH)*LengthConversion(InternalUnits,InputUnits)
+      END DO
+
+      ! Deallocate memory
+      DEALLOCATE( ZHArray, ZCArray )
+
       CLOSE(MinPhononSpectrumUnit)
       CLOSE(AsyPhononSpectrumUnit)
       CLOSE(CartesianCutsUnit)
       CLOSE(NormalModeCutsUnit)
+      CLOSE(ZHZCPathUnit)
 
       500 FORMAT (/, " H-Graphite adsorption geometry and energy   ",/  &
                      " * Asymptotic energy:           ",1F15.6,1X,A, /, &
@@ -579,9 +743,11 @@ MODULE PotentialAnalysis
                      " * ZC at the minimum:           ",1F15.6,1X,A, /, &
                      " * C-H equilibrium distance:    ",1F15.6,1X,A     )
 
-      501 FORMAT (/, " Frequencies along Zc and Zh cuts            ",/  &
-                     " * Frequency along ZH:          ",1F15.2,1X,A, /, &
-                     " * Frequency along ZC:          ",1F15.2,1X,A     ) 
+      501 FORMAT (/, " Frequencies in the minimum geometry         ",/  &
+                     " * Frequency along ZH cut:       ",1F15.2,1X,A,/, &
+                     " * Frequency along ZC cut:       ",1F15.2,1X,A,2/, &
+                     " Frequencies in the asymptotic geometry      ",/ &
+                     " * Frequency along ZC:           ",1F15.2,1X,A    ) 
 
       502 FORMAT (/, " 4D system potential normal modes             ",/, &
                      " 1) Frequency:                   ",1F15.2,1X,A, /, &
@@ -599,7 +765,11 @@ MODULE PotentialAnalysis
       505 FORMAT (/, " Mass-scaled Hessian of the system potential in the minimum (",A," ^2)",/, &
                      4E20.8,/,4E20.8,/,4E20.8,/,4E20.8,/ )
 
-
+      506 FORMAT (/, " H-Graphite 4D potential parameters   ",/  &
+                     " * ZC equilibrium position      ",1F15.6,1X,A, /, &
+                     " * Asymptotic energy:           ",1F15.6,1X,A, /, &
+                     " * ZC asymptotic frequency      ",1F15.6,1X,A, /, &
+                     " * ZC Force constant            ",1F15.6,1X,A     )
 
    END SUBROUTINE PotentialAnalysis_Run
 

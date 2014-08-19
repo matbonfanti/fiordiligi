@@ -548,7 +548,14 @@
 !     Total Potential 
       vv=vt+vlatt-0.5*rkc*(z(1)-qqq)**2
 
+!     Upper and lower energy cutoff
+      if ( vv < -20.0 ) vv = -20.0
+      if ( vv > 20.0 ) vv = 20.0
+
 !     Convert total potential to AU
       vv = vv / MyConsts_Hartree2eV
+
+!     REMOVE CARBON FREQUENCY AND ASYMPTOTIC CONSTANT ENERGY
+      vv = vv - 0.5 * 0.146771 * (rcz - 0.080328)**2 - 0.004022
 
       END SUBROUTINE vhsticking

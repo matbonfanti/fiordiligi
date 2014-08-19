@@ -354,13 +354,6 @@ NewWiener : ${SRCDIR}/NewWiener.f90 ${OBJS}
 	${LINK} ${EXEDIR}/$@ NewWiener.o $(OBJS) ${LIBFLG}
 	rm NewWiener.o
 
-# Link objects to produce NewWiener executable file ( NewWiener )
-CFuncAnalyse : ${SRCDIR}/CFuncAnalyse.f90 ${OBJS}
-	${PREPROCESS} ${SRCDIR}/CFuncAnalyse.f90 ${PPDIR}/CFuncAnalyse.f90
-	${COMPILE} ${PPDIR}/CFuncAnalyse.f90 
-	${LINK} ${EXEDIR}/$@ CFuncAnalyse.o $(OBJS) ${LIBFLG}
-	rm CFuncAnalyse.o
-
 # Make target to build all the object files and assemble them
 all : ${OBJS}
 
