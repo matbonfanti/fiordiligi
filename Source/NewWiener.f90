@@ -26,7 +26,7 @@ PROGRAM NewWiener
    ! Unit to read input sets of data, Unit to write output results
    INTEGER        :: SetsUnit, OutUnit
    ! Time step of the input data sets, Frequency spacing, Omega cut off for hilbert transform
-   REAL           :: DeltaT, DeltaOmega, OmegaCutOff
+   REAL           :: DeltaT, DeltaOmega, OmegaCutOff, LowOmegaCutOff
    ! Time and frequency grid
    REAL, DIMENSION(:), ALLOCATABLE :: TimeGrid, OmegaGrid
    ! Array to store dataset and average
@@ -37,6 +37,10 @@ PROGRAM NewWiener
    INTEGER :: NPow
    ! Data for damping in time
    REAL :: TauDamp, T0Damp
+   ! Data for removing LorentzDistrib from Spectral Density
+!    REAL :: LorentzI, LorentzOmega, LorentzGamma, LorentzF
+   LOGICAL :: NormalMode
+   REAL    :: NormalModeCoeff
    ! Various real data
    REAL :: Time, SetAver, SetSquared, Temperature
    LOGICAL :: VelocitySet
@@ -180,17 +184,40 @@ PROGRAM NewWiener
       ! Calculate average and shift
       SetAver = SUM( DataSet ) / REAL(NStep)
       SetSquared = DOT_PRODUCT( DataSet,DataSet )/REAL(NStep)  
-      DataSet(:) = DataSet(:) - SetAver
+      IF ( .NOT. VelocitySet ) THEN
+	 DataSet(:) = DataSet(:) - SetAver
+      ENDIF
 
       ! fourier transform of the noise, x(w)
       SetTransf(:) = CMPLX( DataSet(:)*DeltaT, 0.0 )
+
       CALL ExecuteFFT( DFTData, SetTransf, INVERSE_FFT  )
 
+      ! Divide by w^2 if velocity data was given
+!       IF ( VelocitySet ) THEN
+! 	 DO iStep = 1, NStep 
+! 	    WRITE(600+iSet,"(I5,10E20.6)") iStep, REAL(SetTransf( iStep ))**2, MAX(OmegaGrid(iStep)**2,1.E-6) &
+!                    ,REAL(SetTransf( iStep ))**2 / MAX(OmegaGrid(iStep)**2,1.E-6)
+! 	    SetTransf( iStep ) = SetTransf( iStep ) / MAX(OmegaGrid(iStep)**2, 1.0)
+! 	 END DO
+!       ENDIF 
+
       ! Spectral density of the noise, S(w)=C(w)/2.d0/pi   
-      DO iStep = 1, NStep              
-         SOmega( iStep ) = SOmega( iStep ) + ABS(SetTransf(iStep))**2 * REAL(NStep) / ( 2.0 * MyConsts_PI * DeltaT )  
-      END DO
-    
+      IF ( VelocitySet ) THEN
+	 DO iStep = 1, NStep              
+	    IF ( OmegaGrid(iStep) > 5.0 * FreqConversion(InputUnits,InternalUnits) ) THEN
+	       SOmega( iStep ) = SOmega( iStep ) +  &
+               ABS(SetTransf(iStep))**2 * REAL(NStep) / ( 2.0 * MyConsts_PI * DeltaT ) / OmegaGrid(iStep)**2
+	    ELSE
+	       SOmega( iStep ) = 0.0 
+	    END IF
+	 END DO
+      ELSE
+	 DO iStep = 1, NStep              
+	    SOmega( iStep ) = SOmega( iStep ) + ABS(SetTransf(iStep))**2 * REAL(NStep) / ( 2.0 * MyConsts_PI * DeltaT )  
+	 END DO
+      END IF
+
       write(*,"(/,A,I5,A)") ' ******* Set number ', iSet, ' *********'
       write(*,*) ' Average value (a.u.) =', SetAver
       write(*,*) ' <X(0)^2>  from data         = ', SetSquared 
@@ -201,12 +228,11 @@ PROGRAM NewWiener
 
    ! Normalize average
    SOmega( : ) = SOmega( : ) / REAL( NSet )
-   ! Divide by w^2 if velocity data was given
-   IF ( VelocitySet ) THEN
-       DO iStep = 1, NStep 
-           SOmega( iStep ) = SOmega( iStep ) / ( OmegaGrid(iStep)**2 )
-       END DO
-   ENDIF 
+
+   ! If Normal mode, multiply by factor
+   IF (NormalMode) THEN
+      SOmega( : ) = SOmega( : ) * NormalModeCoeff
+   END IF
 
    ! Apply low frequency filter
    DO iStep = 1, NStep
@@ -226,7 +252,8 @@ PROGRAM NewWiener
    DO iStep = 1, NStep
       Time = REAL(iStep-1)*DeltaT
       IF ( Time > REAL(NStep)*DeltaT/2.0 )   Time = Time - REAL(NStep)*DeltaT
-      WRITE( OutUnit,"(10E20.6)" ) Time*TimeConversion(InternalUnits,InputUnits), REAL( CorrT(iStep) ), &
+      WRITE( OutUnit,"(10E20.6)" ) Time*TimeConversion(InternalUnits,InputUnits), & 
+               REAL( CorrT(iStep) ),& !*LengthConversion(InternalUnits,InputUnits)**2 , &
                EXP( -(T0Damp-abs(Time))**2 / (2.0*TauDamp**2) )
    ENDDO
    CLOSE( OutUnit )
@@ -245,7 +272,8 @@ PROGRAM NewWiener
    DO iStep = 1, NStep
       Time = REAL(iStep-1)*DeltaT
       IF ( Time > REAL(NStep)*DeltaT/2.0 )   Time = Time - REAL(NStep)*DeltaT
-      WRITE( OutUnit,901 ) Time*TimeConversion(InternalUnits,InputUnits), REAL( CorrT(iStep) )
+      WRITE( OutUnit,901 ) Time*TimeConversion(InternalUnits,InputUnits), &
+                           REAL( CorrT(iStep)) !*LengthConversion(InternalUnits,InputUnits)**2
    ENDDO
    CLOSE( OutUnit )
 
@@ -260,25 +288,42 @@ PROGRAM NewWiener
    OPEN( UNIT=OutUnit, FILE='acorrw.dat' )
    DO iStep = 1, NStep
       IF ( OmegaGrid(iStep) >= MyConsts_PI / DeltaT ) EXIT
-      WRITE( OutUnit,902 ) OmegaGrid(iStep)*FreqConversion(InternalUnits,InputUnits), REAL(SOmega(iStep)) 
+      WRITE( OutUnit,902 ) OmegaGrid(iStep)*FreqConversion(InternalUnits,InputUnits), &
+                           REAL(SOmega(iStep)) !* LengthConversion(InternalUnits,InputUnits)**2
    ENDDO
    CLOSE( OutUnit )
 
    ! Now compute the cauchy transform in the range 0, Wcutoff 
    DO iStep = 1, NCutOff
-      Hilbert(iStep) = REAL(SOmega(iStep)) * OmegaGrid(iStep) / 2.0   ! this is the generating function, w*C(w)/2
+      IF (OmegaGrid(iStep) > LowOmegaCutOff) THEN
+	 Hilbert(iStep) = REAL(SOmega(iStep)) * OmegaGrid(iStep) / 2.0   ! this is the generating function, w*C(w)/2
+      ELSE
+	 Hilbert(iStep) =  0.0
+      END IF
    END DO
    CALL HilbertTransform( NCutOff, Hilbert )
    DO iStep = 1, NCutOff
-       Cauchy(iStep) = CMPLX( Hilbert(iStep), 0.5*REAL(SOmega(iStep))*OmegaGrid(iStep) ) 
-       JOmega(iStep) = Temperature * (0.5 * REAL(SOmega(iStep)) * OmegaGrid(iStep)) / ABS(Cauchy(iStep))**2
+      IF (OmegaGrid(iStep) > LowOmegaCutOff) THEN
+	 Cauchy(iStep) = CMPLX( Hilbert(iStep), 0.5*REAL(SOmega(iStep))*OmegaGrid(iStep) ) 
+	 JOmega(iStep) = Temperature * (0.5 * REAL(SOmega(iStep)) * OmegaGrid(iStep)) / ABS(Cauchy(iStep))**2
+      ELSE
+	 Cauchy(iStep) = 0.0
+	 JOmega(iStep) = 0.0
+      ENDIF
    END DO     
+
+!    DO iStep = 1, NCutOff
+!       LorentzF = LorentzI * LorentzGamma**2 / ( (OmegaGrid(iStep)-LorentzOmega)**2 + LorentzGamma**2 )
+! !       IF (LorentzF < JOmega(iStep)) JOmega(iStep) =  JOmega(iStep) - LorentzF
+!       JOmega(iStep) =  JOmega(iStep) - LorentzF
+!    END DO
 
    ! write w / cm^-1 and j(w)
    OutUnit = LookForFreeUnit()
    OPEN( UNIT=OutUnit, FILE='spectral.dat' )
    DO iStep = 1, NCutOff
-      WRITE( OutUnit,902 ) OmegaGrid(iStep)*FreqConversion(InternalUnits,InputUnits), JOmega(iStep)
+      WRITE( OutUnit,902 ) OmegaGrid(iStep)*FreqConversion(InternalUnits,InputUnits), JOmega(iStep)   !, &
+!          JOmega(iStep)+LorentzI * LorentzGamma**2 / ( (OmegaGrid(iStep)-LorentzOmega)**2 + LorentzGamma**2 )
    ENDDO
    CLOSE( OutUnit )
 
@@ -424,6 +469,8 @@ CONTAINS
       ! Read frequency cutoff
       CALL SetFieldFromInput( InputData, "OmegaCutOff", OmegaCutOff )
       OmegaCutOff = OmegaCutOff * FreqConversion(InputUnits, InternalUnits)
+      CALL SetFieldFromInput( InputData, "LowOmegaCutOff", LowOmegaCutOff, 0.0 )
+      LowOmegaCutOff = LowOmegaCutOff * FreqConversion(InputUnits, InternalUnits)
 
       ! Read temperature
       CALL SetFieldFromInput( InputData, "Temperature", Temperature )
@@ -437,6 +484,19 @@ CONTAINS
       CALL SetFieldFromInput( InputData, "MassHydro", MassHydro )
       MassCarbon = MassCarbon * MassConversion(InputUnits, InternalUnits)
       MassHydro = MassHydro * MassConversion(InputUnits, InternalUnits)
+
+!       ! Removal of lorentz distribution
+!       CALL SetFieldFromInput( InputData, "LorentzGamma", LorentzGamma )
+!       CALL SetFieldFromInput( InputData, "LorentzI",     LorentzI )
+!       CALL SetFieldFromInput( InputData, "LorentzOmega", LorentzOmega )
+!       LorentzOmega = LorentzOmega * FreqConversion(InputUnits, InternalUnits)
+!       LorentzGamma = LorentzGamma * FreqConversion(InputUnits, InternalUnits)
+
+      ! Normal modes
+      CALL  SetFieldFromInput( InputData, "NormalMode", NormalMode, .FALSE. )
+      IF ( NormalMode ) THEN
+	 CALL  SetFieldFromInput( InputData, "NormalModeCoeff", NormalModeCoeff )
+      ENDIF
 
       ! Close input file
       CALL CloseFile( InputData )

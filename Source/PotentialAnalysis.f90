@@ -48,11 +48,12 @@ MODULE PotentialAnalysis
    INTEGER :: NGridPoint        !< Nr of points around the equilibrium value
 
    !> Parameters to plot 2D potential
-   REAL, DIMENSION(:), ALLOCATABLE :: PotentialArray        !< array to store 2D potential
-   REAL, DIMENSION(:), ALLOCATABLE :: ZCArray, ZHArray, OptZC    !< array with coordinates grid
-   REAL :: ZHmin, ZHmax, ZCmin, ZCmax                       !< boundaries of the grid
-   INTEGER :: NpointZH, NpointZC                            !< nr of points of the grid
+   REAL, DIMENSION(:), ALLOCATABLE :: PotentialArray                     !< array to store 2D potential
+   REAL, DIMENSION(:), ALLOCATABLE :: ZCArray, ZHArray, QArray, OptZC    !< array with coordinates grid
+   REAL :: ZHmin, ZHmax, ZCmin, ZCmax, Qmin, Qmax                        !< boundaries of the grid
+   INTEGER :: NpointZH, NpointZC, NpointQ                                !< nr of points of the grid
    TYPE(VTKInfo) :: PotentialCH
+   TYPE(VTKInfo) :: CouplingV
    TYPE(SplineType) :: SplineData                           !< Data for spline interpolation
 
    CONTAINS
@@ -601,8 +602,8 @@ MODULE PotentialAnalysis
       END IF
 
       ! Open VTK file
-      CALL VTK_NewRectilinearSnapshot ( PotentialCH, X=ZHArray*MyConsts_Bohr2Ang,  & 
-                                Y=ZCArray*MyConsts_Bohr2Ang, FileName="GraphiteHSticking" )
+      CALL VTK_NewRectilinearSnapshot ( PotentialCH, X=ZHArray*LengthConversion(InternalUnits,InputUnits),  & 
+                                Y=ZCArray*LengthConversion(InternalUnits,InputUnits), FileName="GraphiteHSticking" )
 
       nPoint = 0
       ! Cycle over the ZC coordinate values
@@ -620,7 +621,8 @@ MODULE PotentialAnalysis
          END DO
       END DO
       ! Print the potential to vtk file
-      CALL VTK_AddScalarField (PotentialCH, Name="CHPotential", Field=PotentialArray*MyConsts_Hartree2eV, LetFileOpen=.TRUE. )
+      CALL VTK_AddScalarField (PotentialCH, Name="CHPotential", &
+                        Field=PotentialArray*EnergyConversion(InternalUnits,InputUnits), LetFileOpen=.TRUE. )
 
       nPoint = 0
       ! Cycle over the ZC coordinate values
@@ -633,12 +635,20 @@ MODULE PotentialAnalysis
             X(3) = ZHArray(j)
             ! Compute potential at optimized geometry
             PotentialArray(nPoint) = VibrRelaxPotential( X, A )
-            ! Remove asymptotic contributions of the energy
-            PotentialArray(nPoint) = PotentialArray(nPoint) - 0.5 * MassVector(4) * ZCAsyFreq**2 * (X(4)-ZCeq)**2 - EMin
+
+            ! Remove costant asymptotic energy
+            PotentialArray(nPoint) = PotentialArray(nPoint) - EMin
+            ! Remove asymptotic contributions of the carbon strain
+            PotentialArray(nPoint) = PotentialArray(nPoint) - 0.5 * MassVector(4) * ZCAsyFreq**2 * (X(4)-ZCeq)**2
+            ! Remove asymptotic CH interaction at fixed Cz
+	    X(4) = ZCeq
+            PotentialArray(nPoint) = PotentialArray(nPoint) - (VibrRelaxPotential( X, A ) - EMin)
+
          END DO
       END DO
       ! Print the potential to vtk file
-      CALL VTK_AddScalarField (PotentialCH, Name="CouplingOnly", Field=PotentialArray*MyConsts_Hartree2eV )
+      CALL VTK_AddScalarField (PotentialCH, Name="CouplingOnly", & 
+                    Field=PotentialArray*EnergyConversion(InternalUnits,InputUnits) )
 
       WRITE(*,"(/,A)") " * PES as a func of ZC and ZH with reference graphite geom written as VTR to file GraphiteHSticking.vtr"
 
@@ -727,7 +737,124 @@ MODULE PotentialAnalysis
       END DO
 
       ! Deallocate memory
-      DEALLOCATE( ZHArray, ZCArray )
+      DEALLOCATE( ZHArray, ZCArray, PotentialArray )
+
+      ! ===================================================================================================
+      ! (10) 2D coupling potential in VTK format
+      ! ===================================================================================================
+
+      IF ( BathType ==  SLAB_POTENTIAL ) THEN
+
+         CALL VTK_NewCollection ( CouplingV, 2, "CouplingV" )
+
+         Qmin = -2.0
+         Qmax = 2.0
+
+         ! Set grid dimensions
+         NpointZH = INT((ZHmax-ZHmin)/GridSpacing) + 1
+         NpointZC = INT((ZCmax-ZCmin)/GridSpacing) + 1
+         NpointQ  = INT((Qmax-Qmin)  /GridSpacing) + 1
+
+         ! Allocate temporary array to store coord grids
+         ALLOCATE( ZCArray( NpointZC ), ZHArray( NpointZH ), QArray( NpointQ ) )
+         ! Define coordinate grids
+         ZCArray = (/ ( ZCmin + GridSpacing*(i-1), i=1,NpointZC) /)
+         ZHArray = (/ ( ZHmin + GridSpacing*(j-1), j=1,NpointZH) /)
+         QArray  = (/ ( Qmin  + GridSpacing*(j-1), j=1,NpointQ)  /)
+
+         ! A) Coupling potential as function of Q and ZH
+
+         ! Allocate temporary array to store potential data
+         ALLOCATE( PotentialArray( NpointZH * NpointQ ) )
+
+         ! fix coordinates 
+         X(1:4) = (/ 0.0, 0.0, HZEquilibrium, C1Puckering /)
+         X(5:NDim) = MinSlab(1:NBath)
+         PotEnergy = VibrRelaxPotential( X, A )
+
+         ! Open VTK file
+         CALL VTK_NewRectilinearSnapshot ( CouplingV, X=ZHArray*LengthConversion(InternalUnits,InputUnits),  & 
+                                   Y=QArray*LengthConversion(InternalUnits,InputUnits), FileName="GraphiteHCouplingV_ZH" )
+
+         nPoint = 0
+         ! Cycle over the ZC coordinate values
+         DO i = 1, NpointQ
+            ! Cycle over the ZH coordinate values
+            DO j = 1, NpointZH
+               nPoint = nPoint + 1
+               ! Set collinear H and other Cs in ideal geometry
+               X(5:7) = QArray(i)
+               X(3) = ZHArray(j)
+               ! Compute potential at current geometry
+               PotentialArray(nPoint) = VibrRelaxPotential( X, A )
+               ! Remove potential of the system
+               X(5:NDim) = MinSlab(1:NBath)
+               X(3) = ZHArray(j)
+               PotentialArray(nPoint) = PotentialArray(nPoint) - VibrRelaxPotential( X, A )
+               ! Remove potential of the slab
+               X(1:4) = (/ 0.0, 0.0, HZEquilibrium, C1Puckering /)
+               X(5:7) = QArray(i)
+               PotentialArray(nPoint) = PotentialArray(nPoint) - VibrRelaxPotential( X, A )
+               ! shoft the V of  the equilibrium geometry to zero
+               PotentialArray(nPoint) = PotentialArray(nPoint) + PotEnergy
+            END DO
+         END DO
+
+         ! Print the potential to vtk file
+         CALL VTK_AddScalarField (CouplingV, Name="CHPotential", &
+                           Field=PotentialArray*EnergyConversion(InternalUnits,InputUnits) )
+
+         DEALLOCATE( PotentialArray )
+
+         ! A) Coupling potential as function of Q and ZH
+
+         ! Allocate temporary array to store potential data
+         ALLOCATE( PotentialArray( NpointZC * NpointQ ) )
+
+         ! fix coordinates 
+         X(1:4) = (/ 0.0, 0.0, HZEquilibrium, C1Puckering /)
+         X(5:NDim) = MinSlab(1:NBath)
+
+         ! Open VTK file
+         CALL VTK_NewRectilinearSnapshot ( CouplingV, X=ZCArray*LengthConversion(InternalUnits,InputUnits),  & 
+                                   Y=QArray*LengthConversion(InternalUnits,InputUnits), FileName="GraphiteHCouplingV_ZC" )
+
+         nPoint = 0
+         ! Cycle over the ZC coordinate values
+         DO i = 1, NpointQ
+            ! Cycle over the ZH coordinate values
+            DO j = 1, NpointZC
+               nPoint = nPoint + 1
+               ! Set collinear H and other Cs in ideal geometry
+               X(5:7) = QArray(i)
+               X(4) = ZCArray(j)
+               ! Compute potential at current geometry
+               PotentialArray(nPoint) = VibrRelaxPotential( X, A )
+               ! Remove potential of the system
+               X(5:NDim) = MinSlab(1:NBath)
+               X(4) = ZCArray(j)
+               PotentialArray(nPoint) = PotentialArray(nPoint) - VibrRelaxPotential( X, A )
+               ! Remove potential of the slab
+               X(1:4) = (/ 0.0, 0.0, HZEquilibrium, C1Puckering /)
+               X(5:7) = QArray(i)
+               PotentialArray(nPoint) = PotentialArray(nPoint) - VibrRelaxPotential( X, A )
+               ! shoft the V of  the equilibrium geometry to zero
+               PotentialArray(nPoint) = PotentialArray(nPoint) + PotEnergy
+            END DO
+         END DO
+
+         ! Print the potential to vtk file
+         CALL VTK_AddScalarField (CouplingV, Name="CHPotential", &
+                           Field=PotentialArray*EnergyConversion(InternalUnits,InputUnits) )
+
+         DEALLOCATE( PotentialArray )
+     
+         WRITE(*,"(/,A)") " * Coupling V written as VTR to file GraphiteHCouplingV_ZH.vtr and GraphiteHCouplingV_ZC.vtr"
+
+         ! Deallocate memory
+         DEALLOCATE( QArray, ZHArray, ZCArray )
+
+      ENDIF
 
       CLOSE(MinPhononSpectrumUnit)
       CLOSE(AsyPhononSpectrumUnit)
@@ -995,6 +1122,13 @@ MODULE PotentialAnalysis
       END DO
 
    END FUNCTION DirectionalSecondDerivative
+
+!*************************************************************************************************
+
+   SUBROUTINE PrintCouplingPotential
+      IMPLICIT NONE
+
+   END SUBROUTINE PrintCouplingPotential
 
 !*************************************************************************************************
 

@@ -4,7 +4,8 @@ MODULE PotentialModule
    USE MyLinearAlgebra
 
    PRIVATE
-   PUBLIC :: SetupPotential, VHSticking, VHFourDimensional, MinimizePotential, HessianOfTheSystem
+   PUBLIC :: SetupPotential, VHSticking, VHFourDimensional, MinimizePotential
+   PUBLIC :: SystemBathLinearCoupling, HessianOfTheSystem
    PUBLIC :: ThermalEquilibriumConditions, ScatteringConditions, ZeroKelvinSlabConditions
    PUBLIC :: CarbonForceConstant, GraphiteLatticeConstant
 
@@ -26,7 +27,7 @@ MODULE PotentialModule
    REAL, DIMENSION(4), PUBLIC :: NormalModes4D_Freq         ! squared frequencies of the normal modes
    !> Frequencies of the normal modes
    REAL, DIMENSION(4,4), PUBLIC :: NormalModes4D_Vecs       ! columns are normal modes of the potential in the minimum
-
+ 
    !> Max nr of iterations for potential optimization
    INTEGER, PARAMETER :: MaxIter = 10000
    !> Threshold for conjugate gradient convergence
@@ -493,6 +494,53 @@ MODULE PotentialModule
 !       CALL TheOneWithMatrixPrintedLineAfterLine( Hessian )
 
    END FUNCTION HessianOfTheSystem
+
+   ! ************************************************************************************************
+
+   FUNCTION SystemBathLinearCoupling( AtPoint ) RESULT( CouplingCoeff )
+      IMPLICIT NONE
+      REAL, DIMENSION(2) :: CouplingCoeff
+      REAL, DIMENSION(:), INTENT(IN) :: AtPoint
+      REAL, DIMENSION(size(AtPoint)) :: Coordinates, FirstDerivative
+      REAL :: Potential
+      INTEGER :: i, k
+
+      REAL, DIMENSION(4), PARAMETER :: Deltas = (/ -2.0,    -1.0,    +1.0,    +2.0    /)
+      REAL, DIMENSION(4), PARAMETER :: Coeffs = (/ +1./12., -8./12., +8./12., -1./12. /) 
+
+      CouplingCoeff(:) = 0.0
+
+      DO k = 1, size(Deltas)
+
+            ! Define small displacement along Q from the point where compute the derivative
+            Coordinates(:) = AtPoint(:)
+            Coordinates(5) = Coordinates(5) + Deltas(k)*SmallDelta 
+
+            ! Compute potential and forces in the displaced coordinate
+            Potential = VHSticking( Coordinates, FirstDerivative )
+            FirstDerivative = - FirstDerivative
+
+            ! Increment numerical derivative of the analytical derivative
+            CouplingCoeff(1) = CouplingCoeff(1) + Coeffs(k)*FirstDerivative(3)/SmallDelta
+
+      END DO
+
+      DO k = 1, size(Deltas)
+
+            ! Define small displacement along Q from the point where compute the derivative
+            Coordinates(:) = AtPoint(:)
+            Coordinates(4) = Coordinates(4) + Deltas(k)*SmallDelta 
+
+            ! Compute potential and forces in the displaced coordinate
+            Potential = VHSticking( Coordinates, FirstDerivative )
+            FirstDerivative = - FirstDerivative
+
+            ! Increment numerical derivative of the analytical derivative
+            CouplingCoeff(2) = CouplingCoeff(2) + Coeffs(k)*FirstDerivative(5)/SmallDelta
+
+      END DO
+
+   END FUNCTION SystemBathLinearCoupling
 
 ! ******************************************************************************************      
 

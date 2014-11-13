@@ -28,7 +28,7 @@ FFTW3 = yes
 OPENMP = no 
 
 # linking LAPACK and BLAS 
-LAPACK = yes
+LAPACK = no
 
 # Compile with standard real 8 (see details about the flags for each compiler...)
 REAL8 = yes
@@ -415,7 +415,7 @@ ${OBJDIR}/PolymerVibrationalRelax.o : ${SRCDIR}/PolymerVibrationalRelax.f90 ${OB
 # Program to compute the properties of the PES
 ${OBJDIR}/PotentialAnalysis.o : ${SRCDIR}/PotentialAnalysis.f90 ${OBJDIR}/MyLinearAlgebra.o ${OBJDIR}/SharedData.o \
                                 ${OBJDIR}/InputField.o ${OBJDIR}/PotentialModule.o ${OBJDIR}/IndependentOscillatorsModel.o \
-                                ${OBJDIR}/DifferenceDerivatives.o ${COMMONDEP}
+                                ${OBJDIR}/DifferenceDerivatives.o ${OBJDIR}/PrintTools.o ${COMMONDEP}
 
 # Set error and warning procedures
 ${OBJDIR}/ErrorTrap.o        : ${SRCDIR}/ErrorTrap.f90 Makefile

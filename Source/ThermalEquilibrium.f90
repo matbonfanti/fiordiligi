@@ -45,9 +45,11 @@ MODULE ThermalEquilibrium
 
    !> Variables to set a model 2D harmonic potential for the system
    LOGICAL :: ModelHarmonic                             !< Model potential is enabled
+   LOGICAL :: ModelLinearCoupling =    .FALSE.          !< Model linear coupling is enabled
    REAL    :: OmegaC, OmegaH, OmegaBend, CouplingCH     !< Parameters of the model potential
    REAL, DIMENSION(4,4) :: HessianMatrix                !< Hessian matrix of the potential in the minimum
-
+   REAL, DIMENSION(2)   :: LinearCouplingCoeff                       !< Linear approximation of the system-bath coupling
+  
    ! Variables of the propagation
    INTEGER :: NrTrajs                   !< Nr of trajectories
    INTEGER :: NrOfSteps                 !< Total nr of time step per trajectory
@@ -103,6 +105,18 @@ MODULE ThermalEquilibrium
          OmegaBend = OmegaBend * FreqConversion(InputUnits, InternalUnits)
          CALL SetFieldFromInput( InputData, "CouplingCH", CouplingCH )
          CouplingCH = CouplingCH * (FreqConversion(InputUnits, InternalUnits)**2)
+      END IF
+
+      IF ( (.NOT. ModelHarmonic) .AND. ( BathType ==  SLAB_POTENTIAL ) ) THEN
+         ! Set linear coupling between system and bath
+         CALL SetFieldFromInput( InputData, "ModelLinearCoupling", ModelLinearCoupling, .FALSE. )
+         
+      END IF
+
+      IF ( ModelLinearCoupling ) THEN
+         CALL SetFieldFromInput( InputData, "LinearCouplingCoeff", LinearCouplingCoeff     )
+         LinearCouplingCoeff = LinearCouplingCoeff * EnergyConversion(InputUnits, InternalUnits) &
+                         / LengthConversion(InputUnits, InternalUnits)
       END IF
 
       ! READ THE VARIABLES FOR THE EQUILIBRIUM SIMULATION 
@@ -281,6 +295,16 @@ MODULE ThermalEquilibrium
          HessianMatrix(4,3) = CouplingCH
       END IF
 
+      ! Initialize coupling coeff for the linear coupling model potential
+      IF ( ModelLinearCoupling ) THEN
+!          LinearCouplingCoeff(:) = SystemBathLinearCoupling( (/ 0.0, 0.0, HZEquilibrium, C1Puckering, MinSlab(:) /) )
+         PRINT*, LinearCouplingCoeff
+      END IF
+
+      X(1:4) = (/ 0.0, 0.0, HZEquilibrium, C1Puckering  /)
+      X(5:NDim) = MinSlab(1:NDim-4)
+      CALL CheckForces( X )
+
    END SUBROUTINE ThermalEquilibrium_Initialize
 
 !-********************************************************************************************
@@ -294,8 +318,10 @@ MODULE ThermalEquilibrium
       INTEGER :: ZHRealizationsUnit, VZHRealizationsUnit, TEquilUnit
       INTEGER :: ZHSpectralDensUnit, CHSpectralDensUnit, FullSpectralDensUnit
       INTEGER :: DebugUnitEn, DebugUnitCoord, DebugUnitVel, DebugUnitEquil
+      INTEGER :: Q1RealizationsUnit, Q2RealizationsUnit
       INTEGER :: iTraj, iCoord, iStep, iOmega, kStep
       REAL    :: TempAverage, TempVariance, TotEnergy, PotEnergy, KinEnergy, IstTemperature
+      REAL    :: NMode1, NMode2
       CHARACTER(100) :: OutFileName
 
       ! Open output file to print the brownian realizations of ZH vs time
@@ -307,6 +333,18 @@ MODULE ThermalEquilibrium
       VZHRealizationsUnit = LookForFreeUnit()
       OPEN( FILE="Trajectories_VZh.dat", UNIT=VZHRealizationsUnit )
       WRITE(VZHRealizationsUnit, "(A,I6,A,/)") "# ", NrTrajs, " realizations of V_zH equilibrium dynamics (fs | Angstrom/fs)"
+
+      IF ( PrintType == NORMALMODES ) THEN
+         ! Open output file to print the normal modes over time
+         Q1RealizationsUnit = LookForFreeUnit()
+         OPEN( FILE="Trajectories_Q1.dat", UNIT=Q1RealizationsUnit )
+         WRITE(Q1RealizationsUnit, "(A,I6,A,/)") "# ", NrTrajs, " realizations of Q1 (fs | Angstrom)"
+	 WRITE(*, *) "# Normal mode 3 projection on cartesian coords", NormalModes4D_Vecs(3:4,3)
+         Q2RealizationsUnit = LookForFreeUnit()
+         OPEN( FILE="Trajectories_Q2.dat", UNIT=Q2RealizationsUnit )
+         WRITE(Q2RealizationsUnit, "(A,I6,A,/)") "# ", NrTrajs, " realizations of Q2 (fs | Angstrom)"
+	 WRITE(*, *) "# Normal mode 4 projection on cartesian coords", NormalModes4D_Vecs(3:4,4)
+      END IF
 
       IF ( PrintType >= FULL ) THEN
          ! Open output file to print the spectral density of the ZH autocorrelation function
@@ -358,6 +396,8 @@ MODULE ThermalEquilibrium
          ! Set initial conditions of the bath
          IF ( BathType == SLAB_POTENTIAL ) THEN 
             CALL ThermalEquilibriumConditions( X, V, Temperature, MassH, MassC, RandomNr )
+            ! for atomistic model of the bath, move the slab so that C2-C3-C4 plane has z=0
+            X(3:NDim) = X(3:NDim)  - (X(5)+X(6)+X(7))/3.0
          ELSE IF ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
             CALL ThermalEquilibriumBathConditions( Bath, X(5:), V(5:), Temperature, RandomNr )
          ELSE IF ( BathType == DOUBLE_CHAIN ) THEN
@@ -380,6 +420,11 @@ MODULE ThermalEquilibrium
          ! Initialize temperature average and variance
          TempAverage = 0.0
          TempVariance = 0.0
+
+         ! Translate system so that Q = 0
+         IF ( BathType == SLAB_POTENTIAL ) THEN 
+            
+         END IF
 
          ! Compute starting potential and forces
          A(:) = 0.0
@@ -404,6 +449,13 @@ MODULE ThermalEquilibrium
 
             ! PROPAGATION for ONE TIME STEP
             CALL EOM_LangevinSecondOrder( Equilibration, X, V, A, ThermalEquilibriumPotential, PotEnergy, RandomNr )
+
+!             CALL CheckForces( X )
+
+            ! for atomistic model of the bath, move the slab so that C2-C3-C4 plane has z=0
+            IF ( BathType == SLAB_POTENTIAL .AND. (.NOT. ModelLinearCoupling) ) THEN 
+               X(3:NDim) = X(3:NDim)  - (X(5)+X(6)+X(7))/3.0
+            ENDIF
 
             ! compute kinetic energy and total energy
             KinEnergy = EOM_KineticEnergy(Equilibration, V )
@@ -461,11 +513,26 @@ MODULE ThermalEquilibrium
          TempVariance = 0.0
 
          ! for atomistic model of the bath, move the slab so that C2-C3-C4 plane has z=0
-         IF ( BathType == SLAB_POTENTIAL )    X(3:size(X)) = X(3:size(X))  - (X(5)+X(6)+X(7))/3.0
+         IF ( BathType == SLAB_POTENTIAL .AND. (.NOT. ModelLinearCoupling) ) THEN 
+            X(3:NDim) = X(3:NDim)  - (X(5)+X(6)+X(7))/3.0
+         ENDIF
 
          ! Write the ZH coordinate in output file
          WRITE(ZHRealizationsUnit,"(F20.8,F20.8)") 0.0, ( X(3) - HZEquilibrium )*MyConsts_Bohr2Ang
          WRITE(VZHRealizationsUnit,"(F20.8,F20.8)") 0.0, V(3)*MyConsts_Bohr2Ang*MyConsts_fs2AU
+
+	 IF ( PrintType == NORMALMODES ) THEN
+	    ! Compute coordinates of the normal modes
+	    NMode1 = 0.0
+	    NMode2 = 0.0
+	    DO iCoord = 1,4
+	       NMode1 = NMode1 + NormalModes4D_Vecs(iCoord,3)*X(iCoord)* SQRT(MassVector(iCoord))
+	       NMode2 = NMode2 + NormalModes4D_Vecs(iCoord,4)*X(iCoord)* SQRT(MassVector(iCoord))
+	    END DO
+	    ! Write the normal mode coords to output file
+	    WRITE(Q1RealizationsUnit,"(F20.8,F20.8)") 0.0, NMode1
+	    WRITE(Q2RealizationsUnit,"(F20.8,F20.8)") 0.0, NMode2
+	 END IF
 
          IF ( PrintType >= FULL ) THEN
             ! store initial coordinate of the trajectory 
@@ -495,7 +562,8 @@ MODULE ThermalEquilibrium
             WRITE(DebugUnitEn,800) 0.0, KinEnergy, PotEnergy, TotEnergy, IstTemperature
 
             WRITE( DebugUnitCoord, "(/,A)" ) "# TRAJECTORY COORD: time / fs | X(1) X(2) ... X(N) / bohr "
-            WRITE(DebugUnitCoord,800) 0.0, X(1), X(2), X(3), X(4), (/ (X(iCoord+4)+0.05*iCoord, iCoord = 1, size(X)-4) /)
+!             WRITE(DebugUnitCoord,800) 0.0, X(1), X(2), X(3), X(4), (/ (X(iCoord+4)+0.05*iCoord, iCoord = 1, size(X)-4) /)
+            WRITE(DebugUnitCoord,800) 0.0, X(1), X(2), X(3), X(4), (/ (X(iCoord+4), iCoord = 1, size(X)-4) /)
 
             WRITE( DebugUnitVel, "(/,A)" ) "# TRAJECTORY VELOCITIES: time / fs | X(1) X(2) ... X(N) / au "
             WRITE(DebugUnitVel,800) 0.0, V(:)
@@ -515,6 +583,12 @@ MODULE ThermalEquilibrium
 
             ! Propagate for one timestep
             CALL EOM_LangevinSecondOrder( MolecularDynamics, X, V, A, ThermalEquilibriumPotential, PotEnergy, RandomNr )
+
+            ! for atomistic model of the bath, move the slab so that C2-C3-C4 plane has z=0
+            IF ( BathType == SLAB_POTENTIAL .AND. (.NOT. ModelLinearCoupling) ) THEN 
+               X(3:NDim) = X(3:NDim)  - (X(5)+X(6)+X(7))/3.0
+            ENDIF
+
 
             ! Compute kin energy and temperature
             KinEnergy = EOM_KineticEnergy( MolecularDynamics, V )
@@ -537,14 +611,24 @@ MODULE ThermalEquilibrium
                kStep = kStep+1
                IF ( kStep > NrOfPrintSteps ) CYCLE 
 
-               ! for atomistic model of the bath, move the slab so that C2-C3-C4 plane has z=0
-               IF ( BathType == SLAB_POTENTIAL )    X(3:size(X)) = X(3:size(X))  - (X(5)+X(6)+X(7))/3.0
-
                ! Write the ZH coordinate in output file
                WRITE(ZHRealizationsUnit,"(F20.8,F20.8)") TimeStep*real(iStep)/MyConsts_fs2AU, &
                                                                 (X(3) - HZEquilibrium) *MyConsts_Bohr2Ang
                WRITE(VZHRealizationsUnit,"(F20.8,F20.8)") TimeStep*real(iStep)/MyConsts_fs2AU, &
                                                                  V(3)*MyConsts_Bohr2Ang*MyConsts_fs2AU
+
+	       IF ( PrintType == NORMALMODES ) THEN
+		  ! Compute coordinates of the normal modes
+		  NMode1 = 0.0
+		  NMode2 = 0.0
+		  DO iCoord = 1,4
+		     NMode1 = NMode1 + NormalModes4D_Vecs(iCoord,3)*X(iCoord)* SQRT(MassVector(iCoord))
+		     NMode2 = NMode2 + NormalModes4D_Vecs(iCoord,4)*X(iCoord)* SQRT(MassVector(iCoord))
+		  END DO
+		  ! Write the normal mode coords to output file
+		  WRITE(Q1RealizationsUnit,"(F20.8,F20.8)") TimeStep*real(iStep)/MyConsts_fs2AU, NMode1
+		  WRITE(Q2RealizationsUnit,"(F20.8,F20.8)") TimeStep*real(iStep)/MyConsts_fs2AU, NMode2
+	       END IF
 
                ! autocorrelation functions are computed only for a full output
                IF ( PrintType >= FULL ) THEN
@@ -558,7 +642,8 @@ MODULE ThermalEquilibrium
                   WRITE(DebugUnitEn,800) TimeStep*real(iStep)/MyConsts_fs2AU, &
                                         KinEnergy, PotEnergy, TotEnergy, IstTemperature
                   WRITE(DebugUnitCoord,800) TimeStep*real(iStep)/MyConsts_fs2AU, X(1:4), &
-                                          (/ (X(iCoord+4)+0.05*iCoord, iCoord = 1, size(X)-4) /)
+!                                           (/ (X(iCoord+4)+0.05*iCoord, iCoord = 1, size(X)-4) /)
+                                          (/ (X(iCoord+4), iCoord = 1, size(X)-4) /)
                   WRITE(DebugUnitVel,800) TimeStep*real(iStep)/MyConsts_fs2AU, V(:)
                END IF
 
@@ -585,6 +670,10 @@ MODULE ThermalEquilibrium
          ! Add while line to the realizations output to separate each traj
          WRITE(ZHRealizationsUnit,*)  " "
          WRITE(VZHRealizationsUnit,*)  " "
+	 IF ( PrintType == NORMALMODES ) THEN
+	    WRITE(Q1RealizationsUnit,*) " "
+	    WRITE(Q2RealizationsUnit,*) " "
+	 END IF
 
          PRINT "(A)", " Time propagation completed! "
 
@@ -666,6 +755,11 @@ MODULE ThermalEquilibrium
          CLOSE( CHSpectralDensUnit )
          CLOSE( FullSpectralDensUnit )
       END IF
+      IF ( PrintType == NORMALMODES ) THEN
+         CLOSE( Unit=Q1RealizationsUnit )
+         CLOSE( Unit=Q2RealizationsUnit )
+      END IF
+
 
    600 FORMAT (/, " Initial condition of the MD trajectory ",/   &
                   " * Potential Energy (eV)        ",1F10.4,/    &
@@ -715,6 +809,8 @@ MODULE ThermalEquilibrium
       REAL, DIMENSION(:), TARGET, INTENT(OUT) :: Forces
       INTEGER :: NrDOF, i       
       REAL, DIMENSION(4) :: tmpForces1, tmpForces2
+      REAL, DIMENSION(:), ALLOCATABLE :: tmpAllCoords, tmpAllForces
+      REAL :: LargeQ
 
       ! Check the number degrees of freedom
       NrDOF = size( Positions )
@@ -729,13 +825,37 @@ MODULE ThermalEquilibrium
       tmpForces2 = 0.0
 
       IF ( BathType == SLAB_POTENTIAL ) THEN 
-         ! Compute potential using the potential subroutine
-         ThermalEquilibriumPotential = VHSticking( Positions, Forces )
-         IF ( ModelHarmonic ) THEN    ! In case, remove anharmonic terms
-            ThermalEquilibriumPotential = ThermalEquilibriumPotential - VHFourDimensional( Positions(1:4), tmpForces1 )
-            ThermalEquilibriumPotential = ThermalEquilibriumPotential + ModelFourDimensionalPotential( Positions(1:4), tmpForces2 )
-            Forces(1:3) = tmpForces2(1:3)
-            Forces(4) = Forces(4) + ( tmpForces2(4) - tmpForces1(4) )
+         IF ( .NOT. ModelLinearCoupling ) THEN
+            ! Compute potential using the potential subroutine
+            ThermalEquilibriumPotential = VHSticking( Positions, Forces )
+            IF ( ModelHarmonic ) THEN    ! In case, remove anharmonic terms
+               ThermalEquilibriumPotential = ThermalEquilibriumPotential - VHFourDimensional( Positions(1:4), tmpForces1 )
+               ThermalEquilibriumPotential = ThermalEquilibriumPotential + &
+                                          ModelFourDimensionalPotential(Positions(1:4), tmpForces2 )
+               Forces(1:3) = tmpForces2(1:3)
+               Forces(4) = Forces(4) + ( tmpForces2(4) - tmpForces1(4) )
+            END IF
+         ELSE IF ( ModelLinearCoupling ) THEN
+            LargeQ = ( Positions(5) + Positions(6) + Positions(7) )
+            ALLOCATE( tmpAllCoords(NrDOF), tmpAllForces(NrDOF) )
+            tmpAllCoords(:) = 0.0
+            tmpAllForces(:) = 0.0
+            ! Potential of the system in the global minimum
+            tmpAllCoords = (/ Positions(1:4), MinSlab(1:NrDOF-4) /)
+            ThermalEquilibriumPotential = ThermalEquilibriumPotential + VHSticking( tmpAllCoords, tmpAllForces )
+            Forces(1:4) = tmpAllForces(1:4)
+            ! Potential of the slab in the global minimum
+            tmpAllCoords = (/ 0.0, 0.0, HZEquilibrium, C1Puckering, Positions(5:NrDOF) /)
+            ThermalEquilibriumPotential = ThermalEquilibriumPotential + VHSticking( tmpAllCoords, tmpAllForces )
+            Forces(5:NrDOF) = tmpAllForces(5:NrDOF)
+            ! Coupling
+!             ThermalEquilibriumPotential = ThermalEquilibriumPotential + LinearCouplingCoeff(1)*LargeQ*(Positions(3)-HZEquilibrium)
+!             Forces(3)   = Forces(3)   - LinearCouplingCoeff(1) * LargeQ
+!             Forces(5:7) = Forces(5:7) - LinearCouplingCoeff(1) * (Positions(3) - HZEquilibrium)
+            ThermalEquilibriumPotential = ThermalEquilibriumPotential + LinearCouplingCoeff(2)*LargeQ*(Positions(4) - C1Puckering)
+            Forces(4)   = Forces(4)   - LinearCouplingCoeff(2) * LargeQ
+            Forces(5:7) = Forces(5:7) - LinearCouplingCoeff(2) * (Positions(4) - C1Puckering)
+            DEALLOCATE( tmpAllCoords, tmpAllForces )
          END IF
 
       ELSE IF ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
@@ -840,5 +960,91 @@ MODULE ThermalEquilibrium
    END SUBROUTINE DiscreteInverseFourier
 
 !*************************************************************************************************
+
+   SUBROUTINE CheckForces( AtPoint )
+      IMPLICIT NONE
+
+      REAL, DIMENSION(:), INTENT(IN) :: AtPoint
+      REAL, DIMENSION(size(AtPoint)) :: Coordinates, FirstDerivative, Forces
+      REAL :: Potential
+
+      REAL, PARAMETER :: SmallDelta = 1.E-04
+      REAL, DIMENSION(4), PARAMETER :: Deltas = (/ -2.0,    -1.0,    +1.0,    +2.0    /)
+      REAL, DIMENSION(4), PARAMETER :: Coeffs = (/ +1./12., -8./12., +8./12., -1./12. /) 
+      REAL, DIMENSION(3), PARAMETER :: ForwardDeltas = (/  0.0,   +1.0,  +2.0   /)
+      REAL, DIMENSION(3), PARAMETER :: ForwardCoeffs = (/ -3./2., +2.0,  -1./2. /) 
+      LOGICAL :: Check = .FALSE.
+      INTEGER :: i,k
+
+!       ! Compute the second derivatives for displacements of x and y
+!       ! IMPORTANT!!! since rho = 0 is a singular value of the function, 
+!       ! the derivative is computed slightly off the minimum, and is computed for x,y > 0
+!       DO i = 1, 2
+! 
+!          FirstDerivative(i) = 0.0
+! 
+!          DO k = 1, size(ForwardDeltas)
+! 
+!             ! Define small displacement along Q from the point where compute the derivative
+!             Coordinates(:) = AtPoint(:)
+!             IF ( Coordinates(i) < 0.0 ) THEN
+!                Coordinates(i) = - Coordinates(i)
+!             END IF
+! 
+!             IF ( Coordinates(i) < 0.001 ) THEN
+!                Coordinates(i) = Coordinates(i) + 0.001 + ForwardDeltas(k)*SmallDelta
+!             ELSE
+!                Coordinates(i) = Coordinates(i) + ForwardDeltas(k)*SmallDelta
+!             END IF
+! 
+!             ! Compute potential and forces in the displaced coordinate
+!             Potential = ThermalEquilibriumPotential( Coordinates, Forces )
+! 
+!             ! Increment numerical derivative
+!             FirstDerivative(i) = FirstDerivative(i) + ForwardCoeffs(k)*Potential/SmallDelta
+! 
+!          END DO
+!       END DO
+
+      ! Compute numerical derivatives
+      DO i = 3, size(AtPoint)
+
+         FirstDerivative(i) = 0.0
+
+         DO k = 1, size(Deltas)
+
+            ! Define small displacement along Q from the point where compute the derivative
+            Coordinates(:) = AtPoint(:)
+            Coordinates(i) = Coordinates(i) + Deltas(k)*SmallDelta 
+
+            ! Compute potential and forces in the displaced coordinate
+            Potential = ThermalEquilibriumPotential( Coordinates, Forces )
+
+            ! Increment numerical derivative
+            FirstDerivative(i) = FirstDerivative(i) + Coeffs(k)*Potential/SmallDelta
+
+         END DO
+      END DO
+
+      ! Compute analytical derivatives
+      Potential = ThermalEquilibriumPotential( AtPoint, Forces )
+      Forces = - Forces
+
+      ! Print results 
+!       PRINT*, " Check of analytical derivatives "
+      DO i = 3, size(AtPoint)
+         IF ( ABS(( FirstDerivative(i) - Forces(i) )) > SmallDelta ) THEN
+            PRINT "(I4,3E15.3)", i, FirstDerivative(i), Forces(i), FirstDerivative(i) - Forces(i)
+            Check = .TRUE.
+         END IF
+      END DO
+      IF ( Check ) THEN
+         PRINT*, " "
+         PRINT*, AtPoint(:) 
+         STOP
+      END IF
+
+   END SUBROUTINE
+
 
 END MODULE ThermalEquilibrium

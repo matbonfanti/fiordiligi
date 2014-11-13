@@ -39,9 +39,10 @@ MODULE SharedData
 
    !> Variable to set the print level of the calculation
    INTEGER :: PrintType
-   INTEGER, PARAMETER :: DEBUG       = 3, &   ! fully detailed information about the trajs
-                         FULL        = 2, &   ! files to plot the make animations, averages for each traj
-                         MINIMAL     = 1      ! minimal level of output, only final averages
+   INTEGER, PARAMETER :: DEBUG       = 3,  &   ! fully detailed information about the trajs
+                         FULL        = 2,  &   ! files to plot the make animations, averages for each traj
+                         NORMALMODES = -1, &   ! files with the normal modes over time
+                         MINIMAL     = 1       ! minimal level of output, only final averages
 
    !> Variable to set the kind of bath included in the dynamics
    INTEGER :: BathType
@@ -115,6 +116,7 @@ CONTAINS
 
       Check = ( IntNr /= DEBUG .AND. &
                 IntNr /= FULL .AND. &
+                IntNr /= NORMALMODES .AND. &
                 IntNr /= MINIMAL  )
       CALL ERROR( Check, " SharedData.CheckPrintType: Invalid PrintType option " )
    END SUBROUTINE CheckPrintType
