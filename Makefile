@@ -394,7 +394,7 @@ ${OBJDIR}/VibrationalRelax.o : ${SRCDIR}/VibrationalRelax.f90 ${OBJDIR}/SharedDa
                                ${OBJDIR}/RandomNumberGenerator.o ${COMMONDEP}
 
 # Program to simulate the vibrational relaxation
-${OBJDIR}/ThermalEquilibrium.o : ${SRCDIR}/VibrationalRelax.f90 ${OBJDIR}/SharedData.o ${OBJDIR}/InputField.o \
+${OBJDIR}/ThermalEquilibrium.o : ${SRCDIR}/ThermalEquilibrium.f90 ${OBJDIR}/SharedData.o ${OBJDIR}/InputField.o \
                                  ${OBJDIR}/ClassicalEqMotion.o ${OBJDIR}/PotentialModule.o ${OBJDIR}/IndependentOscillatorsModel.o \
                                  ${OBJDIR}/RandomNumberGenerator.o ${COMMONDEP}
 

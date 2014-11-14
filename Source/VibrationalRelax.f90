@@ -311,7 +311,7 @@ MODULE VibrationalRelax
       IMPLICIT NONE
       INTEGER  ::  AvEnergyOutputUnit, AvCoordOutputUnit       ! UNITs FOR OUTPUT AND DEBUG
       INTEGER  ::  AvBathCoordUnit, OscillCorrUnit, InitialCondUnit, NormalModesUnit
-      INTEGER  ::  DebugUnitEn, DebugUnitCoord, DebugUnitVel
+      INTEGER  ::  DebugUnitEn, DebugUnitCoord, DebugUnitVel, DebugUnitNormalModes
       REAL     ::  VSys, KSys, Ecoup, VBath, KBath               ! ISTANTANEOUS ENERGY VALUES
       REAL     ::  TotEnergy, PotEnergy, KinEnergy, IstTemperature
       REAL     ::  TempAverage, TempVariance
@@ -525,6 +525,10 @@ MODULE VibrationalRelax
             DebugUnitVel = LookForFreeUnit()
             OPEN( Unit=DebugUnitVel, File=OutFileName )
 
+            WRITE(OutFileName,"(A,I4.4,A)") "Traj_",iTraj,"_NormalModes.dat"
+            DebugUnitNormalModes = LookForFreeUnit()
+            OPEN( Unit=DebugUnitNormalModes, File=OutFileName )
+
             ! Write initial values
             WRITE( DebugUnitEn, "(/,A)" ) "# TRAJECTORY ENERGY: time / fs | ESys, ECoup, EBath, KSys, VSys, KBath, VBath / Eh "
             WRITE(DebugUnitEn,800) 0.0,  KSys+VSys, Ecoup, KBath+VBath, KSys, VSys, KBath, VBath
@@ -534,6 +538,9 @@ MODULE VibrationalRelax
 
             WRITE( DebugUnitVel, "(/,A)" ) "# TRAJECTORY VELOCITIES: time / fs | X(1) X(2) ... X(N) / au "
             WRITE(DebugUnitVel,800) 0.0, V(:)
+
+            WRITE( DebugUnitNormalModes, "(/,A)" ) "# NORMAL MODES time / fs | E1, E2, E3, E4 / Eh "
+            WRITE(DebugUnitNormalModes,800) 0.0, SystemNormalModeEnergies( X(1:4), V(1:4) )
 
           ENDIF
 
@@ -609,6 +616,8 @@ MODULE VibrationalRelax
                   WRITE(DebugUnitCoord,800) TimeStep*real(iStep)/MyConsts_fs2AU, X(1:4), &
                                           (/ (X(iCoord+4)+0.05*iCoord, iCoord = 1, NDim-4) /)
                   WRITE(DebugUnitVel,800) TimeStep*real(iStep)/MyConsts_fs2AU, V(:)
+                  WRITE(DebugUnitNormalModes,800) TimeStep*real(iStep)/MyConsts_fs2AU,  &
+                                             SystemNormalModeEnergies( X(1:4), V(1:4) )
                END IF
 
             END IF 
@@ -831,6 +840,36 @@ MODULE VibrationalRelax
       END IF
 
    END SUBROUTINE IstantaneousEnergies
+
+!*************************************************************************************************
+
+   FUNCTION SystemNormalModeEnergies( Pos, Vel ) RESULT( Energy )
+      IMPLICIT NONE
+      REAL, DIMENSION(4) :: Energy
+      REAL, DIMENSION(4), INTENT(IN) :: Pos, Vel
+      REAL, DIMENSION(4) :: Q, V
+
+      ! Remove average value of the coordinate
+      Q(:) = Pos(:) - (/ 0.0, 0.0, HZEquilibrium, C1Puckering /)
+      V(:) = Vel(:) 
+
+      ! Multiply by square root of mass
+      Q(:) = SQRT( MassVector(1:4) ) * Q(:)
+      V(:) = SQRT( MassVector(1:4) ) * V(:)
+
+      ! Compute normal modes velocity and coordinates
+      Q = TheOneWithMatrixVectorProduct( TheOneWithTransposeMatrix( NormalModes4D_Vecs ), Q )
+      V = TheOneWithMatrixVectorProduct( TheOneWithTransposeMatrix( NormalModes4D_Vecs ), V )
+!       Q = TheOneWithMatrixVectorProduct(  NormalModes4D_Vecs , Q )
+!       V = TheOneWithMatrixVectorProduct(  NormalModes4D_Vecs , V )
+
+      ! Compute potential energy associated to the normal modes
+      Energy(:) = 0.5 * NormalModes4D_Freq(:) * Q(:)**2
+
+      ! Compute potential energy associated to the normal modes
+      Energy(:) = Energy(:) + 0.5 * V(:)**2
+
+   END FUNCTION SystemNormalModeEnergies
 
 !*************************************************************************************************
 
