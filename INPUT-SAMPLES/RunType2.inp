@@ -1,59 +1,74 @@
 # INPUT FILE for JK6_v2
-#
-# the code is capable of running different kind of simulation, as
-# defined by the variable RunType. In detail:
-# RunType 1  -> scattering calculation, in which the initial conditions of H
-#               are set from input, while the C configurations are randomly sampled
-# RunType 2  -> equilibrium simulation, in which all the initial conditions are randomly sampled
-# RunType 3  -> test the parameters with a ND harmonic langevin model, equilibrium simulation
-# RunType 4  -> equilibrium simulation, with harmonic oscillator bath and given spectral density
-# RunType 10 -> Print cuts of the H-graphite potential
-#
-# different level of output is possible, and is defined by the variable PrintType
-# PrintType 1 -> minimal output
-# PrintType 2 -> full output, including trajectories XYZ files
-# PrintType 3 -> debug output, including time resolved info on each trajectory
-# PrintType 4 -> equilibration debug, computing average temperature over time
 
-# Kind of calculation 
+# RUNTYPE
+# 1 - Equilibrium calculation with H already adsorbed
+# 2 - Test the parameters with a 1D harmonic model
+# 3 - Relaxation dynamics of a CH bound state, with the bath at 0K
+# 4 - Scattering calculation with H coming from gas-phase
+# 5 - Vibrational relaxation with ring polymer dynamics
+# 10 - Static analysis of the potential
+
+# PRINTTYPE
+# 3 - DEBUG fully detailed information about each traj
+# 2 - FULL files to plot the averages over the ensamble
+# 1 - MINIMAL minimal level of output, only final averages
+
+# BATHTYPE
+# 1 - LANGEVIN DYNAMICS - effective relaxation dynamics, with langevin eq of motion
+# 2 - CHAIN BATH - bath of HO in a linear chain form
+# 3 - NORMAL BATH bath of HO on a regular freq grid, all coupled to the system
+# 4 - SLAB POTENTIAL the bath is a slab of carbon atom
+# 5 - DOUBLE CHAIN the bath is represented as two chain both coupled to the system
+
+# Units: Ang, eV, AMU, fs, K, cm^-1
+InputLength : 1
+InputEnergy : 3
+InputMass   : 8
+InputTime   : 13
+InputTemp   : 16
+InputFreq   : 18
+
+# Kind of calculation
 RunType : 2
 PrintType : 1
+BathType : 3
+
+# Parameters of the system
+QFreq : 2500
+# Temperature of the system / substrate 
+Temperature : 5.00
 
 # Evolution parameters
 # Step of the time evolution (fs)
-TimeStep : 0.01     
+TimeStep : 0.1
 # Total number of time step per trajectory
-nstep    :  1000000          
+NrOfSteps  :  1000000 
 # Nr of steps between each analysis
-nprint   :  50               
-# Gamma for thermostating the dynamics
-DynamicsGamma : 0.05
+NrOfPrintSteps  : 40000
 
 # Langevin equilibration parameters
 # Friction coefficient (fs-1)
-Gamma : 0.05 
+EquilRelaxTime :  5. 
 # Time step (fs)
-EquilTStep : 0.20
+EquilTStep : 0.02
 # Nr of time steps of the equilibration dynamics
-NrEquilibrSteps :   50000 
-# Nr of time steps to skip in the average temperature computation
-EquilibrInitAverage : 5000
+NrEquilibrSteps :  100000 
+
+# Normal bath
+# mass of the normal bath oscillators
+MassBath : 1.0
+NBath : 100
+OhmicGammaTimesMass : .444104532
+BathCutOffFreq      : 1000.0
+BathLowerCutOffFreq : 0.0
 
 # Masses
 # mass of the target H atom (UMA)
-rmh  : 1.00782503207           
+MassH  : 1.00782503207
 # mass of the substrate C atoms (UMA)
-rmc  : 12.0107
-
-# Temperature of the simulation
-# Temperature of the system / substrate (K)
-temp : 100.00                   
+MassC  : 12.0
 
 # Sampling parameters
 # number of trajectories per impact parameter
-inum   : 1000   
-
-# Number of evolving carbon atoms (max 121)
-nevo : 121
-
+NrTrajs   : 10
 

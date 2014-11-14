@@ -39,6 +39,7 @@ MODULE IndependentOscillatorsModel
    USE RandomNumberGenerator
    USE MyLinearAlgebra
    USE FFTWrapper
+   USE UnitConversion
 
    IMPLICIT NONE
 
@@ -271,9 +272,7 @@ CONTAINS
 
       REAL :: SpectralDens, D0
       INTEGER :: iBath
-#if defined(VERBOSE_OUTPUT)
       INTEGER :: SpectralDensityUnit
-#endif
 
       ! If data already setup give a warning and deallocate memory
       CALL WARN( Bath%BathIsSetup, "IndependentOscillatorsModel.SetupOhmicIndepOscillatorsModel: overwriting bath data" )
@@ -321,7 +320,6 @@ CONTAINS
       ! Module is setup
       Bath%BathIsSetup = .TRUE.
 
-#if defined(VERBOSE_OUTPUT)
       SpectralDensityUnit = LookForFreeUnit()
       OPEN( FILE="ReadSpectralDensity.dat", UNIT=SpectralDensityUnit )
       WRITE(SpectralDensityUnit, "(A,1F15.6)") "# Ohmic Spectral Density with mass*gamma = ", SysMassTimeGamma
@@ -333,10 +331,10 @@ CONTAINS
       END IF
 
       DO iBath = 1, Bath%BathSize
-         WRITE(SpectralDensityUnit,"(2F20.12)") Bath%Frequencies(iBath), Bath%Couplings(iBath) 
+         WRITE(SpectralDensityUnit,"(3F20.12)") Bath%Frequencies(iBath)*FreqConversion(InternalUnits,InputUnits), &
+                           Bath%Couplings(iBath),   SysMassTimeGamma * Bath%Frequencies(iBath)
       END DO
       WRITE(SpectralDensityUnit,"(/)") 
-#endif
 
 #if defined(VERBOSE_OUTPUT)
       WRITE(*,*) " Independent oscillator model potential has been setup"

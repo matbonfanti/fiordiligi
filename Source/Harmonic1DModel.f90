@@ -4,7 +4,7 @@
 !
 !>  \brief     Subroutines for an equilibrium simulation of a model 1D oscillator
 !>  \details   This module contains subroutines to compute averages  \n
-!>             in an equilibrium simulation of a brownian 1D harmonic oscillator \n
+!>             in an equilibrium simulation of a brownian 1D oscillator \n
 !>             at a given temperature   \n
 !
 !***************************************************************************************
@@ -18,7 +18,9 @@
 !>  \par Updates
 !>  \arg 23 October 2013: double chain bath has been implemented
 !
-!>  \todo            fix the log of the input variables
+!>  \todo            fix the log of the input variables, put info on the potential
+!>  \todo            implelement a morse oscillator as anharmonic model
+!>  \todo            include nonlinear coupling (surface oscillator model)
 !>                 
 !***************************************************************************************
 MODULE Harmonic1DModel
@@ -30,6 +32,7 @@ MODULE Harmonic1DModel
    USE ClassicalEqMotion
    USE IndependentOscillatorsModel
    USE RandomNumberGenerator
+   USE UnitConversion
 
    IMPLICIT NONE
 
@@ -55,6 +58,7 @@ MODULE Harmonic1DModel
    REAL    :: EquilTStep           !< Time step for integrating equilibration dynamics
    REAL    :: EquilGamma           !< Friction parameter of the Langevin equation
    INTEGER :: NrEquilibSteps       !< Nr of time step of the equilibration
+   INTEGER :: EquilibrationStepInterval !< Nr of tsteps between each printof equil info ( = NrEquilibSteps/NrOfPrintSteps )
 
    ! Time evolution dataset
    TYPE(Evolution),SAVE :: Equilibration         !< Propagate in macrocanonical ensamble at given T to generate init conditions
@@ -88,7 +92,7 @@ MODULE Harmonic1DModel
 
       ! Frequency of the system
       CALL SetFieldFromInput( InputData, "QFreq", QFreq )
-      QFreq = QFreq * MyConsts_cmmin1toAU
+      QFreq = QFreq * FreqConversion(InputUnits, InternalUnits)
       ! Define accordingly the force constant
       ForceConstant = MassH * QFreq**2 
 
@@ -99,7 +103,7 @@ MODULE Harmonic1DModel
 
       ! Timestep of the propagation
       CALL SetFieldFromInput( InputData, "TimeStep", TimeStep )
-      TimeStep = TimeStep * MyConsts_fs2AU
+      TimeStep = TimeStep * TimeConversion(InputUnits, InternalUnits) 
 
       ! Nr of steps of the propagation
       CALL SetFieldFromInput( InputData, "NrOfSteps", NrOfSteps )
@@ -113,36 +117,39 @@ MODULE Harmonic1DModel
 
       ! Temperature of the equilibrium simulation
       CALL SetFieldFromInput( InputData, "Temperature", Temperature )
-      Temperature = Temperature * MyConsts_K2AU
+      Temperature = Temperature * TemperatureConversion(InputUnits, InternalUnits)
 
       ! Set gamma of the equilibration Langevin dynamics
-      CALL SetFieldFromInput( InputData, "EquilGamma", EquilGamma)
-      EquilGamma = EquilGamma / MyConsts_fs2AU
+      CALL SetFieldFromInput( InputData, "EquilRelaxTime", EquilGamma)
+      EquilGamma = 1. / ( EquilGamma * TimeConversion(InputUnits, InternalUnits) )
 
       ! Set the time step of the equilibration
       CALL SetFieldFromInput( InputData, "EquilTStep",  EquilTStep, TimeStep/MyConsts_fs2AU )
-      EquilTStep = EquilTStep * MyConsts_fs2AU
+      EquilTStep = EquilTStep * TimeConversion(InputUnits, InternalUnits) 
 
       ! Set nr of steps of the equilibration
       CALL SetFieldFromInput( InputData, "NrEquilibrSteps", NrEquilibSteps, int(10.0*(1.0/EquilGamma)/EquilTStep) )
+      EquilibrationStepInterval = CEILING( real(NrEquilibSteps) / real(NrOfPrintSteps) )
 
-! 
-!       WRITE(*, 903) InitEnergy*MyConsts_Hartree2eV, (InitEnergy-MinimumEnergy)*MyConsts_Hartree2eV, &
-!                     NrOfInitSnapshots, TimeBetweenSnaps/MyConsts_fs2AU
-! 
-!       WRITE(*, 904) NrTrajs, TimeStep/MyConsts_fs2AU, NrOfSteps, NrOfPrintSteps
-! 
-!    903 FORMAT(" * Initial conditions of the atom-surface system ", /,&
-!               " * Absolute initial energy (eV):                ",F10.4,/,& 
-!               " *  - w.r.t. the bottom of the well (eV):       ",F10.4,/,& 
-!               " * Nr of initial system snapshots:              ",I10,  /,& 
-!               " * Time between snapshots (fs):                 ",F10.4,/ )
-! 
-!    904 FORMAT(" * Dynamical simulation variables               ", /,&
-!               " * Nr of trajectories:                          ",I10,  /,& 
-!               " * Propagation time step (fs):                  ",F10.4,/,& 
-!               " * Nr of time steps of each trajectory:         ",I10,  /,& 
-!               " * Nr of print steps of each trajectory:        ",I10,  / )
+      WRITE(*, 905) Temperature*TemperatureConversion(InternalUnits,InputUnits), TemperUnit(InputUnits), &
+                    EquilTStep*TimeConversion(InternalUnits,InputUnits), TimeUnit(InputUnits), &
+                    1./EquilGamma*TimeConversion(InternalUnits,InputUnits), TimeUnit(InputUnits), &
+                    NrEquilibSteps, EquilibrationStepInterval
+
+      WRITE(*, 904) NrTrajs, TimeStep*TimeConversion(InternalUnits,InputUnits), TimeUnit(InputUnits), NrOfSteps, NrOfPrintSteps
+
+   905 FORMAT(" * Equilibration variables                      ",           /,&
+              " * Temperature of the system+surface:           ",F10.4,1X,A,/,&  
+              " * Equilibration time step:                     ",F10.4,1X,A,/,&  
+              " * Relaxation time of the Langevin dynamics:    ",F10.4,1X,A,/,&  
+              " * Nr of equilibration steps:                   ",I10,       /,&
+              " * Print every n-th step:                       ",I10,       / )
+
+   904 FORMAT(" * Dynamical simulation variables               ",           /,&
+              " * Nr of trajectories:                          ",I10,       /,& 
+              " * Propagation time step:                       ",F10.4,1X,A,/,&  
+              " * Nr of time steps of each trajectory:         ",I10,       /,& 
+              " * Nr of print steps of each trajectory:        ",I10,       / )
 
    END SUBROUTINE Harmonic1DModel_ReadInput
 
@@ -298,10 +305,10 @@ MODULE Harmonic1DModel
 
          ! Set initial conditions of the bath
          IF ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
-            CALL ThermalEquilibriumBathConditions( Bath, X(5:), V(5:), Temperature, RandomNr )
+            CALL ThermalEquilibriumBathConditions( Bath, X(2:), V(2:), Temperature, RandomNr )
          ELSE IF ( BathType == DOUBLE_CHAIN ) THEN
-            CALL ThermalEquilibriumBathConditions( DblBath(1), X(5:NBath+4), V(5:NBath+4), Temperature, RandomNr )
-            CALL ThermalEquilibriumBathConditions( DblBath(2), X(NBath+5:2*NBath+4), V(NBath+5:2*NBath+4), Temperature, RandomNr )
+            CALL ThermalEquilibriumBathConditions( DblBath(1), X(2:NBath+1), V(2:NBath+1), Temperature, RandomNr )
+            CALL ThermalEquilibriumBathConditions( DblBath(2), X(NBath+2:2*NBath+1), V(NBath+2:2*NBath+1), Temperature, RandomNr )
          ELSE IF ( BathType == LANGEVIN_DYN ) THEN
                ! nothing to do
          END IF
@@ -343,16 +350,16 @@ MODULE Harmonic1DModel
             TempVariance = TempVariance + IstTemperature**2
 
             ! every PrintStepInterval steps, write debug output
-            IF ( PrintType == DEBUG .AND. mod(iStep,PrintStepInterval) == 0 ) THEN
+            IF ( PrintType == DEBUG .AND.  mod(iStep,EquilibrationStepInterval) == 0 ) THEN
                ! Equilibration debug
-               IF ( mod(iStep,PrintStepInterval) == 0 )  WRITE(DebugUnitEquil,850) real(iStep)*EquilTStep/MyConsts_fs2AU, &
+               WRITE(DebugUnitEquil,850) real(iStep)*EquilTStep/MyConsts_fs2AU, &
                         PotEnergy*MyConsts_Hartree2eV, KinEnergy*MyConsts_Hartree2eV, X(1)
                ! Temperature profile during equilibration
                IF (iStep == 1) WRITE(TEquilUnit,"(/,/,A,I5,/)" ) "# Trajectory nr. ", iTraj
-               IF ( mod(iStep,PrintStepInterval) == 0 ) WRITE(TEquilUnit,850)  real(iStep)*EquilTStep/MyConsts_fs2AU, &
+               WRITE(TEquilUnit,850)  real(iStep)*EquilTStep/MyConsts_fs2AU, &
                      TempAverage/iStep, sqrt((TempVariance/iStep)-(TempAverage/iStep)**2)
             END IF
-            850 FORMAT( F12.5, 2F13.6 )
+            850 FORMAT( F12.5, 100F13.6 )
 
          END DO EquilibrationCycle
 
