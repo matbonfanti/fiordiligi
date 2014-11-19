@@ -253,8 +253,8 @@ PROGRAM NewWiener
       Time = REAL(iStep-1)*DeltaT
       IF ( Time > REAL(NStep)*DeltaT/2.0 )   Time = Time - REAL(NStep)*DeltaT
       WRITE( OutUnit,"(10E20.6)" ) Time*TimeConversion(InternalUnits,InputUnits), & 
-               REAL( CorrT(iStep) ),& !*LengthConversion(InternalUnits,InputUnits)**2 , &
-               EXP( -(T0Damp-abs(Time))**2 / (2.0*TauDamp**2) )
+               REAL( CorrT(iStep) )!,& !*LengthConversion(InternalUnits,InputUnits)**2 , &
+               !EXP( -(T0Damp-abs(Time))**2 / (2.0*TauDamp**2) )
    ENDDO
    CLOSE( OutUnit )
 
@@ -286,7 +286,7 @@ PROGRAM NewWiener
    ! and write the spectral density to file
    OutUnit = LookForFreeUnit()
    OPEN( UNIT=OutUnit, FILE='acorrw.dat' )
-   DO iStep = 1, NStep
+   DO iStep = 1, NStep/2-1
       IF ( OmegaGrid(iStep) >= MyConsts_PI / DeltaT ) EXIT
       WRITE( OutUnit,902 ) OmegaGrid(iStep)*FreqConversion(InternalUnits,InputUnits), &
                            REAL(SOmega(iStep)) !* LengthConversion(InternalUnits,InputUnits)**2

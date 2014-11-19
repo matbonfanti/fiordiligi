@@ -17,9 +17,10 @@
 !
 !>  \par Updates
 !>  \arg 23 October 2013: double chain bath has been implemented
+!>  \arg 17 November 2014: FFTWrapper used to compute autocorrelation
+!>  \arg 17 November 2014: morse oscillator implemented
 !
 !>  \todo            fix the log of the input variables, put info on the potential
-!>  \todo            implelement a morse oscillator as anharmonic model
 !>  \todo            include nonlinear coupling (surface oscillator model)
 !>                 
 !***************************************************************************************
@@ -33,6 +34,7 @@ MODULE Harmonic1DModel
    USE IndependentOscillatorsModel
    USE RandomNumberGenerator
    USE UnitConversion
+   USE FFTWrapper
 
    IMPLICIT NONE
 
@@ -44,7 +46,10 @@ MODULE Harmonic1DModel
 
    ! Variables of the system
    REAL    :: QFreq                     !< Frequency of the harmonic oscillator
+   LOGICAL :: MorsePotential            !< When true, anharmonic morse potential is used
    REAL    :: ForceConstant             !< Force constants
+   REAL    :: WellDepth                 !< Dissociation value - when anharmonicity is included
+   REAL    :: MorseAlpha                !< Morse alpha parameter
 
    ! Variables of the propagation
    INTEGER :: NrTrajs                   !< Nr of trajectories
@@ -76,6 +81,9 @@ MODULE Harmonic1DModel
 
    TYPE(RNGInternalState), SAVE :: RandomNr
 
+   ! Fourier transform to compute autocorrelation function
+   TYPE(FFTComplexType), SAVE :: DiscreteFourier
+
    CONTAINS
 
 !*******************************************************************************
@@ -95,6 +103,16 @@ MODULE Harmonic1DModel
       QFreq = QFreq * FreqConversion(InputUnits, InternalUnits)
       ! Define accordingly the force constant
       ForceConstant = MassH * QFreq**2 
+
+      ! Morse potential
+      CALL SetFieldFromInput( InputData, "MorsePotential", MorsePotential, .FALSE. )
+      IF ( MorsePotential ) THEN
+         ! Set potential well depth
+         CALL SetFieldFromInput( InputData, "WellDepth", WellDepth )
+         WellDepth = WellDepth * EnergyConversion(InputUnits, InternalUnits) 
+         ! Compute alpha parameter
+         MorseAlpha = SQRT( ForceConstant / 2.0 / WellDepth )
+      END IF
 
       ! READ THE VARIABLES FOR THE EQUILIBRIUM SIMULATION 
 
@@ -131,12 +149,34 @@ MODULE Harmonic1DModel
       CALL SetFieldFromInput( InputData, "NrEquilibrSteps", NrEquilibSteps, int(10.0*(1.0/EquilGamma)/EquilTStep) )
       EquilibrationStepInterval = CEILING( real(NrEquilibSteps) / real(NrOfPrintSteps) )
 
+      IF ( .NOT. MorsePotential ) THEN
+         WRITE(*, 901) QFreq*FreqConversion(InternalUnits,InputUnits), FreqUnit(InputUnits),      &
+                       ForceConstant*EnergyConversion(InternalUnits,InputUnits)/LengthConversion(InternalUnits,InputUnits)**2, &
+                               EnergyUnit(InputUnits)//"/"//LengthUnit(InputUnits)//"^2"
+      ELSE
+         WRITE(*, 902) QFreq*FreqConversion(InternalUnits,InputUnits), FreqUnit(InputUnits),      &
+                       ForceConstant*EnergyConversion(InternalUnits,InputUnits)/LengthConversion(InternalUnits,InputUnits)**2, &
+                               EnergyUnit(InputUnits)//"/"//LengthUnit(InputUnits)//"^2", &
+                       WellDepth*EnergyConversion(InternalUnits,InputUnits), EnergyUnit(InputUnits), &
+                       MorseAlpha/LengthConversion(InternalUnits,InputUnits), "1/"//LengthUnit(InputUnits)
+      END IF
+
       WRITE(*, 905) Temperature*TemperatureConversion(InternalUnits,InputUnits), TemperUnit(InputUnits), &
                     EquilTStep*TimeConversion(InternalUnits,InputUnits), TimeUnit(InputUnits), &
                     1./EquilGamma*TimeConversion(InternalUnits,InputUnits), TimeUnit(InputUnits), &
                     NrEquilibSteps, EquilibrationStepInterval
 
       WRITE(*, 904) NrTrajs, TimeStep*TimeConversion(InternalUnits,InputUnits), TimeUnit(InputUnits), NrOfSteps, NrOfPrintSteps
+
+   901 FORMAT(" * Harmonic potential                           ",           /,&
+              " * Oscillator frequency                         ",F10.2,1X,A,/,&
+              " * Oscillator force constant                    ",F10.4,1X,A,/ )
+
+   902 FORMAT(" * Morse potential                              ",           /,&
+              " * Oscillator frequency                         ",F10.2,1X,A,/,&
+              " * Oscillator force constant                    ",F10.4,1X,A,/,&
+              " * Depth of the potential well                  ",F10.4,1X,A,/,&
+              " * Morse exponential constant                   ",F10.4,1X,A,/ )
 
    905 FORMAT(" * Equilibration variables                      ",           /,&
               " * Temperature of the system+surface:           ",F10.4,1X,A,/,&  
@@ -158,7 +198,7 @@ MODULE Harmonic1DModel
 !*******************************************************************************
 !> Initialization of the data for the vibrational relaxation simulation:
 !> memory allocation, variable initialization and data type setup.
-!>
+!>SetupFFT
 !*******************************************************************************
    SUBROUTINE Harmonic1DModel_Initialize()
       IMPLICIT NONE
@@ -241,6 +281,9 @@ MODULE Harmonic1DModel
 
       ! Initialize random number seed
       CALL SetSeed( RandomNr, -1 )
+
+      ! Setup fourier transform
+      CALL SetupFFT( DiscreteFourier, NrOfPrintSteps+1 )
 
    END SUBROUTINE Harmonic1DModel_Initialize
 
@@ -536,7 +579,7 @@ MODULE Harmonic1DModel
          ! normalize autocorrelation function
          PowerSpectrum(:) = QAutoCorr(:) / real(NrTrajs ) - ( AverCoordOverTrajs(1) )**2
          ! compute fourier transform
-         CALL DiscreteFourier( PowerSpectrum )
+         CALL ExecuteFFT( DiscreteFourier, PowerSpectrum, DIRECT_FFT )
          ! Print spectral density of the stocastic process X(t)
          DO iOmega = 0, NrOfPrintSteps
                WRITE(QSpectralDensUnit,"(F20.8,3F20.8)")  iOmega*dOmega/MyConsts_cmmin1toAU,  abs(PowerSpectrum(iOmega)), & 
@@ -601,6 +644,9 @@ MODULE Harmonic1DModel
       CALL DisposeEvolutionData( MolecularDynamics )
       CALL DisposeEvolutionData( Equilibration )
 
+      ! Unset fourier transform data
+      CALL DisposeFFT( DiscreteFourier )
+
    END SUBROUTINE Harmonic1DModel_Dispose
 
 !*************************************************************************************************
@@ -616,7 +662,8 @@ MODULE Harmonic1DModel
       IMPLICIT NONE
       REAL, DIMENSION(:), TARGET, INTENT(IN)  :: Positions
       REAL, DIMENSION(:), TARGET, INTENT(OUT) :: Forces 
-      INTEGER :: NrDOF, i       
+      INTEGER :: NrDOF, i   
+      REAL :: ExpAR
       
       ! Check the number of degree of freedom
       NrDOF = size( Positions )
@@ -628,8 +675,14 @@ MODULE Harmonic1DModel
       Forces(:) = 0.0
 
       ! Compute potential and forces for the system potential
-      VHarmonic = VHarmonic + 0.5 * ForceConstant * Positions(1)**2
-      Forces(1) = -  ForceConstant * Positions(1)
+      IF ( .NOT. MorsePotential ) THEN
+         VHarmonic = VHarmonic + 0.5 * ForceConstant * Positions(1)**2
+         Forces(1) = -  ForceConstant * Positions(1)
+      ELSE IF ( MorsePotential ) THEN
+         ExpAR = EXP( -MorseAlpha*Positions(1) ) 
+         VHarmonic = VHarmonic + WellDepth*(1.0 - ExpAR)**2
+         Forces(1) = - 2.0*WellDepth*MorseAlpha * (1.0 - ExpAR) * ExpAR
+      END IF
 
       IF ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
          ! Add potential and forces of the bath and the coupling
@@ -646,52 +699,6 @@ MODULE Harmonic1DModel
       END IF
       
    END FUNCTION VHarmonic
-
-!*************************************************************************************************
-
-   SUBROUTINE DiscreteFourier( Vector )
-      IMPLICIT NONE
-      COMPLEX, DIMENSION(:), INTENT(INOUT) :: Vector
-      COMPLEX, DIMENSION(size(Vector)) :: Transform
-      INTEGER :: N, i, j
-      COMPLEX :: Factor
-
-      N = size( Vector )
-
-      Transform(:) = 0.0
-
-      DO i = 0, N-1
-         Factor = 2.0 * MyConsts_I * MyConsts_PI * real(i) / real(N)
-         DO j = 0, N-1
-            Transform(i+1) = Transform(i+1) + Vector(j+1) * exp( Factor * real(j) )
-         END DO
-      END DO
-
-      Vector(:) = Transform(:)
-
-   END SUBROUTINE DiscreteFourier
-
-   SUBROUTINE DiscreteInverseFourier( Vector )
-      IMPLICIT NONE
-      COMPLEX, DIMENSION(:), INTENT(INOUT) :: Vector
-      COMPLEX, DIMENSION(size(Vector)) :: Transform
-      INTEGER :: N, i, j
-      COMPLEX :: Factor
-
-      N = size( Vector )
-
-      Transform(:) = 0.0
-
-      DO i = 0, N-1
-         Factor = - MyConsts_I * 2.0 * MyConsts_PI * real(i) / real(N)
-         DO j = 0, N-1
-            Transform(i+1) = Transform(i+1) + Vector(j+1) * exp( Factor * real(j) )
-         END DO
-      END DO
-
-      Vector(:) = Transform(:) / ( N-1 )
-
-   END SUBROUTINE DiscreteInverseFourier
 
 !*************************************************************************************************
 
