@@ -67,6 +67,17 @@ C 1d v for ZH at fixed equil zC
       else if (label(1:ilbl) .eq. 'vhsticking1D') then
         ifunc=2
 
+C switching function from interaction to gas phase
+      else if (label(1:ilbl) .eq. 'switchToGasPhase') then
+         if (np .gt.0) then
+            hoprpar(2)=hoppar(1,np)
+            hoprpar(3)=hoppar(2,np)
+         else
+            hoprpar(2)=0.d0
+            hoprpar(3)=1.d0
+         endif
+        ifunc=3
+
 C-----------------------------------------------------------------------
 C end of if loop
 C-----------------------------------------------------------------------
@@ -113,6 +124,9 @@ C       call newfunc(x,v)
 
       else if (ifunc .eq. 2) then
         call vhatfixedzc(x,v)
+
+      else if (ifunc .eq. 3) then
+        call switchFunction(x,v,hoprpar(2),hoprpar(3)) 
 
       else
         routine='ufunc1d (opfuncs/user1D.F)'
@@ -187,6 +201,36 @@ C-----------------------------------------------------------------------
       stop
 
 C      return
+      end
+
+C#######################################################################
+
+
+C#######################################################################
+C#######################################################################
+C
+C                     SwitchFunction
+C
+C#######################################################################
+
+      subroutine switchFunction(x,v,x0,xf)
+
+      implicit none
+
+      real*8  x,v,x0,l
+      real*8  xf
+
+      l = xf - x0
+      if (x .le. x0) then
+         v = 1.0d0
+      else if (x .ge. xf) then
+         v = 0.0d0
+      else
+         v = exp(1.0d0 - 1.0d0/(1.0d0 - ((x-x0)/l)**3))
+      endif
+ 
+
+      return
       end
 
 C#######################################################################
