@@ -301,9 +301,11 @@ MODULE ThermalEquilibrium
          PRINT*, LinearCouplingCoeff
       END IF
 
-      X(1:4) = (/ 0.0, 0.0, HZEquilibrium, C1Puckering  /)
-      X(5:NDim) = MinSlab(1:NDim-4)
-      CALL CheckForces( X )
+      IF ( BathType == SLAB_POTENTIAL ) THEN
+         X(1:4) = (/ 0.0, 0.0, HZEquilibrium, C1Puckering  /)
+         X(5:NDim) = MinSlab(1:NDim-4)
+         CALL CheckForces( X )
+      ENDIF
 
    END SUBROUTINE ThermalEquilibrium_Initialize
 

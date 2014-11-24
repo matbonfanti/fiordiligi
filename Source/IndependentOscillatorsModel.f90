@@ -206,7 +206,7 @@ CONTAINS
             DO iBath = 1,  Bath%BathSize
                Bath%Frequencies(iBath) = Bath%LowerCutOff + iBath * Bath%DeltaOmega
                Bath%Couplings(iBath) = SQRT( 2.0 * Bath%OscillatorsMass * Bath%Frequencies(iBath) * Bath%DeltaOmega *      & 
-                    GetSpline( SpectralDensitySpline, Bath%Frequencies(iBath) ) / MyConsts_PI )
+                    ABS(GetSpline( SpectralDensitySpline, Bath%Frequencies(iBath) )) / MyConsts_PI )
                ! Compute force constant of the distorsion
                Bath%DistorsionForce = Bath%DistorsionForce + Bath%Couplings(iBath)**2 / &
                                                                           ( Bath%OscillatorsMass * Bath%Frequencies(iBath)**2 ) 
