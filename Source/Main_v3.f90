@@ -1,26 +1,19 @@
 !***************************************************************************************
-!*                              PROGRAM JK6_v3
+!*                              PROGRAM fiordiligi
 !***************************************************************************************
-!>  \mainpage      Program JK6 - version 3
+!>  \mainpage      Program fiordiligi - version 3
 !>
 !>  Classical simulations of H + graphene system + dissipative bath       \n
 !>  * Model: 3D for H + 1D Z coordinate for carbon atom                   \n
 !>  * Bath:  121 C atoms slab, normal bath, chain bath, langevin dynamics \n
 !>  * Propagation: Velocity-Verlet in the microcanonical ensamble         \n
-!>                 Beeman's algorithm in the canonical ensamble
+!>                 symplectic in the canonical ensamble                   \n
+!>                 symplectic for ring polymer molecular dynamics
 !>
 !>  \author        Matteo Bonfanti (Bret Jackson and Jay Kerwin for the PES sub)
 !>  \version       3.0
 !>  \date          7 October 2013
 !>
-!>  \todo          Fix temperature boundaries in the istogram of temperature
-!>                 sampling (in Langevin HO test)
-!>  \todo          Fix normalization of DFT and inverse DFT 
-!>  \todo          Introduce more C atoms in the slab when printing the traj
-!>  \todo          PERFORMANCES OF FT !!!! \n
-!>                 at least, since it's a matrix vector product with fixed
-!>                 matrix, on-the-fly computation of exp coeff can be avoided
-!>  \todo          deallocate arrays allocated in the main program!  \n
 !>
 !***************************************************************************************
 PROGRAM JK6_v3
@@ -57,7 +50,7 @@ PROGRAM JK6_v3
 
 
    PRINT "(/,     '                    ==============================')"
-   PRINT "(       '                                JK6_v3            ')"
+   PRINT "(       '                             fiordiligi           ')"
    PRINT "(       '                    ==============================',/)"
    PRINT "(       '                    Author: Matteo Bonfanti  ')"
    PRINT "(       '         ( Potential originally implemented by B.Jackson and J.Kerwin )',/)"
@@ -161,7 +154,13 @@ PROGRAM JK6_v3
       ! Set lower boundary for oscillator bath frequency
       CALL SetFieldFromInput( InputData, "BathLowerCutOffFreq", BathLowerCutOffFreq, 0.0 )
       BathLowerCutOffFreq = BathLowerCutOffFreq * FreqConversion(InputUnits, InternalUnits) 
-
+      ! Set non linear system-bath coupling
+      CALL SetFieldFromInput( InputData, "NonLinearCoupling", NonLinearCoupling, .FALSE. )
+      IF ( NonLinearCoupling ) THEN
+         CALL SetFieldFromInput( InputData, "AlphaCoupling", AlphaCoupling )
+         AlphaCoupling = AlphaCoupling * SQRT(MassConversion(InputUnits, InternalUnits))
+         AlphaCoupling = AlphaCoupling / LengthConversion(InputUnits, InternalUnits)
+      END IF
    ELSE IF ( BathType == CHAIN_BATH ) THEN
       ! Langevin relaxation at the end of the chain
       CALL SetFieldFromInput( InputData, "RelaxAtChainEnd",  DynamicsGamma, 0.0 ) 
@@ -335,6 +334,7 @@ PROGRAM JK6_v3
          ELSE
             CALL SetupOhmicIndepOscillatorsModel( Bath, NBath, 0, OhmicGammaTimesMass, MassBath, BathCutOffFreq )
          END IF
+         IF ( NonLinearCoupling ) CALL SetNonLinearCoupling( Bath, AlphaCoupling )
    ELSE IF (  BathType == CHAIN_BATH ) THEN
          CALL SetupIndepOscillatorsModel( Bath, NBath, 1, SpectralDensityFile, MassBath, BathCutOffFreq )
    ELSE IF ( BathType == DOUBLE_CHAIN ) THEN 

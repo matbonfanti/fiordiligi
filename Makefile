@@ -6,11 +6,11 @@
 #----------------------------------------------------------------------------
 
 # Executable name
-EXENAME = JK6_v3
+EXENAME = fiordiligi_v3
 
 # Print relevant output to log file
 LOGFILE = yes
-LOGNAME = jk6_v3.log
+LOGNAME = fiordiligi_v3.log
 
 # Compiler ( gfortran, ifort )
 FC = ifort    
@@ -333,21 +333,14 @@ AR 			= ar cr
 #                       START OF MAKE RULES
 #----------------------------------------------------------------------------
 
-# Link objects to the produce the executable file ( JK_v3 )
+# Link objects to the produce the executable file
 ${EXENAME} : ${SRCDIR}/Main_v3.f90 ${OBJS} 
 	${PREPROCESS} ${SRCDIR}/Main_v3.f90 ${PPDIR}/Main_v3.f90
 	${COMPILE} ${PPDIR}/Main_v3.f90 
 	${LINK} ${EXEDIR}/$@ Main_v3.o $(OBJS) ${LIBFLG}
 	rm Main_v3.o
 
-# Link objects to the produce the executable file ( JK_v2 )
-JK6_v2 : ${SRCDIR}/Main.f90 ${OBJS} 
-	${PREPROCESS} ${SRCDIR}/Main.f90 ${PPDIR}/Main.f90
-	${COMPILE} ${PPDIR}/Main.f90 
-	${LINK} ${EXEDIR}/$@ Main.o $(OBJS) ${LIBFLG}
-	rm Main.o
-
-# Link objects to produce NewWiener executable file ( NewWiener )
+# Link objects to produce NewWiener executable file
 NewWiener : ${SRCDIR}/NewWiener.f90 ${OBJS}
 	${PREPROCESS} ${SRCDIR}/NewWiener.f90 ${PPDIR}/NewWiener.f90
 	${COMPILE} ${PPDIR}/NewWiener.f90 
@@ -365,7 +358,7 @@ ${OBJDIR}/%.o : ${SRCDIR}/%.f90
 	rm $*.o $(shell echo $* | tr A-Z a-z).mod
 
 # Make target to build required directories
-directories : ${PPDIR} ${OBJDIR} ${EXEDIR}
+directories : 
 	mkdir -p ${PPDIR} ${OBJDIR} ${EXEDIR}
 
 # Make documentation with doxygen

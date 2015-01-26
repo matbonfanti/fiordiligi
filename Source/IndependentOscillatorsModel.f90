@@ -44,7 +44,8 @@ MODULE IndependentOscillatorsModel
    IMPLICIT NONE
 
    PRIVATE
-   PUBLIC :: SetupIndepOscillatorsModel, SetupOhmicIndepOscillatorsModel, BathPotentialAndForces, DisposeIndepOscillatorsModel
+   PUBLIC :: SetupIndepOscillatorsModel, SetupOhmicIndepOscillatorsModel, SetNonLinearCoupling
+   PUBLIC  :: BathPotentialAndForces, DisposeIndepOscillatorsModel
    PUBLIC :: ThermalEquilibriumBathConditions, ZeroKelvinBathConditions, BathOfRingsThermalConditions
    PUBLIC :: EnergyOfTheBath, GetDistorsionForce, CouplingAndDistortionHessian, HessianOfTheBath
 
@@ -65,6 +66,9 @@ MODULE IndependentOscillatorsModel
       REAL :: DeltaOmega                              !< Frequency spacing of the normal bath (stored in AU)
       REAL :: OscillatorsMass                         !< Mass of the oscillators
       REAL :: DistorsionForce                         !< Force constant of the distorsion correction
+      LOGICAL :: NonLinearCoup = .FALSE.              !< Logical variable to set exponential system-bath coupling
+      REAL :: NonLinCoup_Alpha                        !< Alpha coefficient of non linear coupling
+      REAL :: NonLinCoup_D                            !< D coefficient of non linear coupling
       LOGICAL :: BathIsSetup = .FALSE.                !< Logical variable to set status of the class
    END TYPE BathData
 
@@ -220,6 +224,9 @@ CONTAINS
 
       ENDIF
 
+      ! Default coupling is linear
+      Bath%NonLinearCoup = .FALSE.
+
       ! Module is setup
       Bath%BathIsSetup = .TRUE.
 
@@ -346,6 +353,44 @@ CONTAINS
 
    END SUBROUTINE SetupOhmicIndepOscillatorsModel
 
+!===============================================================================================================
+
+!*******************************************************************************
+!                       SetNonLinearCoupling
+!*******************************************************************************
+!>  Setup non linear coupling between the system and the bath.
+!>  Hcoup = D * (exp(-alpha X)-1) / alpha * s
+!>  where D = sqrt(sum c_k^2)/sqrt(mass) and X = sqrt(mass)*sum c_k q_k
+!> 
+!> @param    
+!*******************************************************************************
+   SUBROUTINE SetNonLinearCoupling( Bath, Alpha )
+      IMPLICIT NONE
+      TYPE(BathData)   :: Bath
+      REAL, INTENT(IN) :: Alpha
+      INTEGER :: iBath
+
+      CALL ERROR( Bath%BathType == CHAIN_BATH, &
+            "IndependentOscillatorsModel.SetNonLinearCoupling: exp coupling only with normal bath" )
+
+      ! Compute D
+      Bath%NonLinCoup_D = 0.0
+      DO iBath = 1, Bath%BathSize
+         Bath%NonLinCoup_D = Bath%NonLinCoup_D + Bath%Couplings(iBath)**2
+      END DO
+      Bath%Couplings(iBath) = SQRT( Bath%Couplings(iBath) * Bath%OscillatorsMass )
+
+      ! Store alpha
+      Bath%NonLinCoup_Alpha = Alpha
+
+      ! Set non linear coupling
+      Bath%NonLinearCoup = .TRUE.
+
+   END SUBROUTINE SetNonLinearCoupling
+
+
+!===============================================================================================================
+
 
 
 !*******************************************************************************
@@ -427,17 +472,42 @@ CONTAINS
          Coupl = 0.0
          DO iBath = 1, Bath%BathSize
             V = V + 0.5 * Bath%OscillatorsMass * ( Bath%Frequencies(iBath) * QBath(iBath) )**2
-            QForces(iBath) = QForces(iBath) - Bath%OscillatorsMass * ( Bath%Frequencies(iBath) )**2 * QBath(iBath)   &
-                                   + QCoupl * Bath%Couplings(iBath)
+            IF ( Bath%NonLinearCoup ) THEN
+               QForces(iBath) = QForces(iBath) - Bath%OscillatorsMass * ( Bath%Frequencies(iBath) )**2 * QBath(iBath) 
+            ELSE
+               QForces(iBath) = QForces(iBath) - Bath%OscillatorsMass * ( Bath%Frequencies(iBath) )**2 * QBath(iBath) &
+                                      + QCoupl * Bath%Couplings(iBath)
+            END IF
             Coupl = Coupl + Bath%Couplings(iBath) * QBath(iBath)
          END DO
-         IF ( PRESENT( CouplingV ) ) THEN
-            V = V + 0.5 * Bath%DistorsionForce * QCoupl**2
-            CouplingV = CouplingV - Coupl * QCoupl
-         ELSE
-            V = V - Coupl * QCoupl + 0.5 * Bath%DistorsionForce * QCoupl**2
+
+         IF ( Bath%NonLinearCoup ) THEN
+            DO iBath = 1, Bath%BathSize
+               QForces(iBath) = QForces(iBath) + Bath%NonLinCoup_D * QCoupl * Bath%Couplings(iBath) *&
+              EXP( -Bath%NonLinCoup_Alpha*Coupl/SQRT(Bath%OscillatorsMass) ) / SQRT(Bath%OscillatorsMass)
+            END DO
          END IF
-         CouplForce = CouplForce + Coupl - Bath%DistorsionForce * QCoupl
+
+         IF ( Bath%NonLinearCoup ) THEN
+            IF ( PRESENT( CouplingV ) ) THEN
+               V = V + 0.5 * Bath%DistorsionForce * QCoupl**2
+               CouplingV = CouplingV + Bath%NonLinCoup_D * QCoupl * &
+                     (EXP( -Bath%NonLinCoup_Alpha*Coupl/SQRT(Bath%OscillatorsMass) )-1)/Bath%NonLinCoup_Alpha
+            ELSE
+               V = V + 0.5 * Bath%DistorsionForce * QCoupl**2 + Bath%NonLinCoup_D * QCoupl * &
+                     (EXP( -Bath%NonLinCoup_Alpha*Coupl/SQRT(Bath%OscillatorsMass) )-1)/Bath%NonLinCoup_Alpha
+            END IF
+            CouplForce = CouplForce - Bath%DistorsionForce * QCoupl - 0.5 * Bath%NonLinCoup_D * &
+                     (EXP( -Bath%NonLinCoup_Alpha*Coupl/SQRT(Bath%OscillatorsMass) )-1)/Bath%NonLinCoup_Alpha
+         ELSE
+            IF ( PRESENT( CouplingV ) ) THEN
+               V = V + 0.5 * Bath%DistorsionForce * QCoupl**2
+               CouplingV = CouplingV - Coupl * QCoupl
+            ELSE
+               V = V - Coupl * QCoupl + 0.5 * Bath%DistorsionForce * QCoupl**2
+            END IF
+            CouplForce = CouplForce + Coupl - Bath%DistorsionForce * QCoupl
+         END IF
 
       END IF
 
@@ -700,7 +770,12 @@ CONTAINS
             Coupl = Coupl +  Bath%Couplings(iBath) * QBath(iBath)
             VBath = VBath + 0.5 * Bath%OscillatorsMass * ( Bath%Frequencies(iBath) * QBath(iBath) )**2
          END DO
-         VCoupling = - Coupl * QCoupl 
+         IF ( Bath%NonLinearCoup ) THEN
+            VCoupling = Bath%NonLinCoup_D * QCoupl * &
+                     (EXP( -Bath%NonLinCoup_Alpha*Coupl/SQRT(Bath%OscillatorsMass) )-1)/Bath%NonLinCoup_Alpha
+         ELSE 
+            VCoupling = - Coupl * QCoupl 
+         END IF
          VBath = VBath + 0.5 * Bath%DistorsionForce * QCoupl**2
          IF( PRESENT( FirstEffectiveMode ) ) FirstEffectiveMode = Coupl
 
@@ -820,6 +895,9 @@ CONTAINS
 
       ! deallocate memory
       DEALLOCATE( Bath%Frequencies, Bath%Couplings )
+
+      ! Set linear coupling
+      Bath%NonLinearCoup = .FALSE.
 
       ! Module is no longer setup
       Bath%BathIsSetup = .FALSE.
