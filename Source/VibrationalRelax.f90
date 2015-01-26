@@ -164,23 +164,36 @@ MODULE VibrationalRelax
 
       END IF
 
-      WRITE(*, 903) InitEnergy*EnergyConversion(InternalUnits,InputUnits), EnergyUnit(InputUnits),                 &
+      WRITE(*, 902) InitEnergy*EnergyConversion(InternalUnits,InputUnits), EnergyUnit(InputUnits),                 &
                     (InitEnergy-MinimumEnergy)*EnergyConversion(InternalUnits,InputUnits), EnergyUnit(InputUnits), &
                     NrOfInitSnapshots, TimeBetweenSnaps*TimeConversion(InternalUnits,InputUnits), TimeUnit(InputUnits)
 
-      WRITE(*, 904) NrTrajs, TimeStep*TimeConversion(InternalUnits,InputUnits), TimeUnit(InputUnits), NrOfSteps, NrOfPrintSteps
+      WRITE(*, 903) NrTrajs, TimeStep*TimeConversion(InternalUnits,InputUnits), TimeUnit(InputUnits), NrOfSteps, NrOfPrintSteps
 
-   903 FORMAT(" * Initial conditions of the atom-surface system ", /,&
+      IF ( BathType ==  SLAB_POTENTIAL ) &
+         WRITE(*, 904) 1./EquilGamma*TimeConversion(InternalUnits,InputUnits), TimeUnit(InputUnits), &
+                    EquilTStep*TimeConversion(InternalUnits,InputUnits), TimeUnit(InputUnits), &
+                    NrEquilibSteps*EquilTStep*TimeConversion(InternalUnits,InputUnits), TimeUnit(InputUnits), &
+                    NrEquilibSteps
+
+   902 FORMAT(" * Initial conditions of the atom-surface system ", /,&
               " * Absolute initial energy:                     ",F10.4,1X,A,/,&  
               " *  - w.r.t. the bottom of the well:            ",F10.4,1X,A,/,&  
               " * Nr of initial system snapshots:              ",I10,       /,& 
               " * Time between snapshots:                      ",F10.4,1X,A,/ )
 
-   904 FORMAT(" * Dynamical simulation variables               ",           /,&
+   903 FORMAT(" * Dynamical simulation variables               ",           /,&
               " * Nr of trajectories:                          ",I10,       /,& 
               " * Propagation time step:                       ",F10.4,1X,A,/,&  
               " * Nr of time steps of each trajectory:         ",I10,       /,& 
               " * Nr of print steps of each trajectory:        ",I10,       / )
+
+   904 FORMAT(" * Bath equilibration variables                 ",           /,&
+              " * Relaxation time of the Langevin dynamics:    ",F10.4,1X,A,/,& 
+              " * Equilibration time step:                     ",F10.4,1X,A,/,& 
+              " * Equilibration total time:                    ",F10.4,1X,A,/,&
+              " * Nr of equilibration steps:                   ",I10,       / )
+
 
    END SUBROUTINE VibrationalRelax_ReadInput
 
