@@ -33,8 +33,7 @@
 !***************************************************************************************
 
 MODULE IndependentOscillatorsModel
-   USE ErrorTrap
-   USE MyConsts
+#include "preprocessoptions.cpp"
    USE SplineInterpolator
    USE RandomNumberGenerator
    USE MyLinearAlgebra
@@ -45,9 +44,10 @@ MODULE IndependentOscillatorsModel
 
    PRIVATE
    PUBLIC :: SetupIndepOscillatorsModel, SetupOhmicIndepOscillatorsModel, SetNonLinearCoupling
-   PUBLIC  :: BathPotentialAndForces, DisposeIndepOscillatorsModel
+   PUBLIC :: BathPotentialAndForces, DisposeIndepOscillatorsModel
    PUBLIC :: ThermalEquilibriumBathConditions, ZeroKelvinBathConditions, BathOfRingsThermalConditions
    PUBLIC :: EnergyOfTheBath, GetDistorsionForce, CouplingAndDistortionHessian, HessianOfTheBath
+   PUBLIC :: GetFirstEffectiveMode
 
    PUBLIC :: BathData
 
@@ -68,7 +68,9 @@ MODULE IndependentOscillatorsModel
       REAL :: DistorsionForce                         !< Force constant of the distorsion correction
       LOGICAL :: NonLinearCoup = .FALSE.              !< Logical variable to set exponential system-bath coupling
       REAL :: NonLinCoup_Alpha                        !< Alpha coefficient of non linear coupling
-      REAL :: NonLinCoup_D                            !< D coefficient of non linear coupling
+      REAL :: NonLinCoup_D0                           !< D coefficient of non linear coupling
+      REAL :: NonLinCoup_OmegaBar                     !< Omega Bar coefficient of non linear coupling
+      REAL :: NonLinCoup_Beta                         !< Beta coefficient of non linear coupling
       LOGICAL :: BathIsSetup = .FALSE.                !< Logical variable to set status of the class
    END TYPE BathData
 
@@ -106,7 +108,7 @@ CONTAINS
       REAL, DIMENSION(:), ALLOCATABLE :: RdFreq, RdSpectralDens
       TYPE(SplineType) :: SpectralDensitySpline
       REAL :: D0
-#if defined(VERBOSE_OUTPUT)
+#if defined(__PRINT_SPECTRAL_DENSITY)
       INTEGER :: SpectralDensityUnit
 #endif
 
@@ -230,7 +232,7 @@ CONTAINS
       ! Module is setup
       Bath%BathIsSetup = .TRUE.
 
-#if defined(VERBOSE_OUTPUT)
+#if defined(__PRINT_SPECTRAL_DENSITY)
       SpectralDensityUnit = LookForFreeUnit()
       OPEN( FILE="ReadSpectralDensity.dat", UNIT=SpectralDensityUnit )
       WRITE(SpectralDensityUnit, "(A,A)") "# Spectral Density read from file: ", TRIM(ADJUSTL(FileName))
@@ -247,12 +249,14 @@ CONTAINS
       WRITE(SpectralDensityUnit,"(/)") 
 #endif
 
-#if defined(VERBOSE_OUTPUT)
-      WRITE(*,*) " Independent oscillator model potential has been setup"
-      WRITE(*,*) " ... (details) ... "
-      WRITE(*,*) " Distorsion frequency coefficient (atomic units): ", Bath%DistorsionForce
-      WRITE(*,*) " D0 (atomic units): ", D0
-      WRITE(*,*) " Oscillators mass (atomic units): ", Bath%OscillatorsMass
+#if defined(LOG_FILE)
+      __OPEN_LOG_FILE
+      WRITE(__LOG_UNIT,*) " Independent oscillator model potential has been setup"
+      WRITE(__LOG_UNIT,*) " ... (details) ... "
+      WRITE(__LOG_UNIT,*) " Distorsion frequency coefficient (atomic units): ", Bath%DistorsionForce
+      WRITE(__LOG_UNIT,*) " D0 (atomic units): ", D0
+      WRITE(__LOG_UNIT,*) " Oscillators mass (atomic units): ", Bath%OscillatorsMass
+      __CLOSE_LOG_FILE
 #endif
 
    END SUBROUTINE SetupIndepOscillatorsModel
@@ -279,7 +283,9 @@ CONTAINS
 
       REAL :: SpectralDens, D0
       INTEGER :: iBath
+#if defined(__PRINT_SPECTRAL_DENSITY)
       INTEGER :: SpectralDensityUnit
+#endif
 
       ! If data already setup give a warning and deallocate memory
       CALL WARN( Bath%BathIsSetup, "IndependentOscillatorsModel.SetupOhmicIndepOscillatorsModel: overwriting bath data" )
@@ -327,6 +333,7 @@ CONTAINS
       ! Module is setup
       Bath%BathIsSetup = .TRUE.
 
+#if defined(__PRINT_SPECTRAL_DENSITY)
       SpectralDensityUnit = LookForFreeUnit()
       OPEN( FILE="ReadSpectralDensity.dat", UNIT=SpectralDensityUnit )
       WRITE(SpectralDensityUnit, "(A,1F15.6)") "# Ohmic Spectral Density with mass*gamma = ", SysMassTimeGamma
@@ -342,13 +349,16 @@ CONTAINS
                            Bath%Couplings(iBath),   SysMassTimeGamma * Bath%Frequencies(iBath)
       END DO
       WRITE(SpectralDensityUnit,"(/)") 
+#endif
 
-#if defined(VERBOSE_OUTPUT)
-      WRITE(*,*) " Independent oscillator model potential has been setup"
-      WRITE(*,*) " ... (details) ... "
-      WRITE(*,*) " Distorsion frequency coefficient (atomic units): ", Bath%DistorsionForce
-      WRITE(*,*) " D0 (atomic units): ", D0
-      WRITE(*,*) " Oscillators mass (atomic units): ", Bath%OscillatorsMass
+#if defined(LOG_FILE)
+      __OPEN_LOG_FILE
+      WRITE(__LOG_UNIT,*) " Independent oscillator model potential has been setup"
+      WRITE(__LOG_UNIT,*) " ... (details) ... "
+      WRITE(__LOG_UNIT,*) " Distorsion frequency coefficient (atomic units): ", Bath%DistorsionForce
+      WRITE(__LOG_UNIT,*) " D0 (atomic units): ", D0
+      WRITE(__LOG_UNIT,*) " Oscillators mass (atomic units): ", Bath%OscillatorsMass
+      __CLOSE_LOG_FILE
 #endif
 
    END SUBROUTINE SetupOhmicIndepOscillatorsModel
@@ -373,18 +383,34 @@ CONTAINS
       CALL ERROR( Bath%BathType == CHAIN_BATH, &
             "IndependentOscillatorsModel.SetNonLinearCoupling: exp coupling only with normal bath" )
 
-      ! Compute D
-      Bath%NonLinCoup_D = 0.0
+      ! Compute D0 and OmegaBar
+      Bath%NonLinCoup_D0 = 0.0
+      Bath%NonLinCoup_OmegaBar = 0.0
       DO iBath = 1, Bath%BathSize
-         Bath%NonLinCoup_D = Bath%NonLinCoup_D + Bath%Couplings(iBath)**2
+         Bath%NonLinCoup_D0 = Bath%NonLinCoup_D0 + Bath%Couplings(iBath)**2
+         Bath%NonLinCoup_OmegaBar = Bath%NonLinCoup_OmegaBar + Bath%Couplings(iBath)**2 / Bath%Frequencies(iBath)**2
       END DO
-      Bath%Couplings(iBath) = SQRT( Bath%Couplings(iBath) * Bath%OscillatorsMass )
+      Bath%NonLinCoup_D0 = SQRT( Bath%NonLinCoup_D0 )
+      Bath%NonLinCoup_OmegaBar = Bath%NonLinCoup_D0 / SQRT(Bath%NonLinCoup_OmegaBar)
 
       ! Store alpha
       Bath%NonLinCoup_Alpha = Alpha
 
+      ! Compute beta coefficient
+      Bath%NonLinCoup_Beta = Bath%NonLinCoup_D0 / Bath%OscillatorsMass / Bath%NonLinCoup_OmegaBar**2
+
       ! Set non linear coupling
       Bath%NonLinearCoup = .TRUE.
+
+#if defined(LOG_FILE)
+      __OPEN_LOG_FILE
+      WRITE(__LOG_UNIT,*) " Non-linear coupling in the bath coords has been setup"
+      WRITE(__LOG_UNIT,*) " Alpha (atomic units):     ", Bath%NonLinCoup_Alpha
+      WRITE(__LOG_UNIT,*) " D0 (atomic units):        ", Bath%NonLinCoup_D0
+      WRITE(__LOG_UNIT,*) " Omega bar (atomic units): ", Bath%NonLinCoup_OmegaBar
+      WRITE(__LOG_UNIT,*) " Beta (atomic units):      ", Bath%NonLinCoup_Beta
+      __CLOSE_LOG_FILE
+#endif
 
    END SUBROUTINE SetNonLinearCoupling
 
@@ -421,7 +447,8 @@ CONTAINS
 
       INTEGER :: iBath
       REAL, DIMENSION(:), POINTER :: Dn
-      REAL    :: Coupl
+      REAL    :: EffMode
+      REAL  :: TraslCoord, Expon
 
       ! Check if the bath is setup
       CALL ERROR( .NOT. Bath%BathIsSetup, "IndependentOscillatorsModel.BathPotentialAndForces: bath is not setup" )
@@ -469,44 +496,42 @@ CONTAINS
       ELSE IF ( Bath%BathType == STANDARD_BATH ) THEN
 
          ! POTENTIAL OF THE BATH OSCILLATORS AND DERIVATIVES WITH RESPECT TO BATH COORDS
-         Coupl = 0.0
+         EffMode = 0.0
          DO iBath = 1, Bath%BathSize
             V = V + 0.5 * Bath%OscillatorsMass * ( Bath%Frequencies(iBath) * QBath(iBath) )**2
-            IF ( Bath%NonLinearCoup ) THEN
-               QForces(iBath) = QForces(iBath) - Bath%OscillatorsMass * ( Bath%Frequencies(iBath) )**2 * QBath(iBath) 
-            ELSE
-               QForces(iBath) = QForces(iBath) - Bath%OscillatorsMass * ( Bath%Frequencies(iBath) )**2 * QBath(iBath) &
-                                      + QCoupl * Bath%Couplings(iBath)
-            END IF
-            Coupl = Coupl + Bath%Couplings(iBath) * QBath(iBath)
+            QForces(iBath) = QForces(iBath) - Bath%OscillatorsMass * ( Bath%Frequencies(iBath) )**2 * QBath(iBath) &
+                                   + QCoupl * Bath%Couplings(iBath)
+            EffMode = EffMode + Bath%Couplings(iBath) * QBath(iBath)
          END DO
 
-         IF ( Bath%NonLinearCoup ) THEN
-            DO iBath = 1, Bath%BathSize
-               QForces(iBath) = QForces(iBath) + Bath%NonLinCoup_D * QCoupl * Bath%Couplings(iBath) *&
-              EXP( -Bath%NonLinCoup_Alpha*Coupl/SQRT(Bath%OscillatorsMass) ) / SQRT(Bath%OscillatorsMass)
-            END DO
+         IF ( PRESENT( CouplingV ) ) THEN
+            V = V + 0.5 * Bath%DistorsionForce * QCoupl**2
+            CouplingV = CouplingV - EffMode * QCoupl
+         ELSE
+            V = V - EffMode * QCoupl + 0.5 * Bath%DistorsionForce * QCoupl**2
          END IF
+         CouplForce = CouplForce + EffMode - Bath%DistorsionForce * QCoupl
 
          IF ( Bath%NonLinearCoup ) THEN
-            IF ( PRESENT( CouplingV ) ) THEN
-               V = V + 0.5 * Bath%DistorsionForce * QCoupl**2
-               CouplingV = CouplingV + Bath%NonLinCoup_D * QCoupl * &
-                     (EXP( -Bath%NonLinCoup_Alpha*Coupl/SQRT(Bath%OscillatorsMass) )-1)/Bath%NonLinCoup_Alpha
+            ! Compute some useful quantities
+            EffMode = EffMode / Bath%NonLinCoup_D0
+            TraslCoord = EffMode - Bath%NonLinCoup_Beta * QCoupl
+            Expon = EXP( Bath%NonLinCoup_Alpha * TraslCoord )
+            ! Add potential correction
+            IF ( PRESENT( CouplingV ) ) THEN 
+               CouplingV = CouplingV + 0.5 * Bath%OscillatorsMass * Bath%NonLinCoup_OmegaBar**2 * &
+                                        ( (Expon-1.0)**2/Bath%NonLinCoup_Alpha**2 - TraslCoord**2 )
             ELSE
-               V = V + 0.5 * Bath%DistorsionForce * QCoupl**2 + Bath%NonLinCoup_D * QCoupl * &
-                     (EXP( -Bath%NonLinCoup_Alpha*Coupl/SQRT(Bath%OscillatorsMass) )-1)/Bath%NonLinCoup_Alpha
+               V = V  + 0.5 * Bath%OscillatorsMass * Bath%NonLinCoup_OmegaBar**2 * &
+                                        ( (Expon-1.0)**2/Bath%NonLinCoup_Alpha**2 - TraslCoord**2 )
             END IF
-            CouplForce = CouplForce - Bath%DistorsionForce * QCoupl - 0.5 * Bath%NonLinCoup_D * &
-                     (EXP( -Bath%NonLinCoup_Alpha*Coupl/SQRT(Bath%OscillatorsMass) )-1)/Bath%NonLinCoup_Alpha
-         ELSE
-            IF ( PRESENT( CouplingV ) ) THEN
-               V = V + 0.5 * Bath%DistorsionForce * QCoupl**2
-               CouplingV = CouplingV - Coupl * QCoupl
-            ELSE
-               V = V - Coupl * QCoupl + 0.5 * Bath%DistorsionForce * QCoupl**2
-            END IF
-            CouplForce = CouplForce + Coupl - Bath%DistorsionForce * QCoupl
+            ! Add force correction to the system force
+            CouplForce = CouplForce + Bath%NonLinCoup_D0 * ( Expon * (Expon-1.0)/Bath%NonLinCoup_Alpha - TraslCoord )
+            ! Add force correction to the bath oscillators force
+            DO iBath = 1, Bath%BathSize
+               QForces(iBath) = QForces(iBath) - Bath%OscillatorsMass * Bath%NonLinCoup_OmegaBar**2 * &
+                   Bath%Couplings(iBath) * ( Expon * (Expon-1.0)/Bath%NonLinCoup_Alpha - TraslCoord )
+            END DO
          END IF
 
       END IF
@@ -741,6 +766,8 @@ CONTAINS
       REAL, OPTIONAL, INTENT(OUT)    :: FirstEffectiveMode
       REAL :: Coupl
       INTEGER :: iBath
+      REAL    :: EffMode
+      REAL  :: TraslCoord, Expon
 
       ! Check if the bath is setup
       CALL ERROR( .NOT. Bath%BathIsSetup, "IndependentOscillatorsModel.EnergyOfTheBath: bath is not setup" )
@@ -770,15 +797,20 @@ CONTAINS
             Coupl = Coupl +  Bath%Couplings(iBath) * QBath(iBath)
             VBath = VBath + 0.5 * Bath%OscillatorsMass * ( Bath%Frequencies(iBath) * QBath(iBath) )**2
          END DO
-         IF ( Bath%NonLinearCoup ) THEN
-            VCoupling = Bath%NonLinCoup_D * QCoupl * &
-                     (EXP( -Bath%NonLinCoup_Alpha*Coupl/SQRT(Bath%OscillatorsMass) )-1)/Bath%NonLinCoup_Alpha
-         ELSE 
-            VCoupling = - Coupl * QCoupl 
-         END IF
+         VCoupling = - Coupl * QCoupl 
          VBath = VBath + 0.5 * Bath%DistorsionForce * QCoupl**2
          IF( PRESENT( FirstEffectiveMode ) ) FirstEffectiveMode = Coupl
 
+      END IF
+
+      IF ( Bath%NonLinearCoup ) THEN
+         ! Compute some useful quantities
+         EffMode = Coupl / Bath%NonLinCoup_D0
+         TraslCoord = EffMode - Bath%NonLinCoup_Beta * QCoupl
+         Expon = EXP( Bath%NonLinCoup_Alpha * TraslCoord )
+         ! Add potential correction
+         VCoupling = VCoupling + 0.5 * Bath%OscillatorsMass * Bath%NonLinCoup_OmegaBar**2 * &
+                                  ( (Expon-1.0)**2/Bath%NonLinCoup_Alpha - TraslCoord**2 )
       END IF
 
    END SUBROUTINE EnergyOfTheBath
@@ -801,6 +833,45 @@ CONTAINS
       Dist = Bath%DistorsionForce
    END FUNCTION GetDistorsionForce
 
+!===============================================================================================================
+
+!*******************************************************************************
+!                     GetFirstEffectiveMode
+!*******************************************************************************
+!> Give the distorsion force, stored in the bath data type.
+!>
+!> @param   Bath     Bath data type 
+!> @result  Coords   Coordinates of the bath
+!*******************************************************************************     
+   REAL FUNCTION GetFirstEffectiveMode( Bath, QBath )
+      IMPLICIT NONE
+      TYPE(BathData), INTENT(IN)     :: Bath
+      REAL, INTENT(IN), DIMENSION(:) :: QBath 
+      REAL :: Coupl, DSq
+      INTEGER  :: iBath
+
+      ! Check if the bath is setup
+      CALL ERROR( .NOT. Bath%BathIsSetup, "IndependentOscillatorsModel.GetFirstEffectiveMode: bath is not setup" )
+      ! Check the size of the position array
+      CALL ERROR( size(QBath) /= Bath%BathSize, "IndependentOscillatorsModel.GetFirstEffectiveMode: wrong bath size" )
+
+      IF ( Bath%BathType == CHAIN_BATH ) THEN
+
+         GetFirstEffectiveMode = Bath%Couplings(1)*QBath(1)
+
+      ELSE IF ( Bath%BathType == STANDARD_BATH ) THEN
+
+         Coupl = 0.0
+         DSq = 0.0
+         DO iBath = 1, Bath%BathSize
+            Coupl = Coupl +  Bath%Couplings(iBath) * QBath(iBath)
+            DSq   = DSq   +  Bath%Couplings(iBath)**2
+         END DO
+         GetFirstEffectiveMode = Coupl / SQRT(DSq)
+
+      END IF
+
+   END FUNCTION GetFirstEffectiveMode
 
 !===============================================================================================================
 
@@ -902,8 +973,10 @@ CONTAINS
       ! Module is no longer setup
       Bath%BathIsSetup = .FALSE.
 
-#if defined(VERBOSE_OUTPUT)
-      WRITE(*,*) " Independent oscillator model data has been disposed"
+#if defined(LOG_FILE)
+      __OPEN_LOG_FILE
+      WRITE(__LOG_UNIT,*) " Independent oscillator model data has been disposed"
+      __CLOSE_LOG_FILE
 #endif
 
    END SUBROUTINE DisposeIndepOscillatorsModel

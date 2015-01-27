@@ -396,7 +396,8 @@ MODULE Harmonic1DModel
             IF ( PrintType == DEBUG .AND.  mod(iStep,EquilibrationStepInterval) == 0 ) THEN
                ! Equilibration debug
                WRITE(DebugUnitEquil,850) real(iStep)*EquilTStep/MyConsts_fs2AU, &
-                        PotEnergy*MyConsts_Hartree2eV, KinEnergy*MyConsts_Hartree2eV, X(1)
+                        PotEnergy*MyConsts_Hartree2eV, KinEnergy*MyConsts_Hartree2eV, X(1), &
+                        GetFirstEffectiveMode(Bath, X(2:))
                ! Temperature profile during equilibration
                IF (iStep == 1) WRITE(TEquilUnit,"(/,/,A,I5,/)" ) "# Trajectory nr. ", iTraj
                WRITE(TEquilUnit,850)  real(iStep)*EquilTStep/MyConsts_fs2AU, &
@@ -513,7 +514,7 @@ MODULE Harmonic1DModel
                IF ( kStep > NrOfPrintSteps ) CYCLE 
 
                ! Write the ZH coordinate in output file
-               WRITE(QRealizationsUnit,"(F14.8,F14.8)") TimeStep*real(iStep)/MyConsts_fs2AU, X(1)*MyConsts_Bohr2Ang
+               WRITE(QRealizationsUnit,"(F14.4,F14.8)") TimeStep*real(iStep)/MyConsts_fs2AU, X(1)*MyConsts_Bohr2Ang
 
                ! autocorrelation functions are computed only for a full output
                IF ( PrintType >= FULL ) THEN

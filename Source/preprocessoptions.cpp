@@ -24,6 +24,11 @@
 #define __CLOSE_VHSTICKING_FILE        CLOSE( UNIT=55 )
 #endif
 
+/*==============================================================================*
+ * Define/undefine printing of spectral density.                                *
+ *==============================================================================*/
+
+#undef __PRINT_SPECTRAL_DENSITY
 
 /*==============================================================================*
  * Define alias for OMP parallelization.                                        *

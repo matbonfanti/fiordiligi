@@ -215,6 +215,11 @@ ifeq (${DEBUG}, yes)
    PPDEFINE += -DVERBOSE_OUTPUT
 endif
 
+# Write output to logfile
+ifeq (${LOGFILE}, yes)
+   PPDEFINE += -DLOG_FILE=\"${LOGNAME}\"
+endif
+
 # Preprocess with lapack calls
 ifeq (${LAPACK}, yes)
    PPDEFINE += -DWITH_LAPACK

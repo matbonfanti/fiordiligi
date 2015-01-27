@@ -158,7 +158,6 @@ PROGRAM JK6_v3
       CALL SetFieldFromInput( InputData, "NonLinearCoupling", NonLinearCoupling, .FALSE. )
       IF ( NonLinearCoupling ) THEN
          CALL SetFieldFromInput( InputData, "AlphaCoupling", AlphaCoupling )
-         AlphaCoupling = AlphaCoupling * SQRT(MassConversion(InputUnits, InternalUnits))
          AlphaCoupling = AlphaCoupling / LengthConversion(InputUnits, InternalUnits)
       END IF
    ELSE IF ( BathType == CHAIN_BATH ) THEN
@@ -449,11 +448,6 @@ PROGRAM JK6_v3
    
 END PROGRAM JK6_v3
 
-
-!          ! if XYZ files of the trajectories are required, allocate memory to store the traj
-!          IF ( PrintType >= FULL  .AND. ( RunType == SCATTERING .OR. RunType == EQUILIBRIUM ) ) THEN
-!                ALLOCATE( Trajectory( 16, ntime ) )
-!          END IF
 
 ! !*******************************************************************************
 ! ! WriteTrajectoryXYZ
