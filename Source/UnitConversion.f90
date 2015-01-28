@@ -34,7 +34,7 @@ MODULE UnitConversion
    PUBLIC :: Initialize_UnitConversion, Print_Unit_Definition
    PUBLIC :: LengthUnit, EnergyUnit, MassUnit, AngleUnit, TimeUnit, TemperUnit, FreqUnit
    PUBLIC :: LengthConversion, EnergyConversion, MassConversion, AngleConversion, ForceConversion
-   PUBLIC :: TimeConversion, TemperatureConversion, FreqConversion
+   PUBLIC :: TimeConversion, TemperatureConversion, FreqConversion, VelocityConversion
 
 
 ! **************** Length units ********************
@@ -618,6 +618,25 @@ CONTAINS
 
       Conversion = EnergyConversion( InUnits, OutUnits ) / LengthConversion( InUnits, OutUnits )
    END FUNCTION ForceConversion
+
+!********************************************************************************************************
+
+!*******************************************************************************
+!   VelocityConversion
+!*******************************************************************************
+!> Give force conversion factor from InUnits to OutUnits.
+!>
+!> @param InUnits    Units data type with the input units.
+!> @param OutUnits   Units data type with the output units.
+!> @returns          The conversion factor.
+!*******************************************************************************
+   FUNCTION VelocityConversion( InUnits, OutUnits ) RESULT ( Conversion )
+      IMPLICIT NONE
+      TYPE (Units), INTENT(IN)   :: InUnits, OutUnits
+      REAL                       :: Conversion
+
+      Conversion = LengthConversion( InUnits, OutUnits ) / TimeConversion( InUnits, OutUnits )
+   END FUNCTION VelocityConversion
 
 
 END MODULE UnitConversion

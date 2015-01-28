@@ -19,9 +19,10 @@
 !>  \arg 23 October 2013: double chain bath has been implemented
 !>  \arg 17 November 2014: FFTWrapper used to compute autocorrelation
 !>  \arg 17 November 2014: morse oscillator implemented
+!>  \arg 28 February 2014: unit conversion in standard output
 !
 !>  \todo            fix the log of the input variables, put info on the potential
-!>  \todo            include nonlinear coupling (surface oscillator model)
+!>  \todo            unit conversion in output files
 !>                 
 !***************************************************************************************
 MODULE Harmonic1DModel
@@ -152,11 +153,11 @@ MODULE Harmonic1DModel
       IF ( .NOT. MorsePotential ) THEN
          WRITE(*, 901) QFreq*FreqConversion(InternalUnits,InputUnits), FreqUnit(InputUnits),      &
                        ForceConstant*EnergyConversion(InternalUnits,InputUnits)/LengthConversion(InternalUnits,InputUnits)**2, &
-                               EnergyUnit(InputUnits)//"/"//LengthUnit(InputUnits)//"^2"
+                           TRIM( EnergyUnit(InputUnits))//"/"//TRIM(LengthUnit(InputUnits))//"^2"
       ELSE
          WRITE(*, 902) QFreq*FreqConversion(InternalUnits,InputUnits), FreqUnit(InputUnits),      &
                        ForceConstant*EnergyConversion(InternalUnits,InputUnits)/LengthConversion(InternalUnits,InputUnits)**2, &
-                               EnergyUnit(InputUnits)//"/"//LengthUnit(InputUnits)//"^2", &
+                               TRIM(EnergyUnit(InputUnits))//"/"//TRIM(LengthUnit(InputUnits))//"^2", &
                        WellDepth*EnergyConversion(InternalUnits,InputUnits), EnergyUnit(InputUnits), &
                        MorseAlpha/LengthConversion(InternalUnits,InputUnits), "1/"//LengthUnit(InputUnits)
       END IF
@@ -356,7 +357,8 @@ MODULE Harmonic1DModel
                ! nothing to do
          END IF
 
-         PRINT "(/,A,F6.1)"," Equilibrating the initial conditions at T = ", Temperature / MyConsts_K2AU
+         PRINT "(/,A,F6.1,1X,A)",   " Equilibrating the initial conditions at T = ", &
+             Temperature*TemperatureConversion(InternalUnits,InputUnits), TemperUnit(InputUnits)
 
          IF ( PrintType == DEBUG ) THEN
             ! Open file to store debug info about equilibration
@@ -386,7 +388,7 @@ MODULE Harmonic1DModel
             ! compute kinetic energy and total energy
             KinEnergy = EOM_KineticEnergy(Equilibration, V )
             TotEnergy = PotEnergy + KinEnergy
-            IstTemperature = 2.0*KinEnergy/(MyConsts_K2AU*size(X))
+            IstTemperature = 2.0*KinEnergy/size(X)
 
             ! store temperature average and variance
             TempAverage = TempAverage + IstTemperature
@@ -395,13 +397,15 @@ MODULE Harmonic1DModel
             ! every PrintStepInterval steps, write debug output
             IF ( PrintType == DEBUG .AND.  mod(iStep,EquilibrationStepInterval) == 0 ) THEN
                ! Equilibration debug
-               WRITE(DebugUnitEquil,850) real(iStep)*EquilTStep/MyConsts_fs2AU, &
-                        PotEnergy*MyConsts_Hartree2eV, KinEnergy*MyConsts_Hartree2eV, X(1), &
-                        GetFirstEffectiveMode(Bath, X(2:))
+               WRITE(DebugUnitEquil,850) real(iStep)*EquilTStep*TimeConversion(InternalUnits,InputUnits), &
+                        PotEnergy*EnergyConversion(InternalUnits,InputUnits), &
+                        KinEnergy*EnergyConversion(InternalUnits,InputUnits), &
+                        X(1)*LengthConversion(InternalUnits,InputUnits)
                ! Temperature profile during equilibration
                IF (iStep == 1) WRITE(TEquilUnit,"(/,/,A,I5,/)" ) "# Trajectory nr. ", iTraj
-               WRITE(TEquilUnit,850)  real(iStep)*EquilTStep/MyConsts_fs2AU, &
-                     TempAverage/iStep, sqrt((TempVariance/iStep)-(TempAverage/iStep)**2)
+               WRITE(TEquilUnit,850)  real(iStep)*EquilTStep*TimeConversion(InternalUnits,InputUnits), &
+                     TempAverage/iStep*TemperatureConversion(InternalUnits,InputUnits),   &
+                     sqrt((TempVariance/iStep)-(TempAverage/iStep)**2)*TemperatureConversion(InternalUnits,InputUnits)
             END IF
             850 FORMAT( F12.5, 100F13.6 )
 
@@ -419,8 +423,8 @@ MODULE Harmonic1DModel
          TempAverage = TempAverage / NrEquilibSteps 
          TempVariance = (TempVariance/NrEquilibSteps) - TempAverage**2
          ! output message with average values
-         PRINT "(/,A,1F10.4,/,A,1F10.4,/)",  " * Average temperature (K): ", TempAverage, &
-                                             " * Standard deviation (K):  ", sqrt(TempVariance)
+         WRITE(*,500)  TempAverage*TemperatureConversion(InternalUnits,InputUnits), TemperUnit(InputUnits), &
+                       sqrt(TempVariance)*TemperatureConversion(InternalUnits,InputUnits), TemperUnit(InputUnits)
 
          !*************************************************************
          ! INFORMATION ON INITIAL CONDITIONS, INITIALIZATION, OTHER...
@@ -429,11 +433,13 @@ MODULE Harmonic1DModel
          ! Compute kinetic energy and total energy
          KinEnergy = EOM_KineticEnergy( MolecularDynamics, V )
          TotEnergy = PotEnergy + KinEnergy
-         IstTemperature = 2.0*KinEnergy/(MyConsts_K2AU*size(X))
+         IstTemperature = 2.0*KinEnergy/size(X)
 
          ! PRINT INITIAL CONDITIONS of THE TRAJECTORY
-         WRITE(*,600)  PotEnergy*MyConsts_Hartree2eV, KinEnergy*MyConsts_Hartree2eV, &
-                        TotEnergy*MyConsts_Hartree2eV, IstTemperature
+         WRITE(*,600)  PotEnergy*EnergyConversion(InternalUnits,InputUnits), EnergyUnit(InputUnits), &
+                       KinEnergy*EnergyConversion(InternalUnits,InputUnits), EnergyUnit(InputUnits), &
+                       TotEnergy*EnergyConversion(InternalUnits,InputUnits), EnergyUnit(InputUnits), &
+                       IstTemperature*TemperatureConversion(InternalUnits,InputUnits), TemperUnit(InputUnits)
 
          ! Initialize coordinate average
          AverageCoord(:) = 0.0
@@ -495,7 +501,7 @@ MODULE Harmonic1DModel
             ! Compute kin energy and temperature
             KinEnergy = EOM_KineticEnergy( MolecularDynamics, V )
             TotEnergy = PotEnergy + KinEnergy
-            IstTemperature = 2.0*KinEnergy/(MyConsts_K2AU*size(X))
+            IstTemperature = 2.0*KinEnergy/size(X)
 
             ! Store variables for averages
             AverageCoord(:) = AverageCoord(:) + X(:)
@@ -549,7 +555,10 @@ MODULE Harmonic1DModel
          PRINT "(A)", " Time propagation completed! "
 
          ! print the average values of that trajectory 
-         WRITE(*,700)  TempAverage, TempVariance, AverageCoord(1)* MyConsts_Bohr2Ang, StDevCoord(1)* MyConsts_Bohr2Ang
+         WRITE(*,700) TempAverage*TemperatureConversion(InternalUnits,InputUnits), TemperUnit(InputUnits),  &
+                      TempVariance*TemperatureConversion(InternalUnits,InputUnits), TemperUnit(InputUnits), &
+                      AverageCoord(1)*LengthConversion(InternalUnits,InputUnits), LengthUnit(InputUnits),   &
+                      StDevCoord(1)*LengthConversion(InternalUnits,InputUnits), LengthUnit(InputUnits)
 
          IF ( PrintType == DEBUG ) THEN
                CLOSE( Unit=DebugUnitEn )
@@ -571,7 +580,7 @@ MODULE Harmonic1DModel
       AverCoordOverTrajs(:) = AverCoordOverTrajs(:) / real( NrTrajs )
 
       ! Print temperature average
-      WRITE(*,701)  GlobalTemperature
+      WRITE(*,701)  GlobalTemperature*TemperatureConversion(InternalUnits,InputUnits), TemperUnit(InputUnits)
 
       ! If full print, compute and write spectral densities of the autocorrelation functions
       IF ( PrintType >= FULL ) THEN
@@ -609,19 +618,23 @@ MODULE Harmonic1DModel
       IF ( PrintType >= FULL ) CLOSE( QSpectralDensUnit )
       IF ( BathType == LANGEVIN_DYN ) CLOSE( QSpectralAnalytic )
 
-   600 FORMAT (/, " Initial condition of the MD trajectory ",/   &
-                  " * Potential Energy (eV)        ",1F10.4,/    &
-                  " * Kinetic Energy (eV)          ",1F10.4,/    &
-                  " * Total Energy (eV)            ",1F10.4,/    &
-                  " * Istantaneous temperature (K) ",1F10.4,/ ) 
+   500 FORMAT (/, " Equilibration averages                 ",/   &
+                  " * Average temperature          ",1F10.4,1X,A,/    &
+                  "   Standard deviation           ",1F10.4,1X,A,/ ) 
 
-   700 FORMAT (/, " * Average temperature (K)        ",1F10.4,/    &
-                  "   Standard deviation (K)         ",1F10.4,/    &
-                  " * Average Q height (Ang)         ",1F10.4,/    &
-                  "   Standard deviation (Ang)       ",1F10.4,/ ) 
+   600 FORMAT (/, " Initial condition of the MD trajectory ",/   &
+                  " * Potential Energy             ",1F10.4,1X,A,/    &
+                  " * Kinetic Energy               ",1F10.4,1X,A,/    &
+                  " * Total Energy                 ",1F10.4,1X,A,/    &
+                  " * Istantaneous temperature     ",1F10.4,1X,A,/ ) 
+
+   700 FORMAT (/, " * Average temperature          ",1F10.4,1X,A,/    &
+                  "   Standard deviation           ",1F10.4,1X,A,/    &
+                  " * Average Q height             ",1F10.4,1X,A,/    &
+                  "   Standard deviation           ",1F10.4,1X,A,/ ) 
 
    701 FORMAT (/, " Average temperature for all trajs and time steps ",/   &
-                  " * Average temperature (K)        ",1F10.4,/ ) 
+                  " * Average temperature          ",1F10.4,1X,A,/ ) 
 
    800 FORMAT(F12.5,1000F15.8)
 

@@ -275,9 +275,9 @@ MODULE ScatteringSimulation
 !*******************************************************************************
    SUBROUTINE Scattering_Run()
       IMPLICIT NONE
-      INTEGER  ::  AvEnergyOutputUnit, AvCarbonOutputUnit       ! UNITs FOR OUTPUT AND DEBUG
+      INTEGER  ::  AvHydroOutputUnit, AvCarbonOutputUnit       ! UNITs FOR OUTPUT AND DEBUG
       INTEGER  ::  jRho, iTraj, iStep, kStep
-      REAL     ::  ImpactPar
+      REAL     ::  ImpactPar, Time
       REAL, DIMENSION(1,8)  :: AsymptoticCH
       REAL     ::  TotEnergy, PotEnergy, KinEnergy, IstTemperature
       REAL     ::  TempAverage, TempVariance
@@ -303,9 +303,9 @@ MODULE ScatteringSimulation
 ! 
 
 ! 
-      AvEnergyOutputUnit = LookForFreeUnit()
-      OPEN( FILE="AverageEnergy.dat", UNIT=AvEnergyOutputUnit )
-      WRITE(AvEnergyOutputUnit, "(A,I6,A,/)") "# average energy vs time (fs | eV) - ", NrTrajs, " trajectories "
+      AvHydroOutputUnit = LookForFreeUnit()
+      OPEN( FILE="AverageHydro.dat", UNIT=AvHydroOutputUnit )
+      WRITE(AvHydroOutputUnit, "(A,I6,A,/)") "# average zH coord and vel vs time (fs | ang) - ",NrTrajs, " trajs"
 
       AvCarbonOutputUnit = LookForFreeUnit()
       OPEN( FILE="AverageCarbon.dat", UNIT=AvCarbonOutputUnit )
@@ -522,9 +522,20 @@ MODULE ScatteringSimulation
          AverageVHydro(:)  = AverageVHydro(:)/NrTrajs
          AverageZHydro(:)  = AverageZHydro(:)/NrTrajs
 
-         ! ****************************************
-         ! PRINT TO FILE THE AVERAGES !!!!!
-         ! ****************************************
+         ! write impact parameter header in output files
+         WRITE(AvHydroOutputUnit,"(/,A,F10.5)")  &
+                    "# Impact parameter : ",ImpactPar*LengthConversion(InternalUnits,InputUnits)
+         WRITE(AvCarbonOutputUnit,"(/,A,F10.5)")  &
+                    "# Impact parameter : ",ImpactPar*LengthConversion(InternalUnits,InputUnits)
+
+         ! Print time resolved data to output files
+         DO iStep = 1, NrOfPrintSteps
+            Time = FLOAT(PrintStepInterval*iStep)*TimeStep*TimeConversion(InternalUnits,InputUnits)
+            WRITE(AvHydroOutputUnit,800) Time, AverageZHydro(iStep)*LengthConversion(InternalUnits,InputUnits),  &
+                                             AverageVHydro(iStep)*VelocityConversion(InternalUnits,InputUnits)
+            WRITE(AvCarbonOutputUnit,800) Time, AverageZCarbon(iStep)*LengthConversion(InternalUnits,InputUnits), &     
+                                             AverageVCarbon(iStep)*VelocityConversion(InternalUnits,InputUnits)
+         END DO
 
       END DO ImpactParameter
 
@@ -563,6 +574,8 @@ MODULE ScatteringSimulation
    700 FORMAT (/, " * Final zH coord (Ang)         ",1F10.4,/    &
                   " * Final energy (eV)          ",1F10.4,/    &
                   " * Final zC coord (Ang)         ",1F10.4,/ ) 
+
+   800 FORMAT(F12.5,1000F15.8)
 
    END SUBROUTINE Scattering_Run
 

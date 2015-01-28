@@ -26,6 +26,7 @@
 !>  \arg 22 October 2013: to implement the possibility of having multiple baths, 
 !>             a bath datatype has been implemented and all the subroutine have been adapted accordingly
 !>  \arg 8 Novembre 2013: implemented debug output of frequencies and couplings
+!>  \arg 28 February 2015: non linear coupling implemented for normal bath
 !
 !>  \todo    Initial thermal conditions of a chain bath can be refined by taking into account the coupling
 !>  \todo    Quasi-classical 0K conditions of a chain bath need to be implemented
@@ -513,6 +514,7 @@ CONTAINS
          CouplForce = CouplForce + EffMode - Bath%DistorsionForce * QCoupl
 
          IF ( Bath%NonLinearCoup ) THEN
+
             ! Compute some useful quantities
             EffMode = EffMode / Bath%NonLinCoup_D0
             TraslCoord = EffMode - Bath%NonLinCoup_Beta * QCoupl
@@ -526,7 +528,8 @@ CONTAINS
                                         ( (Expon-1.0)**2/Bath%NonLinCoup_Alpha**2 - TraslCoord**2 )
             END IF
             ! Add force correction to the system force
-            CouplForce = CouplForce + Bath%NonLinCoup_D0 * ( Expon * (Expon-1.0)/Bath%NonLinCoup_Alpha - TraslCoord )
+            CouplForce = CouplForce + Bath%OscillatorsMass * Bath%NonLinCoup_OmegaBar**2 * &
+                       Bath%NonLinCoup_Beta * ( Expon * (Expon-1.0)/Bath%NonLinCoup_Alpha - TraslCoord )
             ! Add force correction to the bath oscillators force
             DO iBath = 1, Bath%BathSize
                QForces(iBath) = QForces(iBath) - Bath%OscillatorsMass * Bath%NonLinCoup_OmegaBar**2 * &
