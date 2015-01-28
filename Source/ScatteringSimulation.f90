@@ -11,19 +11,18 @@
 !***************************************************************************************
 !
 !>  \author           Matteo Bonfanti
-!>  \version          1.0
+!>  \version          2.0
 !>  \date             10 October 2013
 !>
 !***************************************************************************************
 !
 !>  \par Updates
 !>  \arg 28 February 2015 : the module has been completely revise according to the new
-!>                          structure of the code
+!>                          structure of the code (version 2.0)
+!>  \arg 28 February 2015 : * collinear / non collinear distinction
+!>                          * dispose subroutine completed
 !                
 !>  \todo         print XYZ file of scattering trajectory
-!>  \todo         consider collinear case as a special option (conflict between collinear 
-!>                potential and non collinear simulation, special print option )  
-!>  \todo         complete dispose subroutine 
 !
 !***************************************************************************************
 MODULE ScatteringSimulation
@@ -107,8 +106,12 @@ MODULE ScatteringSimulation
       ! Nr of rho values to sample
       CALL SetFieldFromInput( InputData, "NRhoMax", NRhoMax )
       ! Grid spacing in rho
-      CALL SetFieldFromInput( InputData, "DeltaRho", DeltaRho )
-      DeltaRho = DeltaRho * LengthConversion(InputUnits, InternalUnits)
+      IF ( NRhoMax > 0 ) THEN
+         CALL SetFieldFromInput( InputData, "DeltaRho", DeltaRho )
+         DeltaRho = DeltaRho * LengthConversion(InputUnits, InternalUnits)
+      ELSE  ! for collinear calculation, no deltarho is needed
+         DeltaRho = 0.0
+      ENDIF
 
       ! READ THE VARIABLES FOR THE RELAXATION SIMULATION 
 
@@ -246,11 +249,9 @@ MODULE ScatteringSimulation
       END IF
 
       ! Set variables for EOM integration with Langevin thermostat, during initial equilibration
-      IF ( BathType ==  SLAB_POTENTIAL ) THEN
-         CALL EvolutionSetup( Equilibration, NDim, MassVector, EquilTStep )
-         LangevinSwitchOn = (/ (.FALSE., iCoord=1,3), (.TRUE., iCoord=4,NDim ) /)
-         CALL SetupThermostat( Equilibration, EquilGamma, Temperature, LangevinSwitchOn )
-      END IF
+      CALL EvolutionSetup( Equilibration, NDim, MassVector, EquilTStep )
+      LangevinSwitchOn = (/ (.FALSE., iCoord=1,3), (.TRUE., iCoord=4,NDim ) /)
+      CALL SetupThermostat( Equilibration, EquilGamma, Temperature, LangevinSwitchOn )
 
       DEALLOCATE( LangevinSwitchOn )
 
@@ -266,6 +267,11 @@ MODULE ScatteringSimulation
       ! Allocate and initialize trapping probability
       ALLOCATE( TrappingProb(0:NRhoMax,NrOfPrintSteps) )
       TrappingProb = 0.0
+
+      ! Check that a non collinear V is considered when running a non collinear simulation
+      IF (NRhoMax > 0) THEN
+         CALL ERROR( Collinear, " Scattering_Initialize: a non collinear potential is needed!" )
+      END IF 
 
 !          ! if XYZ files of the trajectories are required, allocate memory to store the traj
 !          IF ( PrintType >= FULL  .AND. ( RunType == SCATTERING .OR. RunType == EQUILIBRIUM ) ) THEN
@@ -284,36 +290,15 @@ MODULE ScatteringSimulation
    SUBROUTINE Scattering_Run()
       IMPLICIT NONE
       INTEGER  ::  AvHydroOutputUnit, AvCarbonOutputUnit       ! UNITs FOR OUTPUT AND DEBUG
-      INTEGER  ::  CollinearTrapUnit
+      INTEGER  ::  CollinearTrapUnit, CrossSectionUnit
       INTEGER  ::  jRho, iTraj, iStep, kStep
-      REAL     ::  ImpactPar, Time
+      REAL     ::  ImpactPar, Time, CrossSection
       REAL, DIMENSION(1,8)  :: AsymptoticCH
       REAL     ::  TotEnergy, PotEnergy, KinEnergy, KinHydro, KinCarbon
       REAL     ::  TempAverage, TempVariance, IstTemperature
       REAL, DIMENSION(NRhoMax+1) :: ImpactParameterGrid
       REAL, DIMENSION(NrOfPrintSteps) :: TimeGrid
 
-! 
-!       REAL, DIMENSION(121) :: vzsum, zsum
-!       REAL, DIMENSION(:,:), ALLOCATABLE :: vz2av, zcav
-!       REAL :: vav, vsqav, zav, zsqav
-! 
-!       ! Initialize average values for the INITIAL CONDITION of the lattice Z coordinates
-!       zav    = 0.0         ! average position
-!       zsqav  = 0.0         ! mean squared position
-!       vav    = 0.0         ! average velocity
-!       vsqav  = 0.0         ! mean squared velocity
-! 
-!       ALLOCATE( zcav(10,ntime), vz2av(10,ntime) )
-!       zcav(:,:)  = 0.0
-!       vz2av(:,:) = 0.0
-! 
-!       ! allocate and initialize trapping probability variable
-!       ALLOCATE( ptrap( irho+1, ntime ) )
-!       ptrap(:,:) = 0.0
-! 
-
-! 
       AvHydroOutputUnit = LookForFreeUnit()
       OPEN( FILE="AverageHydro.dat", UNIT=AvHydroOutputUnit )
       WRITE(AvHydroOutputUnit, "(A,I6,A,/)") "# average zH coord and vel vs time (fs | ang) - ",NrTrajs, " trajs"
@@ -341,9 +326,13 @@ MODULE ScatteringSimulation
          ! Set impact parameter and print message
          ImpactPar = float(jRho)*DeltaRho
 
-         PRINT "(2/,A)",    "***************************************************"
-         PRINT "(A,F10.5)", "       IMPACT PARAMETER = ", ImpactPar*LengthConversion(InternalUnits,InputUnits)
-         PRINT "(A,/)" ,    "***************************************************"
+         IF ( NRhoMax == 0 ) THEN 
+            PRINT "(A,I5,A)"," Collinear scattering simulation ... "
+         ELSE
+            PRINT "(2/,A)",    "***************************************************"
+            PRINT "(A,F10.5)", "       IMPACT PARAMETER = ", ImpactPar*LengthConversion(InternalUnits,InputUnits)
+            PRINT "(A,/)" ,    "***************************************************"
+         END IF
 
          PRINT "(A,I5,A)"," Running ", NrTrajs, " trajectories ... "
 
@@ -564,10 +553,11 @@ MODULE ScatteringSimulation
                                       iStep= 1,NrOfPrintSteps  )/)
       ImpactParameterGrid = (/( float(jRho)*DeltaRho*LengthConversion(InternalUnits,InputUnits), jRho = 0,NRhoMax  )/)
 
-      ! Print trapping to vtk file
-      CALL VTK_NewRectilinearSnapshot( TrappingFile, X=ImpactParameterGrid, Y=TimeGrid, FileName="Trapping" )
-      CALL VTK_AddScalarField( TrappingFile, "trapping_p", RESHAPE( TrappingProb(:,:), (/NrOfPrintSteps*(NRhoMax+1) /))  )
-      CALL VTK_PrintCollection( TrappingFile )
+      IF ( NRhoMax > 0 ) THEN
+         ! Print trapping to vtk file
+         CALL VTK_NewRectilinearSnapshot( TrappingFile, X=ImpactParameterGrid, Y=TimeGrid, FileName="Trapping" )
+         CALL VTK_AddScalarField( TrappingFile, "trapping_p", RESHAPE( TrappingProb(:,:), (/NrOfPrintSteps*(NRhoMax+1) /))  )
+      END IF
 
       ! Print to file collinear trapping
       CollinearTrapUnit = LookForFreeUnit()
@@ -583,29 +573,30 @@ MODULE ScatteringSimulation
       CLOSE( AvCarbonOutputUnit )
       CLOSE( AvHydroOutputUnit )
 
+      ! write cross section data 
+      IF ( NRhoMax > 0 ) THEN
 
-      ! ****************************************
-      ! PRINT TO FILE THE TRAPPING PROB !!!!!!
-      ! ****************************************
+         ! open file and write header
+         CrossSectionUnit = LookForFreeUnit()
+         OPEN( FILE="CrossSection.dat", UNIT=CrossSectionUnit )
+         WRITE(CrossSectionUnit, "(A,I6,A,/)") "# cross section vs time (" // TRIM(TimeUnit(InputUnits)) // &
+             " | " // TRIM(LengthUnit(InputUnits)) //"^2) -",NrTrajs, " trajs"
 
+         ! loop over time steps, compute and write trapping cross section
+         DO iStep= 1,NrOfPrintSteps
 
-!       ! write cross section data 
-!       write(6,*)'cross section vs time(ps):'
-! 
-!       ! Cycle over analysis steps
-!       DO iStep=1,ntime
-! 
-!          ! integrate over rxn parameter
-!          crscn(iStep)=0.0
-!          DO jRho=1,irho+1
-!             ImpactPar = 0.000001 + delrho * real(jRho-1) * MyConsts_Bohr2Ang
-!             crscn(iStep)=crscn(iStep)+(ptrap(jRho,iStep)/float(inum))* ImpactPar
-!          END DO
-!          crscn(iStep) = 2.0* MyConsts_PI * delrho*MyConsts_Bohr2Ang * crscn(iStep)
-! 
-!          ! print trapping p to file
-!          write(6,605) dt*real(iStep*nprint)/MyConsts_fs2AU,  crscn(iStep)
-!       END DO
+            ! integrate over impact parameter
+            CrossSection=0.0
+            DO jRho = 0, NRhoMax
+               CrossSection = CrossSection + TrappingProb(jRho,iStep)*ImpactParameterGrid(jRho)
+            END DO
+            CrossSection = 2.0*MyConsts_PI * DeltaRho * CrossSection * LengthConversion(InternalUnits,InputUnits)**2
+
+            ! print trapping cross section to file
+            WRITE(CrossSectionUnit,800) TimeGrid(iStep), CrossSection
+
+         END DO
+      END IF
 
    500 FORMAT (/, " Equilibration averages                 ",/     &
                   " * Average temperature          ",1F10.4,1X,A,/ &
@@ -634,6 +625,14 @@ MODULE ScatteringSimulation
 !*******************************************************************************
    SUBROUTINE Scattering_Dispose()
       IMPLICIT NONE
+
+      ! Deallocate memory
+      DEALLOCATE( X, V, A, MassVector )
+      DEALLOCATE( AverageVHydro, AverageZHydro, AverageVCarbon, AverageZCarbon, TrappingProb )
+
+      ! Unset propagators 
+      CALL DisposeEvolutionData( MolecularDynamics )
+      CALL DisposeEvolutionData( Equilibration )
 
 
    END SUBROUTINE Scattering_Dispose
