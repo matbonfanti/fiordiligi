@@ -17,14 +17,17 @@
 !***************************************************************************************
 !
 !>  \par Updates
-!>  \arg 
+!>  \arg 28 February 2015 : the module has been completely revise according to the new
+!>                          structure of the code
 !                
-!>  \todo             print XYZ file of scattering trajectory
+!>  \todo         print XYZ file of scattering trajectory
+!>  \todo         consider collinear case as a special option (conflict between collinear 
+!>                potential and non collinear simulation, special print option )  
+!>  \todo         complete dispose subroutine 
 !
 !***************************************************************************************
 MODULE ScatteringSimulation
 #include "preprocessoptions.cpp"
-!    USE MyLinearAlgebra
    USE SharedData
    USE InputField
    USE UnitConversion
@@ -32,6 +35,7 @@ MODULE ScatteringSimulation
    USE PotentialModule
    USE IndependentOscillatorsModel
    USE RandomNumberGenerator
+   USE PrintTools
 
    IMPLICIT NONE
 
@@ -72,7 +76,11 @@ MODULE ScatteringSimulation
    ! Random number generator internal status
    TYPE(RNGInternalState), SAVE :: RandomNr    !< spectial type dat to store internal status of random nr generator
 
-   INTEGER :: NDim
+   ! VTK file format
+   TYPE(VTKInfo), SAVE :: TrappingFile         !< derived datatype to print trapping probability
+
+   ! Number of dimensions of the system+bath hamiltonian
+   INTEGER :: NDim                             !< integer nr of dofs of the system+bath hamiltonian
 
    CONTAINS
 
@@ -256,7 +264,7 @@ MODULE ScatteringSimulation
       ALLOCATE( AverageVCarbon(0:NrOfPrintSteps), AverageZCarbon(0:NrOfPrintSteps) )
 
       ! Allocate and initialize trapping probability
-      ALLOCATE( TrappingProb(0:NrOfPrintSteps, 0:NRhoMax) )
+      ALLOCATE( TrappingProb(0:NRhoMax,NrOfPrintSteps) )
       TrappingProb = 0.0
 
 !          ! if XYZ files of the trajectories are required, allocate memory to store the traj
@@ -276,11 +284,14 @@ MODULE ScatteringSimulation
    SUBROUTINE Scattering_Run()
       IMPLICIT NONE
       INTEGER  ::  AvHydroOutputUnit, AvCarbonOutputUnit       ! UNITs FOR OUTPUT AND DEBUG
+      INTEGER  ::  CollinearTrapUnit
       INTEGER  ::  jRho, iTraj, iStep, kStep
       REAL     ::  ImpactPar, Time
       REAL, DIMENSION(1,8)  :: AsymptoticCH
-      REAL     ::  TotEnergy, PotEnergy, KinEnergy, IstTemperature
-      REAL     ::  TempAverage, TempVariance
+      REAL     ::  TotEnergy, PotEnergy, KinEnergy, KinHydro, KinCarbon
+      REAL     ::  TempAverage, TempVariance, IstTemperature
+      REAL, DIMENSION(NRhoMax+1) :: ImpactParameterGrid
+      REAL, DIMENSION(NrOfPrintSteps) :: TimeGrid
 
 ! 
 !       REAL, DIMENSION(121) :: vzsum, zsum
@@ -316,7 +327,7 @@ MODULE ScatteringSimulation
       PRINT "(A,F10.5)", "         H-GRAPHITE SCATTERING SIMULATION"
       PRINT "(A,/)" ,    "***************************************************"
 
-      PRINT "(A,I5,A,I5,A)"," Running ", NrTrajs, " trajectories per ",NRhoMax," impact parameters ... "
+      PRINT "(A,I5,A,I5,A)"," Running ", NrTrajs, " trajectories per ",NRhoMax+1," impact parameters ... "
 
       ! Initialize variables to print average results at a given impact parameter value
       AverageVCarbon(:)         = 0.0
@@ -339,6 +350,8 @@ MODULE ScatteringSimulation
          ! run NTrajs number of trajectories at the current impact parameter
          Trajectory: DO iTraj = 1, NrTrajs
 
+            PRINT "(/,A,I6,A)"," **** Trajectory Nr. ", iTraj," ****" 
+
             !*************************************************************
             ! INITIALIZATION OF THE COORDINATES AND MOMENTA OF THE SYSTEM
             !*************************************************************
@@ -352,7 +365,7 @@ MODULE ScatteringSimulation
             ! Set initial velocities of C and H atoms
             AsymptoticCH(1,5) = 0.0
             AsymptoticCH(1,6) = 0.0
-            AsymptoticCH(1,7) = sqrt( 2.0 * EKinZH / MassH )
+            AsymptoticCH(1,7) = -sqrt( 2.0 * EKinZH / MassH )
             AsymptoticCH(1,8) = 0.0
 
             ! Set initial conditions
@@ -367,13 +380,14 @@ MODULE ScatteringSimulation
                ! nothing to do
             END IF
 
-            X(1:4) = AsymptoticCH( 1, 1:4 )
-            V(1:4) = AsymptoticCH( 1, 5:8 )
+            ! During equilibration, fix H in asymptotic position with null velocity
+            X(1:3) = AsymptoticCH( 1, 1:3 )
+            V(1:3) = 0.0
 
             IF ( BathType /= LANGEVIN_DYN ) THEN 
 
-               PRINT "(/,A,F6.1)"," Equilibrating the initial conditions at T = ",  &
-                                            Temperature*TemperatureConversion(InternalUnits,InputUnits)
+               PRINT "(/,A,F6.1,1X,A)",   " Equilibrating the initial conditions at T = ", &
+                   Temperature*TemperatureConversion(InternalUnits,InputUnits), TemperUnit(InputUnits)
 
                ! Initialize temperature average and variance
                TempAverage = 0.0
@@ -408,21 +422,20 @@ MODULE ScatteringSimulation
 
                PRINT "(A)", " Equilibration completed! "
 
-               X(3:NDim) = X(3:NDim)  - (X(5)+X(6)+X(7))/3.0
-               X(1:4) = AsymptoticCH( 1, 1:4 )
-               V(1:4) = AsymptoticCH( 1, 5:8 )
-
             END IF 
 
             ! Compute average and standard deviation
             TempAverage = TempAverage / NrEquilibSteps 
             TempVariance = (TempVariance/NrEquilibSteps) - TempAverage**2
             ! output message with average values
-            PRINT "(/,A,1F10.4,A,/,A,1F10.4,A,/)",  " * Average temperature: ", &
-                        TempAverage*TemperatureConversion(InternalUnits,InputUnits), TemperUnit(InputUnits), &
-                                                    " * Standard deviation: ", &
-                    sqrt(TempVariance)*TemperatureConversion(InternalUnits,InputUnits), TemperUnit(InputUnits)
+            WRITE(*,500)  TempAverage*TemperatureConversion(InternalUnits,InputUnits), TemperUnit(InputUnits), &
+                          sqrt(TempVariance)*TemperatureConversion(InternalUnits,InputUnits), TemperUnit(InputUnits)
 
+            ! for the slab potential translate C2-C3-C4 plane at z=0
+            IF ( BathType == SLAB_POTENTIAL )   X(3:NDim) = X(3:NDim)  - (X(5)+X(6)+X(7))/3.0
+            ! give right initial conditions to the H atom
+            X(1:3) = AsymptoticCH( 1, 1:3 )
+            V(1:3) = AsymptoticCH( 1, 5:7 )
 
 !           !*************************************************************
 !           ! INFORMATION ON INITIAL CONDITIONS, INITIALIZATION, OTHER...
@@ -430,10 +443,14 @@ MODULE ScatteringSimulation
 
             ! Compute kinetic energy and total energy
             KinEnergy = EOM_KineticEnergy( MolecularDynamics, V )
+            KinHydro  = EOM_KineticEnergy( MolecularDynamics, V, 3 )
+            KinCarbon = KinEnergy - KinHydro
             TotEnergy = PotEnergy + KinEnergy
 
             ! PRINT INITIAL CONDITIONS of THE TRAJECTORY
             WRITE(*,600)  PotEnergy*EnergyConversion(InternalUnits,InputUnits), EnergyUnit(InputUnits), &
+                          KinHydro*EnergyConversion(InternalUnits,InputUnits), EnergyUnit(InputUnits),  &
+                          KinCarbon*EnergyConversion(InternalUnits,InputUnits), EnergyUnit(InputUnits), &
                           KinEnergy*EnergyConversion(InternalUnits,InputUnits), EnergyUnit(InputUnits), &
                           TotEnergy*EnergyConversion(InternalUnits,InputUnits), EnergyUnit(InputUnits)
 
@@ -508,9 +525,9 @@ MODULE ScatteringSimulation
             PRINT "(A)", " Time propagation completed! "
 
             ! print the final values of this trajectory 
-            WRITE(*,700) X(3)*LengthConversion(InternalUnits,InputUnits), LengthUnit(InternalUnits), &
-                         X(4)*LengthConversion(InternalUnits,InputUnits), LengthUnit(InternalUnits), &
-                         TotEnergy*EnergyConversion(InternalUnits,InputUnits), EnergyUnit(InternalUnits)
+            WRITE(*,700) X(3)*LengthConversion(InternalUnits,InputUnits), LengthUnit(InputUnits), &
+                         X(4)*LengthConversion(InternalUnits,InputUnits), LengthUnit(InputUnits), &
+                         TotEnergy*EnergyConversion(InternalUnits,InputUnits), EnergyUnit(InputUnits)
 
          END DO Trajectory
 
@@ -540,7 +557,32 @@ MODULE ScatteringSimulation
       END DO ImpactParameter
 
       ! Normalize trapping probability 
-      TrappingProb(jRho,kStep) = TrappingProb(jRho,kStep) / NrTrajs
+      TrappingProb(:,:) = TrappingProb(:,:) / NrTrajs
+
+      ! Prepare time grid and impact parameter grid
+      TimeGrid = (/( float(PrintStepInterval*iStep)*TimeStep*TimeConversion(InternalUnits,InputUnits), &
+                                      iStep= 1,NrOfPrintSteps  )/)
+      ImpactParameterGrid = (/( float(jRho)*DeltaRho*LengthConversion(InternalUnits,InputUnits), jRho = 0,NRhoMax  )/)
+
+      ! Print trapping to vtk file
+      CALL VTK_NewRectilinearSnapshot( TrappingFile, X=ImpactParameterGrid, Y=TimeGrid, FileName="Trapping" )
+      CALL VTK_AddScalarField( TrappingFile, "trapping_p", RESHAPE( TrappingProb(:,:), (/NrOfPrintSteps*(NRhoMax+1) /))  )
+      CALL VTK_PrintCollection( TrappingFile )
+
+      ! Print to file collinear trapping
+      CollinearTrapUnit = LookForFreeUnit()
+      OPEN( FILE="CollinearTrapping.dat", UNIT=CollinearTrapUnit )
+      WRITE(CollinearTrapUnit, "(A,I6,A,/)") "# collinear trapping probability (" // TRIM(TimeUnit(InputUnits)) // &
+          " | adim) -",NrTrajs, " trajs"
+      DO iStep= 1,NrOfPrintSteps
+         WRITE(CollinearTrapUnit,800) TimeGrid(iStep), TrappingProb(0,iStep)
+      END DO
+
+      ! Close open units
+      CLOSE( CollinearTrapUnit )
+      CLOSE( AvCarbonOutputUnit )
+      CLOSE( AvHydroOutputUnit )
+
 
       ! ****************************************
       ! PRINT TO FILE THE TRAPPING PROB !!!!!!
@@ -565,15 +607,20 @@ MODULE ScatteringSimulation
 !          write(6,605) dt*real(iStep*nprint)/MyConsts_fs2AU,  crscn(iStep)
 !       END DO
 
+   500 FORMAT (/, " Equilibration averages                 ",/     &
+                  " * Average temperature          ",1F10.4,1X,A,/ &
+                  "   Standard deviation           ",1F10.4,1X,A,/ ) 
 
-   600 FORMAT (/, " Initial condition of the MD trajectory ",/   &
-                  " * Potential Energy (eV)        ",1F10.4,/    &
-                  " * Kinetic Energy (eV)          ",1F10.4,/    &
-                  " * Total Energy (eV)            ",1F10.4,/ ) 
+   600 FORMAT (/, " Initial condition of the MD trajectory ",/     &
+                  " * Potential Energy             ",1F10.4,1X,A,/ &
+                  " * Kinetic Energy of H atom     ",1F10.4,1X,A,/ &
+                  " * Kinetic Energy of C atoms    ",1F10.4,1X,A,/ &
+                  " * Total Kinetic Energy         ",1F10.4,1X,A,/ &
+                  " * Total Energy                 ",1F10.4,1X,A,/ ) 
 
-   700 FORMAT (/, " * Final zH coord (Ang)         ",1F10.4,/    &
-                  " * Final energy (eV)          ",1F10.4,/    &
-                  " * Final zC coord (Ang)         ",1F10.4,/ ) 
+   700 FORMAT (/, " * Final zH coord               ",1F10.4,1X,A,/ &
+                  " * Final energy                 ",1F10.4,1X,A,/ &
+                  " * Final zC coord               ",1F10.4,1X,A,/ ) 
 
    800 FORMAT(F12.5,1000F15.8)
 

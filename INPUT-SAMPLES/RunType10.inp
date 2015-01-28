@@ -1,11 +1,11 @@
-# INPUT FILE for JK6_v2
+# INPUT FILE for JK6_v3
 
 # RUNTYPE
 # 1 - Equilibrium calculation with H already adsorbed
 # 2 - Test the parameters with a 1D harmonic model
 # 3 - Relaxation dynamics of a CH bound state, with the bath at 0K
 # 4 - Scattering calculation with H coming from gas-phase
-# 5 - Vibrational relaxation with ring polymer dynamics
+# 5 - Vibrational relaxation with ring polymer dynamics  
 # 10 - Static analysis of the potential
 
 # PRINTTYPE
@@ -28,51 +28,32 @@ InputTime   : 13
 InputTemp   : 16
 InputFreq   : 18
 
-# Kind of calculation
-RunType : 2
-PrintType : 1
-BathType : 3
-
-# Parameters of the system
-QFreq : 500
-# Temperature of the system / substrate 
-Temperature : 300.00
-
-# Evolution parameters
-# Step of the time evolution (fs)
-TimeStep : 0.05
-# Total number of time step per trajectory
-NrOfSteps  :  2000000 
-# Nr of steps between each analysis
-NrOfPrintSteps  : 40000
-
-# Langevin equilibration parameters
-# Friction coefficient (fs-1)
-EquilRelaxTime :  10. 
-# Time step (fs)
-EquilTStep : 0.2
-# Nr of time steps of the equilibration dynamics
-NrEquilibrSteps :  1000000 
-
-# Normal bath
-# mass of the normal bath oscillators
-MassBath : 1.0
-NBath : 500
-OhmicGammaTimesMass : .444104532
-BathCutOffFreq      : 1000.0
-BathLowerCutOffFreq : 0.0
-
-# non linear coupling
-NonLinearCoupling : TRUE
-AlphaCoupling : 1.0
+# Kind of calculation 
+RunType : 10
+PrintType : 2
+BathType : 4
 
 # Masses
 # mass of the target H atom (UMA)
-MassH  : 1.00782503207
+MassH  : 1.00782503207           
 # mass of the substrate C atoms (UMA)
-MassC  : 12.0
+MassC  : 12.0000
 
-# Sampling parameters
-# number of trajectories per impact parameter
-NrTrajs   : 100
+# Maximum frequency of the spectrum
+PlotSpectrum_MaxFreq : 4500.
+# Delta frequency of the discretization
+PlotSpectrum_DeltaFreq : 0.1
+# Width parameter of the peaks in the spectrum
+PlotSpectrum_SigmaPeak : 8.
 
+PlotSpectrum_NGridPoint : 1000
+PlotSpectrum_GridSpacing : 0.02
+
+PlotSpectrum_ZHmin : 0.4  
+PlotSpectrum_ZHmax : 6.0
+PlotSpectrum_ZCmin : -0.2
+PlotSpectrum_ZCmax : 1.0
+
+Collinear : FALSE
+RelaxAtBorders : 0.0 
+NCarbon : 121

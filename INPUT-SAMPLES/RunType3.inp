@@ -1,0 +1,68 @@
+# INPUT FILE for JK6_v3
+
+# RUNTYPE
+# 1 - Equilibrium calculation with H already adsorbed
+# 2 - Test the parameters with a 1D harmonic model
+# 3 - Relaxation dynamics of a CH bound state, with the bath at 0K
+# 4 - Scattering calculation with H coming from gas-phase
+# 10 - Static analysis of the potential
+
+# PRINTTYPE
+# 3 - DEBUG fully detailed information about each traj
+# 2 - FULL files to plot the averages over the ensamble
+# 1 - MINIMAL minimal level of output, only final averages
+
+# BATHTYPE
+# 4 - SLAB POTENTIAL the bath is a slab of carbon atom
+# 3 - NORMAL BATH bath of HO on a regular freq grid, all coupled to the system
+# 2 - CHAIN BATH - bath of HO in a linear chain form
+# 1 - LANGEVIN DYNAMICS - effective relaxation dynamics, with langevin eq of motion
+
+# Kind of calculation
+RunType : 3
+PrintType : 2
+BathType : 3
+
+Collinear : .FALSE. 
+
+# Evolution parameters
+# Step of the time evolution (fs)
+TimeStep : 0.05
+# Total number of time step per trajectory
+NrOfSteps  :  400000
+# Nr of steps between each analysis
+NrOfPrintSteps  : 4000
+# Gamma for thermostating the dynamics
+DynamicsGamma : 0.0
+ 
+# Initial conditions for relaxation
+# Initial energy of the system (absolute energy)
+NInitNormalMode : 3
+InitEnergy : -0.1716987055239936    
+# Nr of initial snapshots to generate with 4D microcan propagation
+NrOfInitSnapshots :  1000
+# Time between each snapshot of the initial dynamics (fs)
+TimeBetweenSnaps : 20
+
+# cutoff frequency of the bath
+BathCutOffFreq : 4000
+# Number of evolving carbon atoms (max 121) / nr of coordinates of the bath
+NBath : 4000
+# file with the spectral density of the C flut/diss
+SpectralDensityFile : spectralC.dat
+
+# Masses
+# mass of the target H atom (UMA)
+MassH  : 1.00782503207
+# mass of the substrate C atoms (UMA)
+MassC  : 12.0
+MassBath  : 12.0
+
+# Temperature of the simulation
+# Temperature of the system / substrate (K)
+Temperature : 0.00                   
+
+# Sampling parameters
+# number of trajectories per impact parameter
+NrTrajs   : 500 
+

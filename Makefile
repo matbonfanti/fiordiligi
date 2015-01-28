@@ -16,7 +16,7 @@ LOGNAME = fiordiligi_v3.log
 FC = ifort    
 
 # Debugging options ( yes or no )
-DEBUG =  no  
+DEBUG =  no
 
 # Optimization level
 OPTLEVEL = 3
@@ -391,10 +391,16 @@ ${OBJDIR}/VibrationalRelax.o : ${SRCDIR}/VibrationalRelax.f90 ${OBJDIR}/SharedDa
                                ${OBJDIR}/ClassicalEqMotion.o ${OBJDIR}/PotentialModule.o ${OBJDIR}/IndependentOscillatorsModel.o \
                                ${OBJDIR}/RandomNumberGenerator.o ${COMMONDEP}
 
-# Program to simulate the vibrational relaxation
+# Program to simulate the thermal equilibrium dynamics
 ${OBJDIR}/ThermalEquilibrium.o : ${SRCDIR}/ThermalEquilibrium.f90 ${OBJDIR}/SharedData.o ${OBJDIR}/InputField.o \
                                  ${OBJDIR}/ClassicalEqMotion.o ${OBJDIR}/PotentialModule.o ${OBJDIR}/IndependentOscillatorsModel.o \
                                  ${OBJDIR}/RandomNumberGenerator.o ${COMMONDEP}
+
+# Program to simulate the scattering process
+${OBJDIR}/ScatteringSimulation.o : ${SRCDIR}/ScatteringSimulation.f90 ${OBJDIR}/SharedData.o ${OBJDIR}/InputField.o \
+                              ${OBJDIR}/UnitConversion.o ${OBJDIR}/ClassicalEqMotion.o ${OBJDIR}/PotentialModule.o \
+                              ${OBJDIR}/IndependentOscillatorsModel.o ${OBJDIR}/RandomNumberGenerator.o  \
+                              ${OBJDIR}/PrintTools.o ${COMMONDEP}
 
 # Program to simulate the vibrational relaxation
 ${OBJDIR}/Harmonic1DModel.o : ${SRCDIR}/Harmonic1DModel.f90 ${OBJDIR}/SharedData.o ${OBJDIR}/InputField.o \

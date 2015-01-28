@@ -28,6 +28,7 @@ PROGRAM JK6_v3
    USE PolymerEquilibriumOscillator
    USE ThermalEquilibrium
    USE Harmonic1DModel
+   USE ScatteringSimulation
    USE IndependentOscillatorsModel
    USE PotentialModule
 
@@ -364,7 +365,7 @@ PROGRAM JK6_v3
       CASE( RPMD_EQUILIBRIUM )
          CALL PolymerEquilibriumOscillator_ReadInput( InputData )
       CASE( SCATTERING )
-         ! ...
+         CALL Scattering_ReadInput( InputData )
       CASE( POTENTIALPRINT )
          CALL PotentialAnalysis_ReadInput( InputData )
    END SELECT
@@ -392,7 +393,8 @@ PROGRAM JK6_v3
          CALL PolymerEquilibriumOscillator_Initialize( )
          CALL PolymerEquilibriumOscillator_Run( )
       CASE( SCATTERING )
-         ! ...
+         CALL Scattering_Initialize()
+         CALL Scattering_Run()
       CASE( POTENTIALPRINT )
          CALL PotentialAnalysis_Initialize()
          CALL PotentialAnalysis_Run()
@@ -414,7 +416,7 @@ PROGRAM JK6_v3
       CASE( RPMD_EQUILIBRIUM )
          CALL PolymerEquilibriumOscillator_Dispose()
       CASE( SCATTERING )
-         ! ...
+         CALL Scattering_Dispose()
       CASE( POTENTIALPRINT )
          CALL PotentialAnalysis_Dispose()
    END SELECT

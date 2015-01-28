@@ -29,42 +29,31 @@ InputTemp   : 16
 InputFreq   : 18
 
 # Kind of calculation
-RunType : 2
+RunType : 1
 PrintType : 1
-BathType : 3
+BathType : 4
 
-# Parameters of the system
-QFreq : 500
-# Temperature of the system / substrate 
-Temperature : 300.00
+# Fixing collinear geometry variable
+NCarbon   : 121
+Collinear : FALSE
 
 # Evolution parameters
 # Step of the time evolution (fs)
-TimeStep : 0.05
+TimeStep : 0.01
 # Total number of time step per trajectory
-NrOfSteps  :  2000000 
+NrOfSteps  :  1000000
 # Nr of steps between each analysis
-NrOfPrintSteps  : 40000
+NrOfPrintSteps  : 20000
+# Gamma for thermostating the dynamics
+RelaxAtBorders : 100.
 
 # Langevin equilibration parameters
 # Friction coefficient (fs-1)
-EquilRelaxTime :  10. 
+EquilRelaxTime :  5. 
 # Time step (fs)
-EquilTStep : 0.2
+EquilTStep : 0.02
 # Nr of time steps of the equilibration dynamics
-NrEquilibrSteps :  1000000 
-
-# Normal bath
-# mass of the normal bath oscillators
-MassBath : 1.0
-NBath : 500
-OhmicGammaTimesMass : .444104532
-BathCutOffFreq      : 1000.0
-BathLowerCutOffFreq : 0.0
-
-# non linear coupling
-NonLinearCoupling : TRUE
-AlphaCoupling : 1.0
+NrEquilibrSteps :  100000 
 
 # Masses
 # mass of the target H atom (UMA)
@@ -72,7 +61,11 @@ MassH  : 1.00782503207
 # mass of the substrate C atoms (UMA)
 MassC  : 12.0
 
+# Temperature of the simulation
+# Temperature of the system / substrate (K)
+Temperature : 5.0
+
 # Sampling parameters
 # number of trajectories per impact parameter
-NrTrajs   : 100
+NrTrajs   : 1000
 

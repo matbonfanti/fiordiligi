@@ -21,7 +21,7 @@ MODULE SharedData
    ! PARAMETERS 
    
    ! Variable to define adsorption condition
-   REAL, PARAMETER :: AdsorpLimit = 2.8
+   REAL, PARAMETER :: AdsorpLimit = 5.0
 
 !=============================================================================================================
 
