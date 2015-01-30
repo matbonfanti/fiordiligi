@@ -1,0 +1,91 @@
+# -------------------- INPUT FILE for fiordiligi (version 3) ------------------------------
+
+# Kind of calculation
+
+# RUNTYPE
+# 1 - Equilibrium calculation with H already adsorbed
+# 2 - Test the parameters with a 1D harmonic model
+# 3 - Relaxation dynamics of a CH bound state, with the bath at 0K
+# 4 - Scattering calculation with H coming from gas-phase
+# 5 - Vibrational relaxation with ring polymer dynamics
+# 10 - Static analysis of the potential
+RunType : 4
+
+# PRINTTYPE
+# 3 - DEBUG fully detailed information about each traj
+# 2 - FULL files to plot the averages over the ensamble
+# 1 - MINIMAL minimal level of output, only final averages
+PrintType : 1
+
+# BATHTYPE
+# 1 - LANGEVIN DYNAMICS - effective relaxation dynamics, with langevin eq of motion
+# 2 - CHAIN BATH - bath of HO in a linear chain form
+# 3 - NORMAL BATH bath of HO on a regular freq grid, all coupled to the system
+# 4 - SLAB POTENTIAL the bath is a slab of carbon atom
+# 5 - DOUBLE CHAIN the bath is represented as two chain both coupled to the system
+BathType : 4
+
+# Units
+# Length: 0 = bohr, 1 = Ang
+InputLength : 1
+# Energy: 2 = Hartree, 3 = eV, 4 = kcal/mol, 5 = kJ/mol, 6 = J
+InputEnergy : 3
+# Mass: 7 = au, 8 = amu, 9 = kg
+InputMass   : 8
+# Angle: 10 = radiant, 11 = degrees
+InputAngle  : 11 
+# Time: 12 = au, 13 = fs, 14 = ps
+InputTime   : 13
+# Temperature: 15 = au, 16 = K
+InputTemp   : 16
+# Frequency: 17 = au, 18 = cm^-1 , 19 = fs^-1
+InputFreq   : 18
+
+# Number of carbon atoms in the cluster model of the substrate
+NCarbon   : 121
+# Fixing collinear geometry variable
+Collinear : FALSE
+
+# Scattering parameters
+# Kinetic energy of the H atom (normal incidence)
+EKinZH : 0.5
+# Initial height of the H atom
+ZHInit : 6.0
+# Maximum number of impact parameter ( 0 = collinear )
+NRhoMax : 0
+# Impact parameter grid spacing
+DeltaRho : 0.0
+
+# Evolution parameters
+# Step of the time evolution
+TimeStep : 0.01
+# Total number of time step per trajectory
+NrOfSteps  :  50000
+# Nr of steps between each analysis
+NrOfPrintSteps  : 1000
+# Gamma for thermostating the dynamics
+RelaxAtBorders : 100.
+
+# Langevin equilibration parameters
+# Friction coefficient 
+EquilRelaxTime :  50.
+# Time step 
+EquilTStep : 0.02
+# Nr of time steps of the equilibration dynamics
+NrEquilibrSteps :  100000
+ 
+# Masses
+# mass of the target H atom 
+MassH  : 1.00782503207
+# mass of the substrate C atoms 
+MassC  : 12.0
+
+# Temperature of the simulation
+# Temperature of the system / substrate
+Temperature : 50.0
+
+# Sampling parameters
+# number of trajectories per impact parameter
+NrTrajs   : 20
+
+# -------------------------------- END OF INPUT FILE -------------------------------------
