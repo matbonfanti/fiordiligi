@@ -646,6 +646,7 @@ MODULE VibrationalRelax
                CLOSE( Unit=DebugUnitEn )
                CLOSE( Unit=DebugUnitCoord )
                CLOSE( Unit=DebugUnitVel )
+               CLOSE( Unit=DebugUnitNormalModes )
          ENDIF
 
       END DO
@@ -782,7 +783,8 @@ MODULE VibrationalRelax
          ! Add potential and forces of the bath and the coupling
          CALL BathPotentialAndForces( Bath, Positions(4)-C1Puckering, Positions(5:), VibrRelaxPotential, &
                                                                                Forces(4), Forces(5:) ) 
-
+         CALL BathPotentialAndForces( Bath, Positions(4)-C1Puckering, Positions(5:), VibrRelaxPotential, &
+                                                                               Forces(4), Forces(5:) ) 
       ELSE IF ( BathType == DOUBLE_CHAIN ) THEN
          ! Compute potential and forces of the system
          IF ( ModelHarmonic ) THEN

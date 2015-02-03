@@ -663,13 +663,13 @@ MODULE PotentialAnalysis
 
       ! Set grid dimensions
       NpointZH = INT((ZHmax-ZHmin)/GridSpacing) + 1
-      NpointZC = INT((0.8-0.0)/0.001) + 1
+      NpointZC = INT((0.8-0.0)/0.0001) + 1
 
       ! Allocate temporary array to store potential data and coord grids
       ALLOCATE( PotentialArray( NpointZC ), ZCArray( NpointZC ), OptZC( NpointZH ), ZHArray( NpointZH ) )
     
       ! Define coordinate grids
-      ZCArray = (/ ( 0.0 + 0.001*(i-1), i=1,NpointZC) /)
+      ZCArray = (/ ( 0.0 + 0.0001*(i-1), i=1,NpointZC) /)
       ZHArray = (/ ( ZHmin + GridSpacing*(j-1), j=1,NpointZH) /)
 
       DO i = 1, NpointZH
@@ -697,11 +697,11 @@ MODULE PotentialAnalysis
 !       ! At each fixed sqrt(rho^2 + zH^2), find minimum of the potential along ZC
 ! 
 !       ! Set ZH grid dimensions
-!       NpointZH = INT((ZHmax-ZHmin)/GridSpacing) + 1
+!       NpointZH = INT((ZHmax-MAX(ZHmin,1.5))/(0.1*GridSpacing)) + 1
 !       ! Allocate temporary array to store the ZH grid and the ZC of the minimum of the potential
-!       ALLOCATE( ZCArray( NpointZH ), ZHArray( NpointZH ) )
+!       ALLOCATE( PotentialArray( NpointZC ), ZCArray( NpointZH ), ZHArray( NpointZH ), OptZC( NpointZH ) )
 !       ! Define coordinate grids
-!       ZHArray = (/ ( ZHmin + GridSpacing*(j-1), j=1,NpointZH) /)
+!       ZHArray = (/ ( MAX(ZHmin,1.5) + (0.1*GridSpacing)*(j-1), j=1,NpointZH) /)
 ! 
 !       DO i = 1, NpointZH
 ! 
@@ -716,21 +716,22 @@ MODULE PotentialAnalysis
 ! 
 !          ! Computing the energy at this geometry
 !          EMin = MinimizePotential( X, Mask ) 
-!          ZCArray(i) = X(4)
+!          OptZC(i) = X(4)
 ! 
 !          WRITE(ZHZCPathUnit, *) ZHArray(i)*LengthConversion(InternalUnits,InputUnits), &
-!                                 ZCArray(i)*LengthConversion(InternalUnits,InputUnits), &
+!                                 OptZC(i)*LengthConversion(InternalUnits,InputUnits), &
 !                                 Emin*EnergyConversion(InternalUnits,InputUnits)
 ! 
 !       END DO
 
       ! Set spline interpolant through the points
       CALL SetupSpline( SplineData, ZHArray(:)+OptZC(:), OptZC )
+!       CALL SetupSpline( SplineData, ZHArray(:), OptZC )
 
       ! Print spline interpolant
       WRITE(ZHZCPathUnit, "(/,A)") "# Spline interpolant "
-      DO i = -2*NpointZH, NpointZH*10
-         ZH = ZHmin + REAL(i)*GridSpacing/2.0
+      DO i = -NpointZH, NpointZH*20
+         ZH =  ZHmin + REAL(i)*0.05*GridSpacing
          
          WRITE(ZHZCPathUnit, *) SQRT(ZH**2+Rho**2)*LengthConversion(InternalUnits,InputUnits), &
                                 GetSpline( SplineData, ZH)*LengthConversion(InternalUnits,InputUnits)

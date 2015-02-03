@@ -74,11 +74,12 @@ MODULE PotentialModule
 ! ************************************************************************************
 
 
-      SUBROUTINE SetupPotential( MassHydro, MassCarb, Collinear )
+      SUBROUTINE SetupPotential( MassHydro, MassCarb, OptimizeSlab, Collinear )
          IMPLICIT NONE
          REAL, INTENT(IN)     :: MassHydro, MassCarb
          LOGICAL, OPTIONAL    :: Collinear
          REAL, DIMENSION(124) :: Positions
+         LOGICAL, INTENT(IN)  :: OptimizeSlab
          INTEGER :: iCoord
          REAL    :: Value
          REAL, DIMENSION(4,4)       :: HessianSystem
@@ -105,8 +106,8 @@ MODULE PotentialModule
          Positions(3) = HZEquilibrium   ! reasonable guess for H Z coordinate
          Positions(4) = C1Puckering
 
-         ! Minimize potential
-         MinimumEnergy =  MinimizePotential( Positions, (/ (.TRUE., iCoord=1,124)  /) )      
+         ! Minimize potential ( this optimization can be disabled )
+         IF (OptimizeSlab)  MinimumEnergy =  MinimizePotential( Positions, (/ (.TRUE., iCoord=1,124)  /) )      
 
          ! Translate to bring C3,C4,C5 in the Z=0 plane
          Value = (Positions(5)+Positions(6)+Positions(7))/3.0

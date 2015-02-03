@@ -324,8 +324,12 @@ PROGRAM JK6_v3
    !       POTENTIAL SETUP 
    !*************************************************************
 
-   ! Setup potential energy surface
-   CALL SetupPotential(  MassH, MassC, Collinear )
+   ! Setup potential energy surface - no relaxation in case of scattering simulation
+   IF ( RunType == SCATTERING ) THEN
+      CALL SetupPotential(  MassH, MassC, .FALSE., Collinear )
+   ELSE
+      CALL SetupPotential(  MassH, MassC, .TRUE., Collinear )
+   ENDIF
    
    ! If needed setup bath frequencies and coupling for oscillator bath models
    IF (  BathType == NORMAL_BATH ) THEN

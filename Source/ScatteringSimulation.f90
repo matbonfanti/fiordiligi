@@ -17,12 +17,16 @@
 !***************************************************************************************
 !
 !>  \par Updates
-!>  \arg 28 February 2015 : the module has been completely revise according to the new
+!>  \arg 28 January 2015 : the module has been completely revise according to the new
 !>                          structure of the code (version 2.0)
-!>  \arg 28 February 2015 : * collinear / non collinear distinction
-!>                          * dispose subroutine completed
+!>  \arg 28 January 2015 : * collinear / non collinear distinction
+!>                         * dispose subroutine completed
+!>  \arg 3 February 2015 : * debug printing is now available
+!>                         * zC-f(ZH) coupling function has been added 
+!>                         * thermal initial conditions before equilibration
 !                
 !>  \todo         print XYZ file of scattering trajectory
+!>  \todo         print coupling function and its derivative
 !
 !***************************************************************************************
 MODULE ScatteringSimulation
@@ -35,6 +39,7 @@ MODULE ScatteringSimulation
    USE IndependentOscillatorsModel
    USE RandomNumberGenerator
    USE PrintTools
+   USE SplineInterpolator
 
    IMPLICIT NONE
 
@@ -80,6 +85,10 @@ MODULE ScatteringSimulation
 
    ! Number of dimensions of the system+bath hamiltonian
    INTEGER :: NDim                             !< integer nr of dofs of the system+bath hamiltonian
+
+   ! ZCeq as a function of ZH
+   CHARACTER(100)   :: ZCofZHFile              !< file storing the data ZC vs ZH (in atomic units)
+   TYPE(SplineType) :: ZCofZHSpline            !< spline function defining ZC as a function of ZH
 
    CONTAINS
 
@@ -130,27 +139,27 @@ MODULE ScatteringSimulation
       ! Accordingly set the interval between each printing step
       PrintStepInterval = NrOfSteps / NrOfPrintSteps
 
-      IF ( BathType ==  SLAB_POTENTIAL ) THEN
-
       ! READ THE VARIABLES TO SET THE INITIAL CONDITIONS OF THE SYSTEM
 
-         ! Temperature of the equilibrium simulation
-         CALL SetFieldFromInput( InputData, "Temperature", Temperature )
-         Temperature = Temperature * TemperatureConversion(InputUnits, InternalUnits)
+      ! Temperature of the equilibrium simulation
+      CALL SetFieldFromInput( InputData, "Temperature", Temperature )
+      Temperature = Temperature * TemperatureConversion(InputUnits, InternalUnits)
 
-         ! Set gamma of the equilibration Langevin dynamics
-         CALL SetFieldFromInput( InputData, "EquilRelaxTime", EquilGamma)
-         EquilGamma = 1. / ( EquilGamma * TimeConversion(InputUnits, InternalUnits) )
+      ! Set gamma of the equilibration Langevin dynamics
+      CALL SetFieldFromInput( InputData, "EquilRelaxTime", EquilGamma)
+      EquilGamma = 1. / ( EquilGamma * TimeConversion(InputUnits, InternalUnits) )
 
-         ! Set the time step of the equilibration
-         CALL SetFieldFromInput( InputData, "EquilTStep",  EquilTStep, TimeStep/MyConsts_fs2AU )
-         EquilTStep = EquilTStep * TimeConversion(InputUnits, InternalUnits)
+      ! Set the time step of the equilibration
+      CALL SetFieldFromInput( InputData, "EquilTStep",  EquilTStep, TimeStep/MyConsts_fs2AU )
+      EquilTStep = EquilTStep * TimeConversion(InputUnits, InternalUnits)
 
-         ! Set nr of steps of the equilibration
-         CALL SetFieldFromInput( InputData, "NrEquilibrSteps", NrEquilibSteps, int(10.0*(1.0/EquilGamma)/EquilTStep) )
-         EquilibrationStepInterval = CEILING( real(NrEquilibSteps) / real(NrOfPrintSteps) )
+      ! Set nr of steps of the equilibration
+      CALL SetFieldFromInput( InputData, "NrEquilibrSteps", NrEquilibSteps, int(10.0*(1.0/EquilGamma)/EquilTStep) )
+      EquilibrationStepInterval = CEILING( real(NrEquilibSteps) / real(NrOfPrintSteps) )
 
-      END IF
+      ! EQUILIBRIUM POSITION OF C ATOM AS FUNCTION OF H
+      IF ( BathType /= LANGEVIN_DYN .AND. BathType /= SLAB_POTENTIAL ) &
+                       CALL SetFieldFromInput( InputData, "ZCofZHFile", ZCofZHFile )
 
       WRITE(*, 902) ZHInit*LengthConversion(InternalUnits,InputUnits), LengthUnit(InputUnits), &
                     EKinZH*EnergyConversion(InternalUnits,InputUnits), EnergyUnit(InputUnits), &
@@ -159,11 +168,12 @@ MODULE ScatteringSimulation
       WRITE(*, 903) NrTrajs, TimeStep*TimeConversion(InternalUnits,InputUnits), TimeUnit(InputUnits), &
                     NrOfSteps, NrOfPrintSteps
 
-      IF ( BathType ==  SLAB_POTENTIAL ) &
-         WRITE(*, 904) 1./EquilGamma*TimeConversion(InternalUnits,InputUnits), TimeUnit(InputUnits), &
-                    EquilTStep*TimeConversion(InternalUnits,InputUnits), TimeUnit(InputUnits), &
-                    EquilTStep*NrEquilibSteps*TimeConversion(InternalUnits,InputUnits), TimeUnit(InputUnits), &
-                    NrEquilibSteps
+      WRITE(*, 904) 1./EquilGamma*TimeConversion(InternalUnits,InputUnits), TimeUnit(InputUnits), &
+                 EquilTStep*TimeConversion(InternalUnits,InputUnits), TimeUnit(InputUnits), &
+                 EquilTStep*NrEquilibSteps*TimeConversion(InternalUnits,InputUnits), TimeUnit(InputUnits), &
+                 NrEquilibSteps
+
+      IF ( BathType /= LANGEVIN_DYN .AND. BathType /= SLAB_POTENTIAL ) WRITE(*, 905) TRIM(ADJUSTL(ZCofZHFile))
 
    902 FORMAT(" * Initial conditions of the atom-surface system ", /,&
               " * Initial height of H atom:                    ",F10.4,1X,A,/,&  
@@ -183,6 +193,8 @@ MODULE ScatteringSimulation
               " * Equilibration total time:                    ",F10.4,1X,A,/,&
               " * Nr of equilibration steps:                   ",I10,       / )
 
+   905 FORMAT(" * File with zC_eq as a function of zH:         ",A,/)
+
    END SUBROUTINE Scattering_ReadInput
 
 !-********************************************************************************************
@@ -195,7 +207,9 @@ MODULE ScatteringSimulation
    SUBROUTINE Scattering_Initialize()
       IMPLICIT NONE
       LOGICAL, DIMENSION(:), ALLOCATABLE :: LangevinSwitchOn
-      INTEGER :: iCoord
+      INTEGER :: ZCEqUnit
+      INTEGER :: iCoord, iData, NData
+      REAL, DIMENSION(:), ALLOCATABLE :: ZHGrid, ZCValue
 
       ! Allocate memory and initialize vectors for trajectory, acceleration and masses
 
@@ -273,6 +287,32 @@ MODULE ScatteringSimulation
          CALL ERROR( Collinear, " Scattering_Initialize: a non collinear potential is needed!" )
       END IF 
 
+      ! Define spline function with ZCeq as a function of ZH
+      IF ( BathType /= LANGEVIN_DYN .AND. BathType /= SLAB_POTENTIAL ) THEN
+
+         ! Count available data and allocate memory
+         NData = CountLinesInFile( TRIM(ADJUSTL(ZCofZHFile)) )
+         ALLOCATE( ZHGrid(NData), ZCValue(NData) )
+
+         ! open file and read content
+         OPEN( FILE=ZCofZHFile , UNIT= ZCEqUnit )
+         DO iData = 1, NData
+            READ(ZCEqUnit,*) ZHGrid(iData), ZCValue(iData)
+         END DO 
+         CLOSE( ZCEqUnit )
+
+         ! Define spline interpolating function
+         CALL SetupSpline( ZCofZHSpline, ZHGrid, ZCValue )
+
+!          DO iData = 1, NData
+!             WRITE(88,*) ZHGrid(iData), GetSpline1D( ZCofZHSpline,ZHGrid(iData)), &
+!                DerivSpline( ZCofZHSpline,ZHGrid(iData))
+!          END DO 
+
+         DEALLOCATE( ZHGrid, ZCValue )
+
+      END IF
+
 !          ! if XYZ files of the trajectories are required, allocate memory to store the traj
 !          IF ( PrintType >= FULL  .AND. ( RunType == SCATTERING .OR. RunType == EQUILIBRIUM ) ) THEN
 !                ALLOCATE( Trajectory( 16, ntime ) )
@@ -291,22 +331,25 @@ MODULE ScatteringSimulation
       IMPLICIT NONE
       INTEGER  ::  AvHydroOutputUnit, AvCarbonOutputUnit       ! UNITs FOR OUTPUT AND DEBUG
       INTEGER  ::  CollinearTrapUnit, CrossSectionUnit
-      INTEGER  ::  jRho, iTraj, iStep, kStep
+      INTEGER  ::  jRho, iTraj, iStep, kStep, iCoord
+      INTEGER  ::  DebugUnitEn, DebugUnitCoord, DebugUnitVel
       REAL     ::  ImpactPar, Time, CrossSection
       REAL, DIMENSION(1,8)  :: AsymptoticCH
       REAL     ::  TotEnergy, PotEnergy, KinEnergy, KinHydro, KinCarbon
       REAL     ::  TempAverage, TempVariance, IstTemperature
       REAL, DIMENSION(NRhoMax+1) :: ImpactParameterGrid
       REAL, DIMENSION(NrOfPrintSteps) :: TimeGrid
+      CHARACTER(100) :: OutFileName
 
-      AvHydroOutputUnit = LookForFreeUnit()
-      OPEN( FILE="AverageHydro.dat", UNIT=AvHydroOutputUnit )
-      WRITE(AvHydroOutputUnit, "(A,I6,A,/)") "# average zH coord and vel vs time (fs | ang) - ",NrTrajs, " trajs"
+      IF ( PrintType >= FULL ) THEN
+         AvHydroOutputUnit = LookForFreeUnit()
+         OPEN( FILE="AverageHydro.dat", UNIT=AvHydroOutputUnit )
+         WRITE(AvHydroOutputUnit, "(A,I6,A,/)") "# average zH coord and vel vs time (fs | ang) - ",NrTrajs, " trajs"
 
-      AvCarbonOutputUnit = LookForFreeUnit()
-      OPEN( FILE="AverageCarbon.dat", UNIT=AvCarbonOutputUnit )
-      WRITE(AvCarbonOutputUnit, "(A,I6,A,/)") "# average zC coord and vel vs time (fs | ang) - ",NrTrajs," trajs"
-
+         AvCarbonOutputUnit = LookForFreeUnit()
+         OPEN( FILE="AverageCarbon.dat", UNIT=AvCarbonOutputUnit )
+         WRITE(AvCarbonOutputUnit, "(A,I6,A,/)") "# average zC coord and vel vs time (fs | ang) - ",NrTrajs," trajs"
+      ENDIF
 
       PRINT "(2/,A)",    "***************************************************"
       PRINT "(A,F10.5)", "         H-GRAPHITE SCATTERING SIMULATION"
@@ -327,7 +370,7 @@ MODULE ScatteringSimulation
          ImpactPar = float(jRho)*DeltaRho
 
          IF ( NRhoMax == 0 ) THEN 
-            PRINT "(A,I5,A)"," Collinear scattering simulation ... "
+            PRINT "(/,A,I5,A)"," Collinear scattering simulation ... "
          ELSE
             PRINT "(2/,A)",    "***************************************************"
             PRINT "(A,F10.5)", "       IMPACT PARAMETER = ", ImpactPar*LengthConversion(InternalUnits,InputUnits)
@@ -361,10 +404,11 @@ MODULE ScatteringSimulation
             IF ( BathType == SLAB_POTENTIAL ) THEN 
                CALL ZeroKelvinSlabConditions( X, V, AsymptoticCH, RandomNr ) 
             ELSE IF ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
-               CALL ZeroKelvinBathConditions( Bath, X(5:), V(5:), ZPECorrection, RandomNr )
+               CALL ThermalEquilibriumBathConditions( Bath, X(5:), V(5:), Temperature, RandomNr )
             ELSE IF ( BathType == DOUBLE_CHAIN ) THEN
-               CALL ZeroKelvinBathConditions( DblBath(1), X(5:NBath+4), V(5:NBath+4), ZPECorrection, RandomNr )
-               CALL ZeroKelvinBathConditions( DblBath(2), X(NBath+5:2*NBath+4), V(NBath+5:2*NBath+4), ZPECorrection, RandomNr )
+               CALL ThermalEquilibriumBathConditions( DblBath(1), X(5:NBath+4), V(5:NBath+4), Temperature, RandomNr )
+               CALL ThermalEquilibriumBathConditions( DblBath(2), X(NBath+5:2*NBath+4), V(NBath+5:2*NBath+4), &
+                                                                           Temperature, RandomNr )
             ELSE IF ( BathType == LANGEVIN_DYN ) THEN
                ! nothing to do
             END IF
@@ -449,6 +493,30 @@ MODULE ScatteringSimulation
             AverageVHydro(0)  = AverageVHydro(0)  + V(3)
             AverageZHydro(0)  = AverageZHydro(0)  + X(3)
 
+            ! Open unit for massive output, with detailed info on trajectories
+            IF ( PrintType == DEBUG ) THEN
+               WRITE(OutFileName,"(A,I4.4,A,I4.4,A)") "Rho_",jRho,"_Traj_",iTraj,"_Energy.dat"
+               DebugUnitEn = LookForFreeUnit()
+               OPEN( Unit=DebugUnitEn, File=OutFileName )
+
+               WRITE(OutFileName,"(A,I4.4,A,I4.4,A)") "Rho_",jRho,"_Traj_",iTraj,"_Coord.dat"
+               DebugUnitCoord = LookForFreeUnit()
+               OPEN( Unit=DebugUnitCoord, File=OutFileName )
+
+               WRITE(OutFileName,"(A,I4.4,A,I4.4,A)") "Rho_",jRho,"_Traj_",iTraj,"_Vel.dat"
+               DebugUnitVel = LookForFreeUnit()
+               OPEN( Unit=DebugUnitVel, File=OutFileName )
+
+               ! Write initial values
+               WRITE( DebugUnitEn, "(/,A)" ) "# TRAJECTORY ENERGY: time / fs | V, KH, KC, Kin, E / Eh "
+               WRITE(DebugUnitEn,800) 0.0,  PotEnergy, KinHydro, KinCarbon, KinEnergy, TotEnergy
+
+               WRITE( DebugUnitCoord, "(/,A)" ) "# TRAJECTORY COORD: time / fs | X(1) X(2) ... X(N) / bohr "
+               WRITE(DebugUnitCoord,800) 0.0, X(1), X(2), X(3), X(4), (/ (X(iCoord+4)+0.05*iCoord, iCoord = 1, NDim-4) /)
+
+               WRITE( DebugUnitVel, "(/,A)" ) "# TRAJECTORY VELOCITIES: time / fs | X(1) X(2) ... X(N) / au "
+               WRITE(DebugUnitVel,800) 0.0, V(:)
+             ENDIF
 
             !*************************************************************
             !         TIME EVOLUTION OF THE TRAJECTORY
@@ -470,11 +538,6 @@ MODULE ScatteringSimulation
                   X(3:NDim) = X(3:NDim)  - (X(5)+X(6)+X(7))/3.0
                ENDIF
 
-               ! Compute kin energy and temperature
-               KinEnergy = EOM_KineticEnergy( MolecularDynamics, V )
-               TotEnergy = PotEnergy + KinEnergy
-               IstTemperature = 2.0*KinEnergy/(MyConsts_K2AU*size(X))
-
                ! output to write every nprint steps 
                IF ( mod(iStep,PrintStepInterval) == 0 ) THEN
 
@@ -488,6 +551,12 @@ MODULE ScatteringSimulation
                   AverageVHydro(kStep)  = AverageVHydro(kStep)  + V(3)
                   AverageZHydro(kStep)  = AverageZHydro(kStep)  + X(3)
                   
+                  ! Compute kinetic energy and total energy
+                  KinEnergy = EOM_KineticEnergy( MolecularDynamics, V )
+                  KinHydro  = EOM_KineticEnergy( MolecularDynamics, V, 3 )
+                  KinCarbon = KinEnergy - KinHydro
+                  TotEnergy = PotEnergy + KinEnergy
+
                   ! check if H is in the trapping region
                   IF ( X(3) <= AdsorpLimit ) TrappingProb(jRho,kStep) = TrappingProb(jRho,kStep)+1.0
 
@@ -497,6 +566,15 @@ MODULE ScatteringSimulation
    !                      Trajectory( 1:min(16,3+nevo) , kstep ) = X( 1:min(16,3+nevo) ) 
    !                      NrOfTrajSteps = kstep
    !                END IF
+
+                  ! If massive level of output, print traj information to std out
+                  IF ( PrintType == DEBUG ) THEN
+                     WRITE(DebugUnitEn,800) TimeStep*real(iStep)/MyConsts_fs2AU, &
+                                           PotEnergy, KinHydro, KinCarbon, KinEnergy, TotEnergy
+                     WRITE(DebugUnitCoord,800) TimeStep*real(iStep)/MyConsts_fs2AU, X(1:4), &
+                                             (/ (X(iCoord+4)+0.05*iCoord, iCoord = 1, NDim-4) /)
+                     WRITE(DebugUnitVel,800) TimeStep*real(iStep)/MyConsts_fs2AU, V(:)
+                  END IF
 
                END IF 
     
@@ -518,6 +596,12 @@ MODULE ScatteringSimulation
                          X(4)*LengthConversion(InternalUnits,InputUnits), LengthUnit(InputUnits), &
                          TotEnergy*EnergyConversion(InternalUnits,InputUnits), EnergyUnit(InputUnits)
 
+            IF ( PrintType == DEBUG ) THEN
+                  CLOSE( Unit=DebugUnitEn )
+                  CLOSE( Unit=DebugUnitCoord )
+                  CLOSE( Unit=DebugUnitVel )
+            ENDIF
+
          END DO Trajectory
 
          PRINT "(A)"," Done! "                                    
@@ -528,20 +612,22 @@ MODULE ScatteringSimulation
          AverageVHydro(:)  = AverageVHydro(:)/NrTrajs
          AverageZHydro(:)  = AverageZHydro(:)/NrTrajs
 
-         ! write impact parameter header in output files
-         WRITE(AvHydroOutputUnit,"(/,A,F10.5)")  &
-                    "# Impact parameter : ",ImpactPar*LengthConversion(InternalUnits,InputUnits)
-         WRITE(AvCarbonOutputUnit,"(/,A,F10.5)")  &
-                    "# Impact parameter : ",ImpactPar*LengthConversion(InternalUnits,InputUnits)
+         IF ( PrintType >= FULL ) THEN
+            ! write impact parameter header in output files
+            WRITE(AvHydroOutputUnit,"(/,A,F10.5)")  &
+                       "# Impact parameter : ",ImpactPar*LengthConversion(InternalUnits,InputUnits)
+            WRITE(AvCarbonOutputUnit,"(/,A,F10.5)")  &
+                       "# Impact parameter : ",ImpactPar*LengthConversion(InternalUnits,InputUnits)
 
-         ! Print time resolved data to output files
-         DO iStep = 1, NrOfPrintSteps
-            Time = FLOAT(PrintStepInterval*iStep)*TimeStep*TimeConversion(InternalUnits,InputUnits)
-            WRITE(AvHydroOutputUnit,800) Time, AverageZHydro(iStep)*LengthConversion(InternalUnits,InputUnits),  &
-                                             AverageVHydro(iStep)*VelocityConversion(InternalUnits,InputUnits)
-            WRITE(AvCarbonOutputUnit,800) Time, AverageZCarbon(iStep)*LengthConversion(InternalUnits,InputUnits), &     
-                                             AverageVCarbon(iStep)*VelocityConversion(InternalUnits,InputUnits)
-         END DO
+            ! Print time resolved data to output files
+            DO iStep = 1, NrOfPrintSteps
+               Time = FLOAT(PrintStepInterval*iStep)*TimeStep*TimeConversion(InternalUnits,InputUnits)
+               WRITE(AvHydroOutputUnit,800) Time, AverageZHydro(iStep)*LengthConversion(InternalUnits,InputUnits),  &
+                                                AverageVHydro(iStep)*VelocityConversion(InternalUnits,InputUnits)
+               WRITE(AvCarbonOutputUnit,800) Time, AverageZCarbon(iStep)*LengthConversion(InternalUnits,InputUnits), &     
+                                                AverageVCarbon(iStep)*VelocityConversion(InternalUnits,InputUnits)
+            END DO
+         END IF
 
       END DO ImpactParameter
 
@@ -570,8 +656,8 @@ MODULE ScatteringSimulation
 
       ! Close open units
       CLOSE( CollinearTrapUnit )
-      CLOSE( AvCarbonOutputUnit )
-      CLOSE( AvHydroOutputUnit )
+      IF ( PrintType >= FULL ) CLOSE( AvCarbonOutputUnit )
+      IF ( PrintType >= FULL ) CLOSE( AvHydroOutputUnit )
 
       ! write cross section data 
       IF ( NRhoMax > 0 ) THEN
@@ -610,8 +696,8 @@ MODULE ScatteringSimulation
                   " * Total Energy                 ",1F10.4,1X,A,/ ) 
 
    700 FORMAT (/, " * Final zH coord               ",1F10.4,1X,A,/ &
-                  " * Final energy                 ",1F10.4,1X,A,/ &
-                  " * Final zC coord               ",1F10.4,1X,A,/ ) 
+                  " * Final zC coord               ",1F10.4,1X,A,/ &
+                  " * Final energy                 ",1F10.4,1X,A,/ ) 
 
    800 FORMAT(F12.5,1000F15.8)
 
@@ -634,6 +720,8 @@ MODULE ScatteringSimulation
       CALL DisposeEvolutionData( MolecularDynamics )
       CALL DisposeEvolutionData( Equilibration )
 
+      ! Dispose spline function
+      CALL DisposeSpline( ZCofZHSpline )
 
    END SUBROUTINE Scattering_Dispose
 
@@ -642,7 +730,8 @@ MODULE ScatteringSimulation
    REAL FUNCTION ScatteringPotential( Positions, Forces )
       REAL, DIMENSION(:), TARGET, INTENT(IN)  :: Positions
       REAL, DIMENSION(:), TARGET, INTENT(OUT) :: Forces
-      INTEGER :: NrDOF, i       
+      INTEGER :: NrDOF, i
+      REAL :: CouplingFs, DTimesX
 
       ! Check the number degrees of freedom
       NrDOF = size( Positions )
@@ -657,25 +746,43 @@ MODULE ScatteringSimulation
          ! Compute potential using the potential subroutine
          ScatteringPotential = VHSticking( Positions, Forces )
 
-      ELSE 
+      ELSE IF ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
          ! Compute potential and forces of the system
-          ScatteringPotential = VHFourDimensional( Positions(1:4), Forces(1:4) )
-
+         ScatteringPotential = VHFourDimensional( Positions(1:4), Forces(1:4) )
+         ! Coupling function of the system
+         CouplingFs = Positions(4)-GetSpline1D(ZCofZHSpline, Positions(3))
          ! Add potential and forces of the bath and the coupling
-         IF ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
-            CALL BathPotentialAndForces( Bath, Positions(4)-C1Puckering, Positions(5:), &
-                          ScatteringPotential, Forces(4), Forces(5:) ) 
-         ELSE IF ( BathType == DOUBLE_CHAIN ) THEN
-            CALL BathPotentialAndForces( DblBath(1), Positions(4)-C1Puckering, Positions(5:NBath+4), &
-                         ScatteringPotential, Forces(4), Forces(5:NBath+4) ) 
-            CALL BathPotentialAndForces( DblBath(2), Positions(4)-C1Puckering, Positions(NBath+5:2*NBath+4), &
-                         ScatteringPotential, Forces(4), Forces(NBath+5:2*NBath+4) ) 
-         END IF
+         CALL BathPotentialAndForces( Bath, CouplingFs, Positions(5:), &
+                                                ScatteringPotential, Forces(4), Forces(5:), DTimesEffMode=DTimesX ) 
+         ! Add forces on ZH coming from ZH-dependent distortion correction
+         Forces(3) = Forces(3) + GetDistorsionForce(Bath)*CouplingFs*DerivSpline(ZCofZHSpline, Positions(3))
+         Forces(3) = Forces(3) - DTimesX * DerivSpline(ZCofZHSpline, Positions(3))
+
+      ELSE IF ( BathType == DOUBLE_CHAIN ) THEN
+         ! Compute potential and forces of the system
+         ScatteringPotential = VHFourDimensional( Positions(1:4), Forces(1:4) )
+         ! Add potential and forces of the bath and the coupling
+         CALL BathPotentialAndForces( DblBath(1), Positions(4)-GetSpline1D( ZCofZHSpline, Positions(3) ), &
+                                     Positions(5:NBath+4), ScatteringPotential, Forces(4), Forces(5:NBath+4) ) 
+         CALL BathPotentialAndForces( DblBath(2), Positions(4)-GetSpline1D( ZCofZHSpline, Positions(3) ), &
+                             Positions(NBath+5:2*NBath+4), ScatteringPotential, Forces(4), Forces(NBath+5:2*NBath+4) ) 
+         ! Add forces on ZH coming from ZH-dependent distortion correction
+         Forces(3) = Forces(3) + GetDistorsionForce(DblBath(1))*(Positions(4)-GetSpline1D( ZCofZHSpline, Positions(3) ))* &
+                   DerivSpline(ZCofZHSpline, Positions(3))
+         ! Add forces on ZH coming from ZH-dependent distortion correction
+         Forces(3) = Forces(3) + GetDistorsionForce(DblBath(2))*(Positions(4)-GetSpline1D( ZCofZHSpline, Positions(3) ))* &
+                   DerivSpline(ZCofZHSpline, Positions(3))
+
+      ELSE IF ( BathType == LANGEVIN_DYN ) THEN
+         ! Compute potential and forces of the system
+         ScatteringPotential = VHFourDimensional( Positions(1:4), Forces(1:4) )
 
       END IF
 
    END FUNCTION ScatteringPotential
 
 !*************************************************************************************************
+
+
 
 END MODULE ScatteringSimulation

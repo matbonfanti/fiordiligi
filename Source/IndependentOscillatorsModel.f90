@@ -26,7 +26,8 @@
 !>  \arg 22 October 2013: to implement the possibility of having multiple baths, 
 !>             a bath datatype has been implemented and all the subroutine have been adapted accordingly
 !>  \arg 8 Novembre 2013: implemented debug output of frequencies and couplings
-!>  \arg 28 February 2015: non linear coupling implemented for normal bath
+!>  \arg 28 January 2015: non linear coupling implemented for normal bath
+!>  \arg 3 February 2015: sub BathPotentialAndForces has a new optional arg for effective mode
 !
 !>  \todo    Initial thermal conditions of a chain bath can be refined by taking into account the coupling
 !>  \todo    Quasi-classical 0K conditions of a chain bath need to be implemented
@@ -245,7 +246,8 @@ CONTAINS
       END IF
 
       DO iBath = 1, Bath%BathSize
-         WRITE(SpectralDensityUnit,"(2F20.12)") Bath%Frequencies(iBath), Bath%Couplings(iBath) 
+         WRITE(SpectralDensityUnit,"(2F20.12)") Bath%Frequencies(iBath)*FreqConversion(InternalUnits,InputUnits),&
+                        Bath%Couplings(iBath) 
       END DO
       WRITE(SpectralDensityUnit,"(/)") 
 #endif
@@ -437,7 +439,7 @@ CONTAINS
 !> @param  CouplForce  In output, CouplForces is incremented with the derivatives of the coupling potential
 !> @param  QForces     In output, array is incremented with the derivatives of the potential (in au)
 !*******************************************************************************     
-   SUBROUTINE BathPotentialAndForces( Bath, QCoupl, QBath, V, CouplForce, QForces, CouplingV ) 
+   SUBROUTINE BathPotentialAndForces( Bath, QCoupl, QBath, V, CouplForce, QForces, CouplingV, DTimesEffMode ) 
       IMPLICIT NONE
       TYPE(BathData), INTENT(IN)                :: Bath
       REAL, INTENT(IN)                          :: QCoupl
@@ -445,11 +447,12 @@ CONTAINS
       REAL, INTENT(INOUT)                       :: V, CouplForce
       REAL, DIMENSION(:), TARGET, INTENT(INOUT) :: QForces 
       REAL, INTENT(OUT), OPTIONAL               :: CouplingV
+      REAL, INTENT(OUT), OPTIONAL               :: DTimesEffMode
 
       INTEGER :: iBath
       REAL, DIMENSION(:), POINTER :: Dn
-      REAL    :: EffMode
       REAL  :: TraslCoord, Expon
+      REAL    :: EffMode
 
       ! Check if the bath is setup
       CALL ERROR( .NOT. Bath%BathIsSetup, "IndependentOscillatorsModel.BathPotentialAndForces: bath is not setup" )
@@ -512,6 +515,8 @@ CONTAINS
             V = V - EffMode * QCoupl + 0.5 * Bath%DistorsionForce * QCoupl**2
          END IF
          CouplForce = CouplForce + EffMode - Bath%DistorsionForce * QCoupl
+
+         IF ( PRESENT(DTimesEffMode)) DTimesEffMode = EffMode
 
          IF ( Bath%NonLinearCoup ) THEN
 
