@@ -24,7 +24,6 @@ MODULE PotentialAnalysis
    USE UnitConversion
    USE PotentialModule
    USE IndependentOscillatorsModel
-   USE DIfferenceDerivatives
    USE PrintTools
    USE SplineInterpolator
 

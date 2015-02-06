@@ -574,7 +574,7 @@ MODULE MyLinearAlgebra
       DEALLOCATE( OffDiagonal )
 #endif
 #if !defined(WITH_NR)
-      CALL AbortWithError( " TheOneWithDiagonalization: Matrix diagonalization implemented only with NR ")
+      CALL AbortWithError( " TheOneWithDiagonalization: Matrix diagonalization implemented only with NR or LAPACK ")
 #endif
 #endif
 

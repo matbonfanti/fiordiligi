@@ -5,11 +5,25 @@ MODULE PotentialModule
 
    PRIVATE
    PUBLIC :: SetupPotential, VHSticking, VHFourDimensional, MinimizePotential
-   PUBLIC :: SystemBathLinearCoupling, HessianOfTheSystem
-   PUBLIC :: ThermalEquilibriumConditions, ScatteringConditions, ZeroKelvinSlabConditions
+   PUBLIC :: SystemBathLinearCoupling, HessianOfTheSystem, HessianOfTheFullPotential
+   PUBLIC :: ThermalEquilibriumConditions, ZeroKelvinSlabConditions
    PUBLIC :: CarbonForceConstant, GraphiteLatticeConstant
 
+   ! Parameters for finite difference derivatives computation
+
    REAL, PARAMETER :: SmallDelta = 1.E-04
+
+   REAL, DIMENSION(4), PARAMETER :: Deltas = (/ -2.0,    -1.0,    +1.0,    +2.0    /)
+   REAL, DIMENSION(4), PARAMETER :: Coeffs = (/ +1./12., -8./12., +8./12., -1./12. /) 
+
+   REAL, DIMENSION(3), PARAMETER :: ForwardDeltas = (/  0.0,   +1.0,  +2.0   /)
+   REAL, DIMENSION(3), PARAMETER :: ForwardCoeffs = (/ -3./2., +2.0,  -1./2. /) 
+
+   !> Parameters defining the kind of 4D system cut of the potential
+   INTEGER, PARAMETER  ::  CUT4D_PLANARGRAPHENE = 0   !< carbons are fixed in the planar configuration
+   INTEGER, PARAMETER  ::  CUT4D_GLOBALMINIMUM  = 1   !< carbons are fixed in the geometry of the global minimum
+   INTEGER, PARAMETER  ::  CUT4D_ADIABATICMODEL = 2   !< carbons position are optimized at each (rho, zH, zC )
+   INTEGER, PUBLIC  :: Cut4D_Model                            !< current choice of the model
 
    !> Setup variable for the potential
    LOGICAL, SAVE :: PotentialModuleIsSetup = .FALSE.
@@ -70,16 +84,15 @@ MODULE PotentialModule
 
    CONTAINS
 
-
 ! ************************************************************************************
 
-
-      SUBROUTINE SetupPotential( MassHydro, MassCarb, OptimizeSlab, Collinear )
+      SUBROUTINE SetupPotential( MassHydro, MassCarb, Cut4DDefinition, Collinear )
          IMPLICIT NONE
          REAL, INTENT(IN)     :: MassHydro, MassCarb
          LOGICAL, OPTIONAL    :: Collinear
          REAL, DIMENSION(124) :: Positions
-         LOGICAL, INTENT(IN)  :: OptimizeSlab
+         LOGICAL, DIMENSION(124) :: OptMask
+         INTEGER, INTENT(IN)  :: Cut4DDefinition
          INTEGER :: iCoord
          REAL    :: Value
          REAL, DIMENSION(4,4)       :: HessianSystem
@@ -97,36 +110,41 @@ MODULE PotentialModule
             CollinearPES = .FALSE.
          END IF
 
+         ! Store the choice of 4D model
+         Cut4D_Model = Cut4DDefinition
+
+         ! Potential module is set up
          PotentialModuleIsSetup = .TRUE.
 
-         ! Define the reference 4D potential for the graphite in minimum E
+         ! Set the values of equilibrium ZC and ZH and Zcarbons according to the chosen 4D model
 
          ! Set guess starting coordinate for the minimization of the slab potential
          Positions(1:124) = 0.0
          Positions(3) = HZEquilibrium   ! reasonable guess for H Z coordinate
          Positions(4) = C1Puckering
 
-         ! Minimize potential ( this optimization can be disabled )
-         IF (OptimizeSlab)  MinimumEnergy =  MinimizePotential( Positions, (/ (.TRUE., iCoord=1,124)  /) )      
+         ! Choose the coordinates to minimize (according to the model)
+         SELECT CASE ( Cut4D_Model )
+            CASE( CUT4D_PLANARGRAPHENE )
+               OptMask = (/ (.TRUE., iCoord=1,4), (.FALSE., iCoord=5,124) /)
+            CASE( CUT4D_GLOBALMINIMUM , CUT4D_ADIABATICMODEL )
+               OptMask = (/ (.TRUE., iCoord=1,4), (.FALSE., iCoord=5,7), (.TRUE., iCoord=8,124) /)
+            CASE DEFAULT
+               CALL AbortWithError( " SetupPotential: chosen 4D model does not exist " )
+         END SELECT
 
-         ! Translate to bring C3,C4,C5 in the Z=0 plane
-         Value = (Positions(5)+Positions(6)+Positions(7))/3.0
-         DO iCoord= 3,124
-            Positions(iCoord) = Positions(iCoord) - Value
-         END DO
-
+         ! Minimize potential
+         MinimumEnergy =  MinimizePotential( Positions, OptMask )
+  
          ! Store the coordinate of the slab
          MinSlab(:) = Positions(5:124)
-
          ! Store the carbon puckering and the H Z at equilibrium
          C1Puckering = Positions(4)
          HZEquilibrium = Positions(3)
 
          ! Set the normal modes of the 4D potential
-
          ! compute the hessian
          HessianSystem = HessianOfTheSystem( Positions, MassHydro, MassCarb )
-
          ! Diagonalize the hessian
          CALL TheOneWithDiagonalization( HessianSystem, NormalModes4D_Vecs, NormalModes4D_Freq )
 
@@ -273,75 +291,6 @@ MODULE PotentialModule
 
       END SUBROUTINE ThermalEquilibriumConditions
 
-
-! ************************************************************************************
-
-      ! Setup initial conditions for the scattering of H atom on a thermalized C slab
-      ! data are initialized in ATOMIC UNITS
-      SUBROUTINE ScatteringConditions( Positions, Velocities, ImpactParam, InitZ, IncEnergy, Temperature, MassHydro, MassCarb )
-         IMPLICIT NONE
-
-         REAL, DIMENSION(:), INTENT(OUT) :: Positions, Velocities
-         REAL, INTENT(IN)  :: Temperature, MassCarb, MassHydro
-         REAL, INTENT(IN)  :: ImpactParam, InitZ, IncEnergy
-         INTEGER           :: nCarbon, NDoF
-         REAL              :: SigmaMomentum, SigmaPosition
-         REAL              :: gaus1, gaus2, gvar1, gvar2, gr1, gr2, gs1, gs2
-
-         ! Error if module not have been setup yet
-         CALL ERROR( .NOT. PotentialModuleIsSetup, "PotentialModule.CarbonForceConstant : Module not Setup" )
-
-         ! Check the number of non frozen degree of freedom
-         NDoF = size( Positions )
-         CALL ERROR( size(Velocities) /= NDoF, "PotentialModule.ScatteringConditions: array dimension mismatch" )
-
-         ! Check if the nr of dimension is compatible with the slab maximum size
-         CALL ERROR( (NDoF > 124) .OR. (NDoF < 4), "PotentialModule.ScatteringConditions: wrong number of DoFs" )
-
-         ! Scattering position of H atom
-         Positions(1) = ImpactParam
-         Positions(2) = 0.00001
-         Positions(3) = InitZ
-
-         ! Velocity of the H atom
-         Velocities(1) = 0.0
-         Velocities(2) = 0.0
-         Velocities(3) = - sqrt( 2.0* IncEnergy / MassHydro )
-
-         ! standard deviation of the position distribution (force constant needs to be in AU)
-         SigmaPosition = sqrt( Temperature / (rkc*(MyConsts_Bohr2Ang)**2/MyConsts_Hartree2eV) )
-         ! standard deviation of the momentum distribution
-         SigmaMomentum = sqrt( MassCarb * Temperature )
-
-         ! Cycle over carbon atoms in the slab
-         DO nCarbon = 4,NDoF
-
-            ! Initialization
-            Positions(nCarbon)   = 0.0
-            Velocities(nCarbon)   = 0.0
-
-            ! Generate gaussian random numbers for position and velocity
-            DO 
-               call random_number(gaus1)
-               call random_number(gaus2)
-               gvar1=2.0*gaus1-1
-               gvar2=2.0*gaus2-1
-               gr1=gvar1**2+gvar2**2
-               IF (gr1 < 1.0) EXIT
-            END DO
-            gr2=sqrt(-2.0*alog(gr1)/gr1)
-            gs1=gvar1*gr2
-            gs2=gvar2*gr2
-
-            ! Set position and velocity of the carbon atom
-            Positions(nCarbon)  = SigmaPosition*gs1
-            Velocities(nCarbon) = SigmaMomentum*gs2/MassCarb
-
-         END DO
-
-      END SUBROUTINE ScatteringConditions
-
-
 ! ************************************************************************************
 
       REAL FUNCTION GraphiteLatticeConstant()
@@ -430,12 +379,6 @@ MODULE PotentialModule
       REAL :: Potential
       INTEGER :: i, k
 
-      REAL, DIMENSION(4), PARAMETER :: Deltas = (/ -2.0,    -1.0,    +1.0,    +2.0    /)
-      REAL, DIMENSION(4), PARAMETER :: Coeffs = (/ +1./12., -8./12., +8./12., -1./12. /) 
-
-      REAL, DIMENSION(3), PARAMETER :: ForwardDeltas = (/  0.0,   +1.0,  +2.0   /)
-      REAL, DIMENSION(3), PARAMETER :: ForwardCoeffs = (/ -3./2., +2.0,  -1./2. /) 
-
       MassVector(1:3) = MassHydro
       MassVector(4)   = MassCarb
 
@@ -498,6 +441,77 @@ MODULE PotentialModule
 
    ! ************************************************************************************************
 
+   FUNCTION HessianOfTheFullPotential( AtPoint, MassHydro, MassCarb ) RESULT( Hessian )
+      IMPLICIT NONE
+      REAL, DIMENSION(:), INTENT(IN) :: AtPoint
+      REAL, INTENT(IN)               :: MassHydro, MassCarb
+      REAL, DIMENSION(size(AtPoint),size(AtPoint)) :: Hessian
+      REAL, DIMENSION(size(AtPoint)) :: Coordinates, FirstDerivative, MassVector
+      REAL :: Potential
+      INTEGER :: i, k, NDim
+
+      MassVector(1:3) = MassHydro
+      MassVector(4:)  = MassCarb
+      NDim = size(AtPoint)
+
+      Hessian(:,:) = 0.0
+
+      ! Compute the second derivatives for displacements of x and y
+      ! IMPORTANT!!! since rho = 0 is a singular value of the function, 
+      ! the derivative is computed slightly off the minimum, and is computed for x,y > 0
+      DO i = 1, 2
+         DO k = 1, size(ForwardDeltas)
+
+            ! Define small displacement from the point where compute the derivative
+            Coordinates(:) = AtPoint(:)
+            IF ( Coordinates(i) < 0.0 ) THEN
+               Coordinates(i) = - Coordinates(i)
+            END IF
+
+            IF ( Coordinates(i) < 0.001 ) THEN
+               Coordinates(i) = Coordinates(i) + 0.001 + ForwardDeltas(k)*SmallDelta
+            ELSE
+               Coordinates(i) = Coordinates(i) + ForwardDeltas(k)*SmallDelta
+            END IF
+
+            ! Compute potential and forces in the displaced coordinate
+            Potential = VHSticking( Coordinates, FirstDerivative )
+            FirstDerivative = - FirstDerivative
+
+            ! Increment numerical derivative of the analytical derivative
+            Hessian(i,:) = Hessian(i,:) + ForwardCoeffs(k)*FirstDerivative(:)/SmallDelta
+
+         END DO
+      END DO
+
+      DO i = 3, NDim
+         DO k = 1, size(Deltas)
+
+            ! Define small displacement from the point where compute the derivative
+            Coordinates(:) = AtPoint(:)
+            Coordinates(i) = Coordinates(i) + Deltas(k)*SmallDelta
+
+            ! Compute potential and forces in the displaced coordinate
+            Potential = VHSticking( Coordinates, FirstDerivative )
+            FirstDerivative = - FirstDerivative
+
+            ! Increment numerical derivative of the analytical derivative
+            Hessian(i,:) = Hessian(i,:) + Coeffs(k)*FirstDerivative(:)/SmallDelta
+
+         END DO
+      END DO
+
+      ! Numerical mass scaled hessian of the full system+slab potential
+      DO k = 1, NDim
+         DO i = 1, NDim
+            Hessian(i,k) = Hessian(i,k) / SQRT( MassVector(i)*MassVector(k) )
+         END DO
+      END DO
+
+   END FUNCTION HessianOfTheFullPotential
+
+!*************************************************************************************************
+
    FUNCTION SystemBathLinearCoupling( AtPoint ) RESULT( CouplingCoeff )
       IMPLICIT NONE
       REAL, DIMENSION(2) :: CouplingCoeff
@@ -505,9 +519,6 @@ MODULE PotentialModule
       REAL, DIMENSION(size(AtPoint)) :: Coordinates, FirstDerivative
       REAL :: Potential
       INTEGER :: i, k
-
-      REAL, DIMENSION(4), PARAMETER :: Deltas = (/ -2.0,    -1.0,    +1.0,    +2.0    /)
-      REAL, DIMENSION(4), PARAMETER :: Coeffs = (/ +1./12., -8./12., +8./12., -1./12. /) 
 
       CouplingCoeff(:) = 0.0
 
@@ -558,15 +569,42 @@ MODULE PotentialModule
 
          REAL, DIMENSION(:), TARGET, INTENT(IN)  :: Positions
          REAL, DIMENSION(:), TARGET, INTENT(OUT) :: Forces 
-         REAL, DIMENSION(124) :: Dummy
+         REAL, DIMENSION(124) :: Dummy, OptCoord
+         LOGICAL, DIMENSION(124) :: OptMask
+         INTEGER :: iCoord
 
-         Dummy = 0.0
-         ! use the full potential with the carbon atoms in the equilibrium geometry
-         V = VHSticking( (/ Positions, MinSlab(:) /), Dummy(:) ) 
-         Forces(1:4) = Dummy(1:4)
+         ! Choose the method according to the model
+         SELECT CASE ( Cut4D_Model )
+
+            ! For a non adiabatic model, use stored configuration of carbon atoms
+            CASE( CUT4D_PLANARGRAPHENE , CUT4D_GLOBALMINIMUM )
+
+               Dummy = 0.0
+               ! use the full potential with the carbon atoms in the equilibrium geometry
+               V = VHSticking( (/ Positions, MinSlab(:) /), Dummy(:) ) 
+               Forces(1:4) = Dummy(1:4)
+
+            ! For a diabatic model, minimize carbon coordinates at fixed ZH ZC rho
+            CASE( CUT4D_ADIABATICMODEL )
+
+               ! Set optimization constraints
+               OptMask = (/ (.FALSE., iCoord=1,7), (.TRUE., iCoord=8,124) /)
+               ! Set starting geometry
+               OptCoord = (/ Positions, MinSlab(:) /)
+               ! Optimize coordinates
+               V =  MinimizePotential( OptCoord, OptMask )
+
+               ! Use optimized coordinates to compute forces and energy
+               V = VHSticking( OptCoord, Dummy(:) ) 
+               Forces(1:4) = Dummy(1:4)
+
+         END SELECT
+
+         ! For a collinear PES, set lateral forces to zero
          IF ( CollinearPES ) THEN 
             Forces(1:2) = 0.0
          END IF
+
 
       END FUNCTION VHFourDimensional
 

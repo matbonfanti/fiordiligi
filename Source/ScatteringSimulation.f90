@@ -288,7 +288,7 @@ MODULE ScatteringSimulation
       END IF 
 
       ! Define spline function with ZCeq as a function of ZH
-      IF ( BathType /= LANGEVIN_DYN .AND. BathType /= SLAB_POTENTIAL ) THEN
+      IF ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
 
          ! Count available data and allocate memory
          NData = CountLinesInFile( TRIM(ADJUSTL(ZCofZHFile)) )
@@ -762,16 +762,10 @@ MODULE ScatteringSimulation
          ! Compute potential and forces of the system
          ScatteringPotential = VHFourDimensional( Positions(1:4), Forces(1:4) )
          ! Add potential and forces of the bath and the coupling
-         CALL BathPotentialAndForces( DblBath(1), Positions(4)-GetSpline1D( ZCofZHSpline, Positions(3) ), &
-                                     Positions(5:NBath+4), ScatteringPotential, Forces(4), Forces(5:NBath+4) ) 
-         CALL BathPotentialAndForces( DblBath(2), Positions(4)-GetSpline1D( ZCofZHSpline, Positions(3) ), &
-                             Positions(NBath+5:2*NBath+4), ScatteringPotential, Forces(4), Forces(NBath+5:2*NBath+4) ) 
-         ! Add forces on ZH coming from ZH-dependent distortion correction
-         Forces(3) = Forces(3) + GetDistorsionForce(DblBath(1))*(Positions(4)-GetSpline1D( ZCofZHSpline, Positions(3) ))* &
-                   DerivSpline(ZCofZHSpline, Positions(3))
-         ! Add forces on ZH coming from ZH-dependent distortion correction
-         Forces(3) = Forces(3) + GetDistorsionForce(DblBath(2))*(Positions(4)-GetSpline1D( ZCofZHSpline, Positions(3) ))* &
-                   DerivSpline(ZCofZHSpline, Positions(3))
+         CALL BathPotentialAndForces( DblBath(1), Positions(4)-C1Puckering, Positions(5:NBath+4), ScatteringPotential, &
+                                                                               Forces(4), Forces(5:NBath+4) ) 
+         CALL BathPotentialAndForces( DblBath(2), Positions(4)-C1Puckering, Positions(NBath+5:2*NBath+4), ScatteringPotential, &
+                                                                               Forces(4), Forces(NBath+5:2*NBath+4) ) 
 
       ELSE IF ( BathType == LANGEVIN_DYN ) THEN
          ! Compute potential and forces of the system

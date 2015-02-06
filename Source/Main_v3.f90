@@ -23,6 +23,7 @@ PROGRAM JK6_v3
    USE InputField
    USE UnitConversion
    USE PotentialAnalysis
+   USE MinimumEnergyPath
    USE VibrationalRelax
    USE PolymerVibrationalRelax
    USE PolymerEquilibriumOscillator
@@ -118,6 +119,9 @@ PROGRAM JK6_v3
    MassH = MassH * MassConversion(InputUnits, InternalUnits)
    CALL SetFieldFromInput( InputData, "MassC", MassC )
    MassC = MassC * MassConversion(InputUnits, InternalUnits)
+
+   ! Kind of 4D reduced model of the potential
+   CALL SetFieldFromInput( InputData, "Cut4D_Model",  Cut4D_Model ) 
 
    ! SET THE BATH-REPRESENTATION DEPENDENT VARIABLES 
 
@@ -225,6 +229,8 @@ PROGRAM JK6_v3
          WRITE(*,"(/,A)") " * Equilibrium simulation with Ring Polymer MD"
       CASE( POTENTIALPRINT )
          WRITE(*,"(/,A)") " * Analysis of the potential energy surfaces "
+      CASE( POTENTIALMEP )
+         WRITE(*,"(/,A)") " * Analysis of the minimum energy path of the potential energy surfaces "
    END SELECT
 
    IF ( (RunType /= HARMONICMODEL) .AND. (RunType /= RPMD_EQUILIBRIUM) ) THEN
@@ -240,7 +246,11 @@ PROGRAM JK6_v3
    ! Write info about the bath representation
    SELECT CASE( BathType )
       CASE( SLAB_POTENTIAL )
-         WRITE(*,904) NCarbon, 1.0/DynamicsGamma*TimeConversion(InternalUnits, InputUnits), TimeUnit(InputUnits)
+         IF (DynamicsGamma /= 0. ) THEN
+            WRITE(*,904) NCarbon, 1.0/DynamicsGamma*TimeConversion(InternalUnits, InputUnits), TimeUnit(InputUnits)
+         ELSE
+            WRITE(*,804) NCarbon
+         END IF
       CASE( NORMAL_BATH ) 
          IF ( OhmicGammaTimesMass == 0.0 ) THEN
             WRITE(*,900) NBath, MassBath*MassConversion(InternalUnits, InputUnits), MassUnit(InputUnits), &
@@ -286,6 +296,9 @@ PROGRAM JK6_v3
    904 FORMAT(" * Bath is a slab of C atoms (force field potential) ", /,&
               " * Nr of Carbon atoms:                          ",I10,  /,&
               " * Langevin relax time at the edges:            ",F10.4,1X,A,/)
+   804 FORMAT(" * Bath is a slab of C atoms (force field potential) ", /,&
+              " * Nr of Carbon atoms:                          ",I10,  /,&
+              " * Infinite relaxation time                     ",/)
 
    900 FORMAT(" * Bath is a set of independent HO coupled to the system ",/,&
               " * Nr of bath oscillators:                      ",I10,  /,& 
@@ -324,12 +337,8 @@ PROGRAM JK6_v3
    !       POTENTIAL SETUP 
    !*************************************************************
 
-   ! Setup potential energy surface - no relaxation in case of scattering simulation
-   IF ( RunType == SCATTERING ) THEN
-      CALL SetupPotential(  MassH, MassC, .FALSE., Collinear )
-   ELSE
-      CALL SetupPotential(  MassH, MassC, .TRUE., Collinear )
-   ENDIF
+   ! Setup potential energy surface
+   CALL SetupPotential(  MassH, MassC, Cut4D_Model, Collinear )
    
    ! If needed setup bath frequencies and coupling for oscillator bath models
    IF (  BathType == NORMAL_BATH ) THEN
@@ -372,6 +381,8 @@ PROGRAM JK6_v3
          CALL Scattering_ReadInput( InputData )
       CASE( POTENTIALPRINT )
          CALL PotentialAnalysis_ReadInput( InputData )
+      CASE( POTENTIALMEP )
+         CALL MinimumEnergyPath_ReadInput( InputData )
    END SELECT
 
    CALL CloseFile( InputData )
@@ -402,6 +413,9 @@ PROGRAM JK6_v3
       CASE( POTENTIALPRINT )
          CALL PotentialAnalysis_Initialize()
          CALL PotentialAnalysis_Run()
+      CASE( POTENTIALMEP )
+         CALL MinimumEnergyPath_Initialize()
+         CALL MinimumEnergyPath_Run()
    END SELECT
 
    !*************************************************************
@@ -423,6 +437,8 @@ PROGRAM JK6_v3
          CALL Scattering_Dispose()
       CASE( POTENTIALPRINT )
          CALL PotentialAnalysis_Dispose()
+      CASE( POTENTIALMEP )
+         CALL MinimumEnergyPath_Dispose()
    END SELECT
 
    IF ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
@@ -455,62 +471,3 @@ PROGRAM JK6_v3
 END PROGRAM JK6_v3
 
 
-! !*******************************************************************************
-! ! WriteTrajectoryXYZ
-! !*******************************************************************************
-! !>  Given an array containing one trajectory over time, print it
-! !>  to file. 
-! !> 
-! !> @param   CoordinatesVsTime  Array with trajectory (size: 7 x N time steps).
-! !> @param   FileName           Output file name.
-! !> @param   LatticeConst       Lattice constant of the graphite slab. 
-! !*******************************************************************************
-!    SUBROUTINE WriteTrajectoryXYZ( CoordinatesVsTime, FileName, LatticeConst )
-!       IMPLICIT NONE
-! 
-!          REAL, DIMENSION( :,: ), INTENT(IN) :: CoordinatesVsTime
-!          CHARACTER(*), INTENT(IN)           :: FileName
-!          REAL, INTENT(IN)                   :: LatticeConst
-! 
-!          INTEGER :: NrTimeStep, UnitNr, i
-!          REAL    :: A1_x, A1_y, A2_x, A2_y
-! 
-!          ! check and store array dimensions
-!          NrTimeStep = size( CoordinatesVsTime, 2 )
-!          CALL ERROR( size( CoordinatesVsTime, 1 ) /= min(16,3+nevo) , " WriteTrajectoryXYZ: Invalid array dimension "  )
-! 
-!          ! Open input file in a free output unit
-!          UnitNr =  LookForFreeUnit()
-!          OPEN( FILE = trim(adjustl(FileName)), UNIT=UnitNr )
-!    
-!          A1_x = LatticeConst
-!          A1_y = 0.0 
-!          A2_x = LatticeConst/2.0
-!          A2_y = sqrt(3.)*LatticeConst/2.0
-! 
-!          ! write snapshot to output file
-!          DO i = 1, NrTimeStep
-!             WRITE( UnitNr, * ) " 14 "
-!             WRITE( UnitNr, * ) " Step nr ",i," of the trajectory "
-!             WRITE( UnitNr, "(A,3F15.6)" ) " H ", CoordinatesVsTime(1,i), CoordinatesVsTime(2,i)     , CoordinatesVsTime(3,i)
-!             WRITE( UnitNr, "(A,3F15.6)" ) " C ", 0.0                   , 0.0                        , CoordinatesVsTime(4,i) !C1
-!             WRITE( UnitNr, "(A,3F15.6)" ) " C ", 0.0                   , LatticeConst/sqrt(3.)      , CoordinatesVsTime(5,i) !C2
-!             WRITE( UnitNr, "(A,3F15.6)" ) " C ", - LatticeConst/2.0    , -LatticeConst/(2*sqrt(3.)) , CoordinatesVsTime(6,i) !C3
-!             WRITE( UnitNr, "(A,3F15.6)" ) " C ", LatticeConst/2.0      , -LatticeConst/(2*sqrt(3.)) , CoordinatesVsTime(7,i) !C4
-!             WRITE( UnitNr, "(A,3F15.6)" ) " C ", -A1_x+A2_x            , -A1_y+A2_y                 , CoordinatesVsTime(8,i) !C5
-!             WRITE( UnitNr, "(A,3F15.6)" ) " C ", +A2_x                 , +A2_y                      , CoordinatesVsTime(9,i) !C6
-!             WRITE( UnitNr, "(A,3F15.6)" ) " C ", -A1_x                 , -A1_y                      , CoordinatesVsTime(10,i) !C7
-!             WRITE( UnitNr, "(A,3F15.6)" ) " C ", +A1_x                 , +A1_y                      , CoordinatesVsTime(11,i) !C8
-!             WRITE( UnitNr, "(A,3F15.6)" ) " C ", -A2_x                 , -A2_y                      , CoordinatesVsTime(12,i) !C9
-!             WRITE( UnitNr, "(A,3F15.6)" ) " C ", +A1_x-A2_x            , +A1_y-A2_y                 , CoordinatesVsTime(13,i) !C10
-!             WRITE( UnitNr, "(A,3F15.6)" ) " C ", -A1_x                 , LatticeConst/sqrt(3.)-A1_y , CoordinatesVsTime(14,i) !C11
-!             WRITE( UnitNr, "(A,3F15.6)" ) " C ", +A1_x                 , LatticeConst/sqrt(3.)+A1_y , CoordinatesVsTime(15,i) !C12
-!             WRITE( UnitNr, "(A,3F15.6)" ) " C ", 0.0+A1_x-2*A2_x , LatticeConst/sqrt(3.)+A1_y-2*A2_y, CoordinatesVsTime(16,i) !C13
-! 
-! 
-!          END DO
-! 
-!          ! close input file
-!          CLOSE( UnitNr )
-!    
-!    END SUBROUTINE WriteTrajectoryXYZ

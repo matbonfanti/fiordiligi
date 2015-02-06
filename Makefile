@@ -418,8 +418,15 @@ ${OBJDIR}/PolymerVibrationalRelax.o : ${SRCDIR}/PolymerVibrationalRelax.f90 ${OB
 
 # Program to compute the properties of the PES
 ${OBJDIR}/PotentialAnalysis.o : ${SRCDIR}/PotentialAnalysis.f90 ${OBJDIR}/MyLinearAlgebra.o ${OBJDIR}/SharedData.o \
-                                ${OBJDIR}/InputField.o ${OBJDIR}/PotentialModule.o ${OBJDIR}/IndependentOscillatorsModel.o \
-                                ${OBJDIR}/DifferenceDerivatives.o ${OBJDIR}/PrintTools.o ${COMMONDEP}
+                                ${OBJDIR}/InputField.o ${OBJDIR}/UnitConversion.o ${OBJDIR}/PotentialModule.o      \
+				${OBJDIR}/IndependentOscillatorsModel.o ${OBJDIR}/DifferenceDerivatives.o          \
+				${OBJDIR}/PrintTools.o ${COMMONDEP}
+
+# Program to compute the minimum energy path of the PES
+${OBJDIR}/MinimumEnergyPath.o : ${SRCDIR}/MinimumEnergyPath.f90 ${OBJDIR}/MyLinearAlgebra.o ${OBJDIR}/SharedData.o \
+                                ${OBJDIR}/InputField.o ${OBJDIR}/UnitConversion.o ${OBJDIR}/PotentialModule.o      \
+				${OBJDIR}/IndependentOscillatorsModel.o ${OBJDIR}/DifferenceDerivatives.o          \
+				${OBJDIR}/PrintTools.o ${COMMONDEP}
 
 # Set error and warning procedures
 ${OBJDIR}/ErrorTrap.o        : ${SRCDIR}/ErrorTrap.f90 Makefile

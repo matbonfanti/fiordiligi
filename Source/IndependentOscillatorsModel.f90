@@ -497,6 +497,8 @@ CONTAINS
          ! DERIVATIVE OF THE COUPLING+DISTORSION CORRECTION W.R.T. THE COUPLING COORDINATE
          CouplForce = CouplForce + Bath%Couplings(1) * QBath(1) - Bath%DistorsionForce * QCoupl
 
+         IF ( PRESENT(DTimesEffMode)) DTimesEffMode = Bath%Couplings(1) * QBath(1)
+
       ELSE IF ( Bath%BathType == STANDARD_BATH ) THEN
 
          ! POTENTIAL OF THE BATH OSCILLATORS AND DERIVATIVES WITH RESPECT TO BATH COORDS

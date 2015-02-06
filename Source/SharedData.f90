@@ -29,13 +29,14 @@ MODULE SharedData
    
    !> Variable to define which kind of calculation is required 
    INTEGER :: RunType
-   INTEGER, PARAMETER :: EQUILIBRIUM     = 1,  & ! Equilibrium calculation with H already adsorbed
-                         HARMONICMODEL   = 2,  & ! Test the parameters with a 1D harmonic model 
-                         RELAXATION      = 3,  & ! Relaxation dynamics of a CH bound state, with the bath at 0K
-                         SCATTERING      = 4,  & ! Scattering calculation with H coming from gas-phase
-                         RPMD_RELAXATION = 5,  & ! Relaxation dynamics with RING POLYMER DYNAMICS
+   INTEGER, PARAMETER :: EQUILIBRIUM      = 1,  & ! Equilibrium calculation with H already adsorbed
+                         HARMONICMODEL    = 2,  & ! Test the parameters with a 1D harmonic model 
+                         RELAXATION       = 3,  & ! Relaxation dynamics of a CH bound state, with the bath at 0K
+                         SCATTERING       = 4,  & ! Scattering calculation with H coming from gas-phase
+                         RPMD_RELAXATION  = 5,  & ! Relaxation dynamics with RING POLYMER DYNAMICS
                          RPMD_EQUILIBRIUM = 6,  & ! Equilibrium simulation with Ring Polymer MD
-                         POTENTIALPRINT  = 10    ! Static analysis of the potential 
+                         POTENTIALPRINT   = 10, & ! Static analysis of the potential 
+                         POTENTIALMEP     = 11    ! Computation of the minimum energy path
 
    !> Variable to set the print level of the calculation
    INTEGER :: PrintType
@@ -106,7 +107,8 @@ CONTAINS
                 IntNr /= SCATTERING .AND. &
                 IntNr /= RPMD_RELAXATION .AND. &
                 IntNr /= RPMD_EQUILIBRIUM .AND. &
-                IntNr /= POTENTIALPRINT )
+                IntNr /= POTENTIALPRINT .AND. &
+                IntNr /= POTENTIALMEP )
       CALL ERROR( Check, " SharedData.CheckRunType: Invalid RunType option " )
    END SUBROUTINE CheckRunType
 
