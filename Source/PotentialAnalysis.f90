@@ -293,7 +293,7 @@ MODULE PotentialAnalysis
          Mask(4) = .TRUE.
 
          ! Computing the energy at this geometry
-         EMin = MinimizePotential( X, Mask ) 
+         EMin = MinimizePotential( X, Mask, 1.E-6 ) 
          ZCeq = X(4)
 
          ! Computing the C1 frequency at this geometry

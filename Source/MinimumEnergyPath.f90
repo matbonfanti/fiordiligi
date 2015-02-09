@@ -818,7 +818,7 @@ MODULE MinimumEnergyPath
       WRITE(*,"(I12,E20.6,E20.6)") NIter, GradNorm
 
       ! Check max number of iterations
-      CALL WARN( NIter == NMaxIter, " NewtonLocator: max number of iterations reached " )
+      CALL WARN( NIter == NMaxIter+1, " NewtonLocator: max number of iterations reached " )
 
       ! Store final point
       StationaryPoint = CurrentX

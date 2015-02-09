@@ -24,6 +24,8 @@ MODULE PotentialModule
    INTEGER, PARAMETER  ::  CUT4D_GLOBALMINIMUM  = 1   !< carbons are fixed in the geometry of the global minimum
    INTEGER, PARAMETER  ::  CUT4D_ADIABATICMODEL = 2   !< carbons position are optimized at each (rho, zH, zC )
    INTEGER, PUBLIC  :: Cut4D_Model                            !< current choice of the model
+   !> Temporary array to store minimized geometry of the slab
+   REAL, DIMENSION(117) :: TmpSlab
 
    !> Setup variable for the potential
    LOGICAL, SAVE :: PotentialModuleIsSetup = .FALSE.
@@ -43,9 +45,7 @@ MODULE PotentialModule
    REAL, DIMENSION(4,4), PUBLIC :: NormalModes4D_Vecs       ! columns are normal modes of the potential in the minimum
  
    !> Max nr of iterations for potential optimization
-   INTEGER, PARAMETER :: MaxIter = 10000
-   !> Threshold for conjugate gradient convergence
-   REAL, PARAMETER :: GradEps = 1.0E-6
+   INTEGER, PARAMETER :: MaxIter = 100000
    !> Parameter for finite difference computation
    REAL, PARAMETER :: Delta = 1.0E-4
 
@@ -113,6 +113,9 @@ MODULE PotentialModule
          ! Store the choice of 4D model
          Cut4D_Model = Cut4DDefinition
 
+         ! Initialize temporary position of the slab for optimization
+         TmpSlab = 0.0
+
          ! Potential module is set up
          PotentialModuleIsSetup = .TRUE.
 
@@ -134,7 +137,7 @@ MODULE PotentialModule
          END SELECT
 
          ! Minimize potential
-         MinimumEnergy =  MinimizePotential( Positions, OptMask )
+         MinimumEnergy =  MinimizePotential( Positions, OptMask, 1.E-6 )
   
          ! Store the coordinate of the slab
          MinSlab(:) = Positions(5:124)
@@ -317,10 +320,11 @@ MODULE PotentialModule
 
 ! ******************************************************************************************      
 
-      REAL FUNCTION MinimizePotential( Coords, Mask ) RESULT( Pot )
+      REAL FUNCTION MinimizePotential( Coords, Mask, GradEps ) RESULT( Pot )
          IMPLICIT NONE
-         REAL, INTENT(INOUT), DIMENSION(:)               :: Coords
+         REAL, INTENT(INOUT), DIMENSION(:)            :: Coords
          LOGICAL, INTENT(IN), DIMENSION(size(Coords)) :: Mask
+         REAL, INTENT(IN)                             :: GradEps
 
          INTEGER :: NrDimension, NrOptimization
          INTEGER :: iIter, iCoord
@@ -364,7 +368,7 @@ MODULE PotentialModule
 #if defined(VERBOSE_OUTPUT)
          WRITE(*,"(/,A,I6,A)") "Convergence in ", iIter, " steps"
 #endif
-         CALL WARN( iIter == MaxIter, "PotentialModule. MinimizePotential: convergence not reached" )
+         CALL WARN( iIter == MaxIter+1, "PotentialModule. MinimizePotential: convergence not reached" )
 
       END FUNCTION MinimizePotential
 
@@ -576,8 +580,13 @@ MODULE PotentialModule
          ! Choose the method according to the model
          SELECT CASE ( Cut4D_Model )
 
-            ! For a non adiabatic model, use stored configuration of carbon atoms
-            CASE( CUT4D_PLANARGRAPHENE , CUT4D_GLOBALMINIMUM )
+            ! For a non adiabatic model with planar graphene, use ad hoc function
+            CASE( CUT4D_PLANARGRAPHENE )
+
+               V = VHTrapping( Positions, Forces )
+
+            ! For a non adiabatic model with global minimum, use stored configuration of carbon atoms
+            CASE( CUT4D_GLOBALMINIMUM )
 
                Dummy = 0.0
                ! use the full potential with the carbon atoms in the equilibrium geometry
@@ -590,9 +599,9 @@ MODULE PotentialModule
                ! Set optimization constraints
                OptMask = (/ (.FALSE., iCoord=1,7), (.TRUE., iCoord=8,124) /)
                ! Set starting geometry
-               OptCoord = (/ Positions, MinSlab(:) /)
+               OptCoord = (/ Positions, 0., 0., 0., TmpSlab(:) /)
                ! Optimize coordinates
-               V =  MinimizePotential( OptCoord, OptMask )
+               V =  MinimizePotential( OptCoord, OptMask, 1.0E-4 )
 
                ! Use optimized coordinates to compute forces and energy
                V = VHSticking( OptCoord, Dummy(:) ) 
@@ -2164,5 +2173,214 @@ MODULE PotentialModule
 
       END FUNCTION VHSticking
       
+!*******************************************************************************
+!> Four dimensional part of the H-Graphene potential by Jackson and coworkers.
+!> @ref http://pubs.acs.org/doi/abs/10.1021/jp057136%2B [ J.Phys.Chem.B 2006,110,18811 ]
+!> @ref other papers jackson
+!>
+!> @param Positions    Array with 3 cartesian coordinates for the H atom and 
+!>                     1 Z coordinates for the carbon atoms (in au)
+!> @param Forces       Output array with the derivatives of the potential (in au)
+!> @returns            Output potential in atomic units
+!*******************************************************************************     
+      REAL FUNCTION VHTrapping( Positions, Forces ) RESULT(vv) 
+         IMPLICIT NONE
+
+         REAL, DIMENSION(:), TARGET, INTENT(IN)  :: Positions
+         REAL, DIMENSION(:), TARGET, INTENT(OUT) :: Forces 
+
+         ! temporary variables to store positions in Ang units
+         REAL :: xh, yh, zh, zc
+
+         REAL :: a, b, c1, c2, d0
+
+         REAL :: dbdzc, dc1dzc, dc2dzc, dd0dzc, df2dr, dkrdzc, dkrdzh
+         REAL :: dswdr, dvdzc, dvdzh, dvidzc, dvidzh, dvqdr, dvqdzc
+         REAL :: dvqdzh, dvtdrho, dvtds1, dvtds2
+         REAL :: dzgdzc, dzmdzc
+
+         REAL :: fexp, ff1, ff2, ff3
+         REAL :: rho, rkrho, sub1, sub2, sw
+         REAL :: v, vi, vq, vt
+         REAL :: zg, zm
+
+         INTEGER :: nn
+
+         ! Error if module not have been setup yet
+         CALL ERROR( .NOT. PotentialModuleIsSetup, "PotentialModule.VHTrapping : Module not Setup" )
+
+         ! Check the number of non frozen degree of freedom
+         CALL ERROR( size(Forces)    /= 4, "PotentialModule.VHTrapping: wrong Forces dimension" )
+         CALL ERROR( size(Positions) /= 4, "PotentialModule.VHTrapping: wrong Positions array dimension" )
+
+         ! Transform input coordinate from AU to Angstrom
+         IF ( CollinearPES ) THEN
+            xh = 0.0
+            yh = 0.0
+         ELSE
+            xh = Positions(1) * MyConsts_Bohr2Ang
+            yh = Positions(2) * MyConsts_Bohr2Ang
+         ENDIF
+         zh = Positions(3) * MyConsts_Bohr2Ang
+         zc = Positions(4) * MyConsts_Bohr2Ang
+
+         ! Compute some relevant coordinates for the PES
+
+         ! positions of H and C1 with respect to zero
+         sub1=zh
+         sub2=zc
+         ! rho
+         rho=sqrt(xh**2+yh**2)
+
+   ! **************************************************************************************************
+   !                           POTENTIAL FOR THE C-H SYSTEM
+   ! **************************************************************************************************
+
+         ! Compute the parameters for the morse + gaussian 
+         ! functional form for the collinear potential
+
+         ! D_0 is the morse depth (eV)
+         d0=0.474801+0.9878257*sub2-1.3921499*sub2**2              &
+         +0.028278*sub2**3-1.8879928*sub2**4                       &
+         +0.11*exp(-8.0*(sub2-0.28)**2)
+         dd0dzc=0.9878257-2.7842998*sub2+0.084834*sub2**2-         &
+         7.5519712*sub2**3+(                                       &
+         -1.76*(sub2-0.28)*exp(-8.0*(sub2-0.28)**2))
+
+         ! A is the morse curvature (Ang)
+         a=2.276211
+
+         ! Z_M is the morse equilibrium distance (Ang)
+         zm=0.87447*(sub2)+1.17425
+         dzmdzc=0.87447
+
+         ! C_1 is the asympotic harmonic potential for C1 vibrations (eV)
+         c1=0.5*rkc*(sub2)**2-0.00326
+         dc1dzc=rkc*(sub2)
+
+         ! C_2 is the gaussian height (eV)
+         c2= 0.3090344*exp(-2.741813*(sub2-0.2619756))+            &
+         0.03113325*exp(3.1844857*(sub2-0.186741))+                &
+         0.02*exp(-20.0*(sub2-0.1)**2) 
+         dc2dzc=-0.8473145*exp(-2.741813*(sub2-0.2619756))+        &
+         0.0991434*exp(3.1844857*(sub2-0.186741))+(                &
+         -0.8*(sub2-0.1)*exp(-20.0*(sub2-0.1)**2))
+
+         ! B is the gaussian curvature (Ang-2)
+         b=4.00181*exp(1.25965*(sub2-0.58729)) 
+         dbdzc=5.0408799*exp(1.25965*(sub2-0.58729))
+
+         ! Z_G is the center of the gaussian (Ang)
+         zg=1.99155*(sub2)+1.46095
+         dzgdzc=1.99155
+
+         ! Compute the potential and the derivatives of the 
+         ! collinear potential V_0
+
+         v=c1+(c1+d0)*(exp(-2.0*a*(sub1-zm))-2.0*exp(-a*(sub1-zm)))+       &
+         c2*exp(-b*(sub1-zg)**2)
+
+         dvdzh=-b*c2*(sub1-zg)*2.0*exp(-b*(sub1-zg)**2) +                  &
+         (c1+d0)*2.0*(-a*exp(-2.0*a*(sub1-zm))+a*exp(-a*(sub1-zm)))
+
+         dvdzc=dc1dzc+(dc1dzc+dd0dzc)*                             &
+         (exp(-2.0*a*(sub1-zm))-2.0*exp(-a*(sub1-zm)))+            &
+         (c1+d0)*(a*dzmdzc*2.0*exp(-2.0*a*(sub1-zm))+              &
+         (-a*dzmdzc)*2.0*exp(-a*(sub1-zm)))+                       &
+         dc2dzc*exp(-b*(sub1-zg)**2)+                              &
+         (-c2*dbdzc*(sub1-zg)**2+c2*b*2.0*(sub1-zg)*dzgdzc)*       &
+         exp(-b*(sub1-zg)**2)
+
+         ! Compute the force constant (and derivatives) for small rho 
+         ! potential rkrho(zh-q,zc-q)
+
+         rkrho=3.866259*exp(-17.038588*(sub2-0.537621)**2+         &
+         0.312355*(sub2-0.537621)*(sub1-2.003753)-                 &
+         4.479864*(sub1-2.003753)**2)+                             &
+         4.317415*exp(-11.931770*(sub2-0.286858)**2+               &
+         18.540974*(sub2-0.286858)*(sub1-1.540947)-                &
+         14.537321*(sub1-1.540947)**2)
+
+         dkrdzc=(-34.077176*(sub2-0.537621)+0.312355*              &
+         (sub1-2.003753))                                          &
+         *3.866259*exp(-17.038588*(sub2-0.537621)**2+              &
+         0.312355*(sub2-0.537621)*(sub1-2.003753)-                 &
+         4.479864*(sub1-2.003753)**2)+                             &
+         (-23.86354*(sub2-0.286858)+18.540974*(sub1-1.540947))     &
+         *4.317415*exp(-11.931770*(sub2-0.286858)**2+              &
+         18.540974*(sub2-0.286858)*(sub1-1.540947)-                &
+         14.537321*(sub1-1.540947)**2)
+
+         dkrdzh=(0.312355*(sub2-0.537621)-8.959728*(sub1-2.003753))        &
+         *3.866259*exp(-17.038588*(sub2-0.537621)**2+                      &
+         0.312355*(sub2-0.537621)*(sub1-2.003753)-                         &
+         4.479864*(sub1-2.003753)**2)+                                     &
+         (18.540974*(sub2-0.286858)-29.074642*(sub1-1.540947))             &
+         *4.317415*exp(-11.931770*(sub2-0.286858)**2+                      &
+         18.540974*(sub2-0.286858)*(sub1-1.540947)-                        &
+         14.537321*(sub1-1.540947)**2)
+
+         ! Compute the small rho potential/derivatives
+
+         vq=v+0.5*rkrho*rho**2
+         dvqdzh=dvdzh+0.5*dkrdzh*rho**2
+         dvqdzc=dvdzc+0.5*dkrdzc*rho**2
+         dvqdr=rkrho*rho
+
+         ! Compute the  "infinite" rho potential/derivatives
+
+         vi=0.5*rkc*sub2**2-0.00326+                                       &
+         di*(exp(-2.0*alphi*(sub1-ai))-2.0*exp(-alphi*(sub1-ai)))
+         dvidzh=di*(-2.0*alphi*exp(-2.0*alphi*(sub1-ai))+                  &
+               2.0*alphi*exp(-alphi*(sub1-ai)))
+         dvidzc=rkc*sub2
+
+         ! Switching function and associated functions
+
+         fexp=exp(-ba*(rho-rhoa))
+         ff1=1.0+fexp
+         ff2=exp(-2.0*alp*rho)-2.0*exp(-alp*rho)*exp(-alp2*rho/ff1)
+         ff3=(vi-v)*ff2+vi
+         sw=1.0/(1.0+exp(-bs*(rho-rhos)))
+
+         ! Total H,C1 potential/derivatives
+
+         vt=vq*(1.0-sw)+ff3*sw
+      
+         df2dr=-2.0*alp*exp(-2.0*alp*rho)-                &
+            2.0*exp(-alp*rho)*exp(-alp2*rho/ff1)*       &
+            (-alp-(alp2/ff1)-alp2*rho*ba*fexp/(ff1**2))
+         dswdr=(bs*exp(-bs*(rho-rhos)))/((1.0+exp(-bs*(rho-rhos)))**2)
+
+         dvtds1=dvqdzh*(1.0-sw)+sw*((dvidzh-dvdzh)*ff2+dvidzh)
+         dvtds2=dvqdzc*(1.0-sw)+sw*((dvidzc-dvdzc)*ff2+dvidzc)
+         dvtdrho=dvqdr*(1.0-sw)+vq*(-dswdr)+sw*(vi-v)*df2dr+ff3*dswdr
+
+         ! Total Potential 
+         vv=vt
+
+         ! Upper and lower energy cutoff
+         if ( vv < -1.0 ) vv = -1.0
+         if ( vv > 20.0 ) vv = 20.0
+
+         ! Convert total potential to AU
+         vv = vv / MyConsts_Hartree2eV
+
+         ! Forces (negative sign because F = -dV/dx )
+         IF ( rho == 0.0 ) THEN
+            Forces(1) = 0.0
+            Forces(2) = 0.0
+         ELSE
+            Forces(1) = -dvtdrho*xh/rho
+            Forces(2) = -dvtdrho*yh/rho
+         ENDIF
+         Forces(3)=-dvtds1
+         Forces(4)=-dvtds2
+         
+         ! Transform forces in atomic units (from eV Ang^-1 to Hartree Bohr^-1) 
+         Forces(:) = Forces(:) * MyConsts_Bohr2Ang / MyConsts_Hartree2eV
+
+      END FUNCTION VHTrapping
+
 END MODULE PotentialModule
 
