@@ -63,11 +63,11 @@ C newfunc     ! This is, of course, just an example.
 C     elseif (label(1:ilbl) .eq. 'newfunc') then
 C        ifunc=2
 
-C 1d v for ZH at fixed equil zC
-      else if (label(1:ilbl) .eq. 'vhsticking1D') then
-        ifunc=2
-
-C switching function from interaction to gas phase
+C ===========================================================
+C              Matteo Bonfanti - Nov 2014
+C    switching function from interaction to gas phase
+C ===========================================================
+C 
       else if (label(1:ilbl) .eq. 'switchToGasPhase') then
          if (np .gt.0) then
             hoprpar(2)=hoppar(1,np)
@@ -76,7 +76,18 @@ C switching function from interaction to gas phase
             hoprpar(2)=0.d0
             hoprpar(3)=1.d0
          endif
+        ifunc=2
+
+C ===========================================================
+C            Matteo Bonfanti - 11 Feb 2015
+C    1D functions for the definition of the 2D 
+C    H-graphene sticking potential 
+C ===========================================================
+
+      else if (label(1:ilbl) .eq. 'hstick_carbon_1D') then
         ifunc=3
+      else if (label(1:ilbl) .eq. 'hstick_hydro_1D') then
+        ifunc=4
 
 C-----------------------------------------------------------------------
 C end of if loop
@@ -122,11 +133,25 @@ C
 C     elseif (ifunc .eq. 2) then
 C       call newfunc(x,v)
 
+C ===========================================================
+C              Matteo Bonfanti - Nov 2014
+C    switching function from interaction to gas phase
+C ===========================================================
+C 
       else if (ifunc .eq. 2) then
-        call vhatfixedzc(x,v)
-
-      else if (ifunc .eq. 3) then
         call switchFunction(x,v,hoprpar(2),hoprpar(3)) 
+
+C ===========================================================
+C            Matteo Bonfanti - 11 Feb 2015
+C    1D functions for the definition of the 2D 
+C    H-graphene sticking potential 
+C ===========================================================
+
+      elseif (ifunc .eq. 3) then
+        call hstick_carbon( x, v )
+      elseif (ifunc .eq. 4) then
+        call hstick_hydro( 0.d0, 0.d0, x, v )
+
 
       else
         routine='ufunc1d (opfuncs/user1D.F)'

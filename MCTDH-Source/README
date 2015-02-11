@@ -1,0 +1,38 @@
+
+ **** MCTDH code for implementing VHSTICKING adiabatic 2D/4D potential ****
+
+ The files present in the current directory are needed for the 
+ implementation of the VHSTICKING potential in Heidelberg's MCTDH package
+
+ - vhsticking.f90 is the actual PES code while DEF_vhsticking.f is
+   its dummy counterpart which is needed by MCTDH 
+
+ - user_surfaces and user_surfdef are the MAKEFILE additions for 
+   the compilation of MCTDH with vhsticking
+ 
+ - user1d.F and usersrf.F are the modified MCTDH source files linking the 
+   new subroutines defined by the user
+
+ - test.f90 is a test code for running the subroutines in vhsticking.f90
+   without MCTDH linking
+
+ These subroutines define a 2D/4D potential for H sticking on graphite
+ depending on xH,yH,zH and zC. This potential is defined starting from
+ J.Kerwin and B.Jackson's potential energy surface (see reference 
+ J.Phys.Chem B 2006, 110, 18811-18817). At each fixed 2D/4D geometry,
+ the positions of the other carbon atoms are optimized to get the lowest
+ energy with a mixed steepest descent / newton-raphson procedure.
+
+ To install VHSTICKING in Heidelberg's MCTDH, perform the following actions:
+
+ 1) copy vhsticking.f90 and DEF_vhsticking.f in the directory 
+    $MCTDH_DIR/mctdh85.3/source/surfaces/
+ 2) copy user_surfaces and user_surfdef in the directory 
+    $MCTDH_DIR/mctdh85.3/install 
+ 3) cp user1d.F and usersrf.F in the directory 
+    $MCTDH_DIR/mctdh85.3/source/opfuncs 
+ 4) compile MCTDH executables
+    $! compile -a -x lapack -i vhsticking all
+
+ WARNING: in steps 2) and 3) default files will be overwritten! 
+

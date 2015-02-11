@@ -54,12 +54,15 @@ C       which are on this file (opfuncs/usersrf.F) below.
 C-----------------------------------------------------------------------
 C     elseif (label(1:ll) .eq. 'yoursrf') then
 C        hopilab=2
-       else if (label(1:ll) .eq. 'vhsticking') then
+
+C ===========================================================
+C            Matteo Bonfanti - 11 Feb 2015
+C    2D coupling function for the definition of the 2D 
+C    H-graphene sticking potential 
+C ===========================================================
+
+       else if (label(1:ll) .eq. 'hstick_coupling_2D') then
         hopilab=2
-       else if (label(1:ll) .eq. 'vhcollinear') then
-        hopilab=3
-       else if (label(1:ll) .eq. 'vhcartesian') then
-        hopilab=4
 
 C-----------------------------------------------------------------------
 C end of if loop
@@ -113,19 +116,19 @@ C ----   One has to edit mysrf.f as well as to adapt usersurfinfo below.
 
 C      elseif(ifunc .eq. 2) then
 C ----   add the code for calling another surface here.
-        else if(ifunc .eq. 2) then
-           zh  = gpoint(1)
-           zc  = gpoint(2)
-           rho = gpoint(3)
-           call vhsticking( rho, 0.0d0, zh, zc, v )
-        else if(ifunc .eq. 3) then
-           call vhsticking( 0.d0, 0.d0, gpoint(1),gpoint(2) ,v)
-        else if(ifunc .eq. 4) then
-           zh  = gpoint(1)
-           zc  = gpoint(2)
-           xh = gpoint(3)
-           yh = gpoint(4)
-           call vhsticking( xh, yh, zh, zc, v )
+
+C ===========================================================
+C            Matteo Bonfanti - 11 Feb 2015
+C    2D coupling function for the definition of the 2D 
+C    H-graphene sticking potential 
+C ===========================================================
+
+      else if(ifunc .eq. 2) then
+         xh = 0.d0
+         yh = 0.d0
+         zh = gpoint(1)
+         zc = gpoint(2)
+         call hstick_coupling( xh, yh, zh, zc, v )
 
       else
          routine='uvpoint (opfuncs/usersrf.F)'
@@ -169,29 +172,19 @@ C        write(ilog,'(a)') '(Tell what surface it is).'
 C        write(ilog,'(2a)') '1. DOF : ',mlabel(1)
 C        write(ilog,'(2a)') '2. DOF : ',mlabel(2)
 C        jj=3   ! This is dimension+1
+
+C ===========================================================
+C            Matteo Bonfanti - 11 Feb 2015
+C    2D coupling function for the definition of the 2D 
+C    H-graphene sticking potential 
+C ===========================================================
+
        else if (hopilab .eq. 2) then
         write(ilog,'(a)') 
-     + 'VHSTICKING (Jackson PES for Gr-H sticking, 3D).'
-        write(ilog,'(2a)') '1. zH  : ',mlabel(1)
-        write(ilog,'(2a)') '2. zC  : ',mlabel(2)
-        write(ilog,'(2a)') '3. rho : ',mlabel(3)
-        jj=4   ! This is dimension+1
-
-       else if (hopilab .eq. 3) then
-        write(ilog,'(a)') 
-     + 'VHCOLLINEAR (Jackson PES for Gr-H sticking, 2D).'
+     +  'hstick_coupling_2D - 2D (zH,zC) coupling, adiabatic V.'
         write(ilog,'(2a)') '1. zH  : ',mlabel(1)
         write(ilog,'(2a)') '2. zC  : ',mlabel(2)
         jj=3   ! This is dimension+1
-
-       else if (hopilab .eq. 4) then
-        write(ilog,'(a)')
-     + 'VHCARTESIAN (Jackson PES for Gr-H sticking, 3D).'
-        write(ilog,'(2a)') '1. zH  : ',mlabel(1)
-        write(ilog,'(2a)') '2. zC  : ',mlabel(2)
-        write(ilog,'(2a)') '3. xH  : ',mlabel(3)
-        write(ilog,'(2a)') '4. yH  : ',mlabel(4)
-        jj=5   ! This is dimension+1
 
       else
          routine='usersurfinfo (opfuncs/usersrf.F)'
