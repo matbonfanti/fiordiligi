@@ -28,7 +28,7 @@ FFTW3 = yes
 OPENMP = no 
 
 # linking LAPACK and BLAS 
-LAPACK = no
+LAPACK = yes
 
 # Compile with standard real 8 (see details about the flags for each compiler...)
 REAL8 = yes

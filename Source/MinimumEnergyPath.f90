@@ -13,6 +13,15 @@
 !>  \date             4 February 2015
 !>
 !***************************************************************************************
+!
+!>  \par Updates
+!>  \arg 10 February 2015: only one TS is now computed, for the full PES only
+!>  \arg 10 February 2015: MEP is computed with Runge-Kutta 4th order method
+!
+!>  \todo          Move optimization and similar subs to an independent module
+!
+!***************************************************************************************
+
 MODULE MinimumEnergyPath
 #include "preprocessoptions.cpp"
    USE MyLinearAlgebra
@@ -46,11 +55,10 @@ MODULE MinimumEnergyPath
    REAL    :: MEPStep        !< Size of each MEP step
 
    ! Arrays to store info about MEPS
-   REAL, DIMENSION(:,:), ALLOCATABLE :: MEP_2D_Plus,   MEP_2D_Minus
    REAL, DIMENSION(:,:), ALLOCATABLE :: MEP_Full_Plus, MEP_Full_Minus
 
    !> Data for printing trajectory in VTK format
-   TYPE(VTKInfo) :: MEPTraj_2D_Plus, MEPTraj_2D_Minus, MEPTraj_Full_Plus, MEPTraj_Full_Minus
+   TYPE(VTKInfo) :: MEPTraj_Full_Plus, MEPTraj_Full_Minus
 
 !    !> Parameters to plot potential cuts
 !    REAL :: GridSpacing          !< Spacing of the grid to plot the potential
@@ -135,12 +143,12 @@ MODULE MinimumEnergyPath
 !*******************************************************************************
    SUBROUTINE MinimumEnergyPath_Run()
       IMPLICIT NONE
-      INTEGER :: MEP2DUnit, MEPFullUnit, TS2DUnit, TSFullUnit
+      INTEGER :: MEPFullUnit, TSFullUnit
 
-      REAL, DIMENSION(NDim)      :: XMin, XAsy, XTS1, XTS2, MEPX
-      REAL :: Emin, Easy, ETS1, ETS2, EMEP
+      REAL, DIMENSION(NDim)      :: XMin, XAsy, XTS, MEPX
+      REAL :: Emin, Easy, ETS, EMEP
       LOGICAL, DIMENSION(NDim)   :: OptMask
-      INTEGER :: iStep, Max2DPlus, Max2DMinus, MaxFullPlus, MaxFullMinus
+      INTEGER :: iStep, MaxFullPlus, MaxFullMinus
       LOGICAL :: Check
 
       PRINT "(2/,A)",    "***************************************************"
@@ -205,29 +213,6 @@ MODULE MinimumEnergyPath
       ! (2) look for the transition state of the potential energy surface 
       ! ===================================================================================================
 
-
-      PRINT "(2/,A)",    " **** Transition state of 2D (zH,zC) PES, bath in asymptotic geometry **** "
-
-      ! guess reasonable coordinates of the TS of the PES
-      X(:) = XAsy(:); X(3) = 3.4; X(4) = 0.190
-
-      ! Set appropriate constraints and find TS by Newton's optimization
-      OptMask = .FALSE.; OptMask(3:4) = .TRUE.
-      XTS1 = NewtonLocator( X, MaxOptSteps, OptThreshold, OptThreshold, Mask=OptMask, TransitionState=.TRUE. )
-      ETS1 = HStickPotential( XTS1, A )
-
-      ! Print results to screen
-      WRITE(*,501) XTS1(3)*LengthConversion(InternalUnits, InputUnits), LengthUnit(InputUnits), &
-                   XTS1(4)*LengthConversion(InternalUnits, InputUnits), LengthUnit(InputUnits), &
-                   ETS1*EnergyConversion(InternalUnits, InputUnits), EnergyUnit(InputUnits),    &
-                   (ETS1-EAsy)*EnergyConversion(InternalUnits, InputUnits),  EnergyUnit(InputUnits)
-
-      ! Write to output file the coordinates of the TS
-      TS2DUnit = LookForFreeUnit()
-      OPEN( FILE="TS_Reduced2DPES.dat", UNIT=TS2DUnit )
-      WRITE( TS2DUnit, * ) XTS1
-      CLOSE( TS2DUnit )
-
       PRINT "(2/,A)",    " **** Transition state of full PES **** "
 
       ! Set appropriate constraints and find TS by Newton's optimization
@@ -239,27 +224,27 @@ MODULE MinimumEnergyPath
       IF ( TSRestart ) THEN
          TSFullUnit = LookForFreeUnit()
          OPEN( FILE=TRIM(FullPES_TSRestartFile), UNIT=TSFullUnit )
-         READ( TSFullUnit, * ) XTS2
-         XTS2 = XTS2*LengthConversion(InputUnits,InternalUnits)
+         READ( TSFullUnit, * ) XTS
+         XTS = XTS*LengthConversion(InputUnits,InternalUnits)
          CLOSE( TSFullUnit )
       ELSE
-         XTS2 = XTS1
+         XTS(:) = XAsy(:); XTS(3) = 3.8; XTS(4) = 0.190
       END IF
 
       ! Run optimization
-      XTS2 = NewtonLocator( XTS2, MaxOptSteps, OptThreshold, OptThreshold, Mask=OptMask, TransitionState=.TRUE. )
-      ETS2 = HStickPotential( XTS2, A )
+      XTS = NewtonLocator( XTS, MaxOptSteps, OptThreshold, OptThreshold, Mask=OptMask, TransitionState=.TRUE. )
+      ETS = HStickPotential( XTS, A )
 
       ! Print results to screen
-      WRITE(*,501) XTS2(3)*LengthConversion(InternalUnits, InputUnits), LengthUnit(InputUnits), &
-                   XTS2(4)*LengthConversion(InternalUnits, InputUnits), LengthUnit(InputUnits), &
-                   ETS2*EnergyConversion(InternalUnits, InputUnits), EnergyUnit(InputUnits),    &
-                   (ETS2-EAsy)*EnergyConversion(InternalUnits, InputUnits),  EnergyUnit(InputUnits)
+      WRITE(*,501) XTS(3)*LengthConversion(InternalUnits, InputUnits), LengthUnit(InputUnits), &
+                   XTS(4)*LengthConversion(InternalUnits, InputUnits), LengthUnit(InputUnits), &
+                   ETS*EnergyConversion(InternalUnits, InputUnits), EnergyUnit(InputUnits),    &
+                   (ETS-EAsy)*EnergyConversion(InternalUnits, InputUnits),  EnergyUnit(InputUnits)
 
       ! Write to output file the coordinates of the TS
       TSFullUnit = LookForFreeUnit()
       OPEN( FILE="TS_FullPES.dat", UNIT=TSFullUnit )
-      WRITE( TSFullUnit, * ) XTS2*LengthConversion(InternalUnits, InputUnits)
+      WRITE( TSFullUnit, * ) XTS*LengthConversion(InternalUnits, InputUnits)
       CLOSE( TSFullUnit )
 
       ! ===================================================================================================
@@ -267,83 +252,7 @@ MODULE MinimumEnergyPath
       ! ===================================================================================================
 
       ! Allocate memory to store the MEPS
-      ALLOCATE( MEP_2D_Plus(3,MaxMEPNrSteps), MEP_2D_Minus(3,MaxMEPNrSteps),  &
-                MEP_Full_Plus(3,MaxMEPNrSteps), MEP_Full_Minus(3,MaxMEPNrSteps)    )
-
-      PRINT "(/,A,/)",    " **** MEP from the 2D (zH,zC) PES TS **** "
-
-      ! Define constraints mask
-      OptMask = .FALSE.; OptMask(3:4) = .TRUE.
-
-      ! Write header lines screen 
-      WRITE(*,700) TRIM(LengthUnit(InputUnits)), TRIM(LengthUnit(InputUnits)), TRIM(EnergyUnit(InputUnits))
-
-      ! Write to output file and to screen the starting point
-      WRITE(*,601) 0, XTS1(3)*LengthConversion(InternalUnits, InputUnits), &
-         XTS1(4)*LengthConversion(InternalUnits, InputUnits), ETS1*EnergyConversion(InternalUnits, InputUnits)
-
-      ! First step from the TS, with plus sign
-      MEPX = XTS1
-      Check = DoMEPStep( MEPX, +0.01, FirstStep=.TRUE., Mask=OptMask )
-      MEP_2D_Plus(:,1) = (/ MEPX(3), MEPX(4), HStickPotential( MEPX, A ) /)
-
-      DO iStep = 2, MaxMEPNrSteps
-         ! Following steps
-         Check = DoMEPStep( MEPX, MEPStep, FirstStep=.FALSE., Mask=OptMask )
-         MEP_2D_Plus(:,iStep) = (/ MEPX(3), MEPX(4), HStickPotential( MEPX, A ) /)
-         IF ( .NOT. Check )  EXIT
-      END DO
-      Max2DPlus = iStep - 1
-
-      ! Write to screen final step
-      WRITE(*,601) Max2DPlus, MEPX(3)*LengthConversion(InternalUnits, InputUnits), &
-                   MEPX(4)*LengthConversion(InternalUnits, InputUnits), &
-                   MEP_2D_Plus(3,Max2DPlus)*EnergyConversion(InternalUnits, InputUnits)
-
-      ! First step from the TS, with minus sign
-      MEPX = XTS1
-      Check = DoMEPStep( MEPX, -0.01, FirstStep=.TRUE., Mask=OptMask )
-      MEP_2D_Minus(:,1) = (/ MEPX(3), MEPX(4), HStickPotential( MEPX, A ) /)
-
-      DO iStep = 2, MaxMEPNrSteps
-         ! Following steps
-         Check = DoMEPStep( MEPX, MEPStep, FirstStep=.FALSE., Mask=OptMask )
-         MEP_2D_Minus(:,iStep) = (/ MEPX(3), MEPX(4), HStickPotential( MEPX, A ) /)
-         IF ( .NOT. Check ) EXIT
-      END DO
-      Max2DMinus = iStep - 1
-
-      ! Write to screen final step
-      WRITE(*,601) -Max2DMinus, MEPX(3)*LengthConversion(InternalUnits, InputUnits), &
-                   MEPX(4)*LengthConversion(InternalUnits, InputUnits), &
-                   MEP_2D_Minus(3,Max2DMinus)*EnergyConversion(InternalUnits, InputUnits)
-
-
-      ! Open output file and write path to file
-      MEP2DUnit = LookForFreeUnit()
-      OPEN( FILE="MEP_Reduced2DPES.dat", UNIT=MEP2DUnit )
-
-      ! Header of the output file
-      WRITE(MEP2DUnit,700) TRIM(LengthUnit(InputUnits)), TRIM(LengthUnit(InputUnits)), TRIM(EnergyUnit(InputUnits))
-
-      ! Write minus section of the MEP
-      DO iStep = Max2DMinus, 1, -1
-         WRITE(MEP2DUnit,601) -iStep, MEP_2D_Minus(1,iStep)*LengthConversion(InternalUnits, InputUnits), &
-                              MEP_2D_Minus(2,iStep)*LengthConversion(InternalUnits, InputUnits), &
-                              MEP_2D_Minus(3,iStep)*EnergyConversion(InternalUnits, InputUnits)
-      END DO
-      ! Write TS properties
-      WRITE(MEP2DUnit,601) 0, XTS1(3)*LengthConversion(InternalUnits, InputUnits), &
-         XTS1(4)*LengthConversion(InternalUnits, InputUnits), ETS1*EnergyConversion(InternalUnits, InputUnits)
-      ! Write plus section of the MEP
-      DO iStep = 1, Max2DPlus
-         WRITE(MEP2DUnit,601) iStep, MEP_2D_Plus(1,iStep)*LengthConversion(InternalUnits, InputUnits), &
-                              MEP_2D_Plus(2,iStep)*LengthConversion(InternalUnits, InputUnits), &
-                              MEP_2D_Plus(3,iStep)*EnergyConversion(InternalUnits, InputUnits)
-      END DO
-
-      ! Close file
-      CLOSE(MEP2DUnit)
+      ALLOCATE( MEP_Full_Plus(3,MaxMEPNrSteps), MEP_Full_Minus(3,MaxMEPNrSteps)    )
 
       PRINT "(/,A,/)",    " **** MEP from the global PES TS **** "
 
@@ -355,11 +264,11 @@ MODULE MinimumEnergyPath
       WRITE(*,700) TRIM(LengthUnit(InputUnits)), TRIM(LengthUnit(InputUnits)), TRIM(EnergyUnit(InputUnits))
 
       ! Write to output file and to screen the starting point
-      WRITE(*,601) 0, XTS2(3)*LengthConversion(InternalUnits, InputUnits), &
-         XTS2(4)*LengthConversion(InternalUnits, InputUnits), ETS2*EnergyConversion(InternalUnits, InputUnits)
+      WRITE(*,601) 0, XTS(3)*LengthConversion(InternalUnits, InputUnits), &
+         XTS(4)*LengthConversion(InternalUnits, InputUnits), ETS*EnergyConversion(InternalUnits, InputUnits)
 
       ! First step from the TS, with plus sign
-      MEPX = XTS2
+      MEPX = XTS
       Check = DoMEPStep( MEPX, +0.01, FirstStep=.TRUE., Mask=OptMask )
       MEP_Full_Plus(:,1) = (/ MEPX(3), MEPX(4), HStickPotential( MEPX, A ) /)
 
@@ -374,10 +283,10 @@ MODULE MinimumEnergyPath
       ! Write to screen final step
       WRITE(*,601) MaxFullPlus, MEPX(3)*LengthConversion(InternalUnits, InputUnits), &
                    MEPX(4)*LengthConversion(InternalUnits, InputUnits), &
-                   MEP_Full_Plus(3,Max2DPlus)*EnergyConversion(InternalUnits, InputUnits)
+                   MEP_Full_Plus(3,MaxFullPlus)*EnergyConversion(InternalUnits, InputUnits)
 
       ! First step from the TS, with minus sign
-      MEPX = XTS2
+      MEPX = XTS
       Check = DoMEPStep( MEPX, -0.01, FirstStep=.TRUE., Mask=OptMask )
       MEP_Full_Minus(:,1) = (/ MEPX(3), MEPX(4), HStickPotential( MEPX, A ) /)
 
@@ -392,8 +301,7 @@ MODULE MinimumEnergyPath
       ! Write to screen final step
       WRITE(*,601) -MaxFullMinus, MEPX(3)*LengthConversion(InternalUnits, InputUnits), &
                    MEPX(4)*LengthConversion(InternalUnits, InputUnits), &
-                   MEP_Full_Minus(3,Max2DMinus)*EnergyConversion(InternalUnits, InputUnits)
-
+                   MEP_Full_Minus(3,MaxFullMinus)*EnergyConversion(InternalUnits, InputUnits)
 
       ! Open output file and write path to file
       MEPFullUnit = LookForFreeUnit()
@@ -404,16 +312,16 @@ MODULE MinimumEnergyPath
 
       ! Write minus section of the MEP
       DO iStep = MaxFullMinus, 1, -1
-         WRITE(MEPFullUnit,601) -iStep, MEP_Full_Minus(1,iStep)*LengthConversion(InternalUnits, InputUnits), &
+         WRITE(MEPFullUnit,602) -iStep*MEPStep, MEP_Full_Minus(1,iStep)*LengthConversion(InternalUnits, InputUnits), &
                               MEP_Full_Minus(2,iStep)*LengthConversion(InternalUnits, InputUnits), &
                               MEP_Full_Minus(3,iStep)*EnergyConversion(InternalUnits, InputUnits)
       END DO
       ! Write TS properties
-      WRITE(MEPFullUnit,601) 0, XTS2(3)*LengthConversion(InternalUnits, InputUnits), &
-         XTS2(4)*LengthConversion(InternalUnits, InputUnits), ETS2*EnergyConversion(InternalUnits, InputUnits)
+      WRITE(MEPFullUnit,602) 0.0, XTS(3)*LengthConversion(InternalUnits, InputUnits), &
+         XTS(4)*LengthConversion(InternalUnits, InputUnits), ETS*EnergyConversion(InternalUnits, InputUnits)
       ! Write plus section of the MEP
       DO iStep = 1, MaxFullPlus
-         WRITE(MEPFullUnit,601) iStep, MEP_Full_Plus(1,iStep)*LengthConversion(InternalUnits, InputUnits), &
+         WRITE(MEPFullUnit,602) iStep*MEPStep, MEP_Full_Plus(1,iStep)*LengthConversion(InternalUnits, InputUnits), &
                               MEP_Full_Plus(2,iStep)*LengthConversion(InternalUnits, InputUnits), &
                               MEP_Full_Plus(3,iStep)*EnergyConversion(InternalUnits, InputUnits)
       END DO
@@ -422,10 +330,6 @@ MODULE MinimumEnergyPath
       CLOSE(MEPFullUnit)
  
       ! Write the MEP to VTV files
-      CALL VTK_WriteTrajectory ( MEPTraj_2D_Plus, &
-         MEP_2D_Plus(1:2,1:Max2DPlus)*LengthConversion(InternalUnits, InputUnits), "MEPTraj_2D_Plus" )
-      CALL VTK_WriteTrajectory ( MEPTraj_2D_Minus, &
-         MEP_2D_Minus(1:2,1:Max2DMinus)*LengthConversion(InternalUnits, InputUnits),     "MEPTraj_2D_Minus" )
       CALL VTK_WriteTrajectory ( MEPTraj_Full_Plus, &
          MEP_Full_Plus(1:2,1:MaxFullPlus)*LengthConversion(InternalUnits, InputUnits),   "MEPTraj_Full_Plus" )
       CALL VTK_WriteTrajectory ( MEPTraj_Full_Minus, &
@@ -455,6 +359,7 @@ MODULE MinimumEnergyPath
 
    600 FORMAT ( A12,A20,A20,A20 )
    601 FORMAT ( I12,F20.6,F20.6,F20.6 )
+   602 FORMAT ( F20.6,F20.6,F20.6,F20.6 )
 
    700 FORMAT ( "#  N Step   ", "   zH Coord / ", A6, "   zC Coord / ", A6, "     Energy / ", A6, /,  &
                 "#---------------------------------------------------------------------------------" )
@@ -668,18 +573,28 @@ MODULE MinimumEnergyPath
             
             ! Compute constrained Hessian at current position
             Hessian = HessianOfThePotential( CurrentX )
+            DO i = 1, NDim
+               DO n = 1, NDim
+                  Hessian(i,n) = Hessian(i,n) * SQRT(MassVector(i)) * SQRT(MassVector(n))
+               END DO
+            END DO
             WrkHessian = ConstrainedHessian( Hessian, Mask )
          ELSE
             ! compute Hessian and forces at current position
             V = HStickPotential( CurrentX, WrkForces )
             WrkHessian = HessianOfThePotential( CurrentX )
+            DO i = 1, NDim
+               DO n = 1, NDim
+                  WrkHessian(i,n) = WrkHessian(i,n) * SQRT(MassVector(i)) * SQRT(MassVector(n))
+               END DO
+            END DO
          END IF
 
          ! Compute norm of the gradient
-         GradNorm  = SQRT(TheOneWithVectorDotVector(WrkForces, WrkForces))
+         GradNorm  = SQRT(TheOneWithVectorDotVector(WrkForces, WrkForces) / NOpt )
 
          ! When the gradient is large, switch off newton and use gradient only
-         IF ( GradNorm < 0.25E-04 ) THEN
+         IF ( GradNorm > 1.E-1 ) THEN
             SteepestDescent = .TRUE.
          ELSE
             SteepestDescent = .FALSE.
@@ -712,12 +627,7 @@ MODULE MinimumEnergyPath
          WrkForces = TheOneWithMatrixVectorProduct( EigenVectors, WrkForces )
 
          ! Compute norm of the displacement
-         IF (.NOT. SteepestDescent ) THEN
-            WrkForces(:) = 0.0001 * WrkForces(:)
-         ELSE
-            WrkForces(:) = WrkForces(:)
-         END IF
-         DisplNorm = SQRT(TheOneWithVectorDotVector(WrkForces, WrkForces))
+         DisplNorm = SQRT(TheOneWithVectorDotVector(WrkForces, WrkForces) / NOpt )
 
          ! Move to new coordinates
          IF ( PRESENT(Mask) ) THEN
@@ -734,7 +644,8 @@ MODULE MinimumEnergyPath
 
          ! Print info to screen
 !          IF ( MOD(NIter-1,NMaxIter/20) == 0 ) WRITE(*,"(I12,E20.6,E20.6)") NIter, DisplNorm, GradNorm
-         IF ( MOD(NIter-1,5000) == 0 ) WRITE(*,"(I12,E20.6,E20.6)") NIter, DisplNorm, GradNorm
+!          IF ( MOD(NIter-1,5000) == 0 ) WRITE(*,"(I12,E20.6,E20.6)") NIter, DisplNorm, GradNorm
+         IF ( MOD(NIter-1,5) == 0 ) WRITE(*,"(I12,E20.6,E20.6)") NIter, DisplNorm, GradNorm
 
          ! Check convergence criteria
          IF ( GradNorm < GradThresh .AND. DisplNorm < DisplThresh ) THEN
@@ -842,6 +753,8 @@ MODULE MinimumEnergyPath
       REAL, DIMENSION(:,:), ALLOCATABLE :: EigenVectors, WrkHessian
 
       REAL, DIMENSION(SIZE(X)) :: Forces
+      REAL, DIMENSION(SIZE(X)) :: Kappa1, Kappa2, Kappa3, Kappa4, Step
+
       REAL, DIMENSION(SIZE(X),SIZE(X)) :: Hessian
       REAL :: V, FMax
       INTEGER :: i, n, NOpt, NegativeEig
@@ -907,17 +820,27 @@ MODULE MinimumEnergyPath
          END IF
 
          ! Check if forces would result in a negligible step
-         IF ( FMax < 1E-5 )  THEN
+         IF ( FMax < 1.E-4 )  THEN
             ! Do not take any step
             DoMEPStep = .FALSE.
          ELSE
+            ! Make a runge kutta 4th order step
+            Kappa1 = NormalizedForces( Forces, Mask )
+            V = HStickPotential( X + 0.5*ABS(StepLength)*Kappa1, Forces )
+            Kappa2 = NormalizedForces( Forces, Mask )
+            V = HStickPotential( X + 0.5*ABS(StepLength)*Kappa2, Forces )
+            Kappa3 = NormalizedForces( Forces, Mask )
+            V = HStickPotential( X + ABS(StepLength)*Kappa3, Forces )
+            Kappa4 = NormalizedForces( Forces, Mask )
+            Step = ( Kappa1/6.0 + Kappa2/3.0 + Kappa3/3.0 + Kappa4/6.0 )
+
             ! move uncostrained coordinates in the direction of the forces
             IF ( PRESENT(Mask) ) THEN
                DO i = 1, size(X)
-                  IF ( Mask(i) ) X(i) = X(i) + ABS(StepLength) * Forces(i)
+                  IF ( Mask(i) ) X(i) = X(i) + ABS(StepLength) * Step(i)
                END DO
             ELSE
-               X(:) = X(:) + ABS(StepLength) * Forces(:)
+               X(:) = X(:) + ABS(StepLength) * Step(:)
             END IF
             ! Return TRUE value
             DoMEPStep = .TRUE.
@@ -925,6 +848,20 @@ MODULE MinimumEnergyPath
       END IF
 
    END FUNCTION DoMEPStep
+
+   FUNCTION NormalizedForces( Forces, Mask )
+      IMPLICIT NONE
+      REAL, DIMENSION(:), INTENT(IN) :: Forces
+      LOGICAL, DIMENSION(size(X)), INTENT(IN) :: Mask
+      REAL, DIMENSION(size(X)) :: NormalizedForces
+      REAL :: VectorNorm
+
+      NormalizedForces(:) = Forces(:) / MassVector(:)
+      VectorNorm = SQRT(TheOneWithVectorDotVector( ConstrainedVector(NormalizedForces,Mask), &
+                     ConstrainedVector(NormalizedForces,Mask) ))
+      NormalizedForces(:) = NormalizedForces(:) / VectorNorm
+   END FUNCTION NormalizedForces
+
 
 !*************************************************************************************************
 

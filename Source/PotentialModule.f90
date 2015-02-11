@@ -129,16 +129,16 @@ MODULE PotentialModule
          ! Choose the coordinates to minimize (according to the model)
          SELECT CASE ( Cut4D_Model )
             CASE( CUT4D_PLANARGRAPHENE )
-               OptMask = (/ (.TRUE., iCoord=1,4), (.FALSE., iCoord=5,124) /)
+               OptMask = (/ (.FALSE., iCoord=1,2), (.TRUE., iCoord=3,4), (.FALSE., iCoord=5,124) /)
             CASE( CUT4D_GLOBALMINIMUM , CUT4D_ADIABATICMODEL )
-               OptMask = (/ (.TRUE., iCoord=1,4), (.FALSE., iCoord=5,7), (.TRUE., iCoord=8,124) /)
+               OptMask = (/ (.FALSE., iCoord=1,2), (.TRUE., iCoord=3,4), (.FALSE., iCoord=5,7), (.TRUE., iCoord=8,124) /)
             CASE DEFAULT
                CALL AbortWithError( " SetupPotential: chosen 4D model does not exist " )
          END SELECT
 
          ! Minimize potential
-         MinimumEnergy =  MinimizePotential( Positions, OptMask, 1.E-6 )
-  
+         Positions =  MinimizePotential( Positions, 10**6, 1.0E-8, OptMask )
+
          ! Store the coordinate of the slab
          MinSlab(:) = Positions(5:124)
          ! Store the carbon puckering and the H Z at equilibrium
@@ -150,7 +150,6 @@ MODULE PotentialModule
          HessianSystem = HessianOfTheSystem( Positions, MassHydro, MassCarb )
          ! Diagonalize the hessian
          CALL TheOneWithDiagonalization( HessianSystem, NormalModes4D_Vecs, NormalModes4D_Freq )
-
 
 #if defined(__PRINT_VHSTICKING_FUNCTION)
          __OPEN_VHSTICKING_FILE
@@ -189,7 +188,6 @@ MODULE PotentialModule
          WRITE(*,*) " "
 #endif
       END SUBROUTINE
-
 
 ! ************************************************************************************
 
@@ -320,59 +318,118 @@ MODULE PotentialModule
 
 ! ******************************************************************************************      
 
-      REAL FUNCTION MinimizePotential( Coords, Mask, GradEps ) RESULT( Pot )
+      FUNCTION MinimizePotential( StartX, NMaxIter, GradThresh, Mask ) RESULT( MinPoint )
          IMPLICIT NONE
-         REAL, INTENT(INOUT), DIMENSION(:)            :: Coords
-         LOGICAL, INTENT(IN), DIMENSION(size(Coords)) :: Mask
-         REAL, INTENT(IN)                             :: GradEps
 
-         INTEGER :: NrDimension, NrOptimization
-         INTEGER :: iIter, iCoord
-         REAL, DIMENSION(size(Coords)) :: Gradient
-         REAL :: Norm
+         REAL, DIMENSION(:), INTENT(IN)    :: StartX
+         INTEGER, INTENT(IN)               :: NMaxIter
+         REAL, INTENT(IN)                  :: GradThresh
+         LOGICAL, DIMENSION(size(StartX)), INTENT(IN) :: Mask
+         REAL, DIMENSION(size(StartX))     :: MinPoint
 
-         ! Set dimension number
-         NrDimension = size(Coords)
-         ! Set optimization coordinates nr
-         NrOptimization = count( Mask )
-         ! Check if the nr of dimension is compatible with the slab maximum size
-         CALL ERROR( (NrDimension > 124) .OR. (NrDimension < 4), "PotentialModule.MinimizePotential: wrong number of DoFs" )
+         INTEGER :: NIter, NOpt, n, i
+         REAL :: GradNorm, DeltaNorm, V
+         REAL, DIMENSION(size(StartX)) :: Forces
+         REAL, DIMENSION(count(Mask)) :: WrkForces, Delta
+         REAL, DIMENSION(count(Mask),count(Mask)) :: Hessian
 
-         ! Cycle over steepest descent iterations
-         DO iIter = 1, MaxIter
-
-            ! compute negative of the gradient
-            Pot = VHSticking( Coords, Gradient )
-
-            ! compute norm of the gradient
-            Norm = 0.0
-            DO iCoord = 1, NrDimension
-               IF ( Mask( iCoord ) ) THEN
-                  Norm = Norm + Gradient(iCoord)**2
-               END IF
-            END DO
-            Norm = SQRT( Norm / NrOptimization )
-
-            ! check convergence
-            IF (Norm < GradEps) EXIT
-      
-            ! move geometry along gradient
-            DO iCoord = 1, NrDimension
-               IF ( Mask( iCoord ) ) THEN
-                  Coords(iCoord) = Coords(iCoord) + Gradient(iCoord)
-               END IF
-            END DO
-
-         END DO
-
-#if defined(VERBOSE_OUTPUT)
-         WRITE(*,"(/,A,I6,A)") "Convergence in ", iIter, " steps"
+#if defined(LOG_FILE) && defined(VERBOSE_OUTPUT)
+         __OPEN_LOG_FILE
+         ! Print info to screen
+         WRITE(__LOG_UNIT,"(/,A,/)") " Stationary point locator with Newton-Raphson method "
+         WRITE(__LOG_UNIT,"(A)") " Looking for a minimum of the potential"
 #endif
-         CALL WARN( iIter == MaxIter+1, "PotentialModule. MinimizePotential: convergence not reached" )
+
+         ! Number of non constrained variables
+         NOpt = COUNT(Mask)
+#if defined(LOG_FILE) && defined(VERBOSE_OUTPUT)
+            WRITE(__LOG_UNIT,"(A,I3,A,/)") " Optimization of ",NOpt," variables "
+#endif
+
+         ! Start at initial position
+         MinPoint = StartX
+
+#if defined(LOG_FILE) && defined(VERBOSE_OUTPUT)
+         WRITE(__LOG_UNIT,"(A12,A20,A20,A20)") "N Iteration", "Gradient Norm", "Displacement Norm", "Potential"
+         WRITE(__LOG_UNIT,*)              "------------------------------------------------------"
+#endif
+
+         Iterations: DO NIter = 1, NMaxIter
+
+            ! Compute forces
+            V = VHSticking( MinPoint, Forces )
+            WrkForces = ConstrainedVector( Forces, Mask )
+
+            ! Compute root mean square of the gradient components
+            GradNorm  = SQRT( TheOneWithVectorDotVector(WrkForces, WrkForces) / NOpt )
+            
+            ! Check convergence criteria
+            IF ( GradNorm < GradThresh ) THEN
+               EXIT Iterations
+            END IF
+
+            ! When the gradient is large, switch off newton and use gradient only
+            IF ( GradNorm > 1.E-3 ) THEN
+               ! Displacement along the gradient
+               Delta = WrkForces
+               DeltaNorm = GradNorm
+            ELSE
+               ! Compute hessian
+               Hessian = ConstrainedHessian( MinPoint, Mask ) 
+               ! Compute displacement by solution of the equation Hessian * DX = - Grad
+               Delta = TheOneWithSymmetricLinearSystem( Hessian, WrkForces )
+               ! Compute root mean square of the displacement components
+               DeltaNorm = SQRT( TheOneWithVectorDotVector(Delta, Delta) / NOpt )
+            END IF
+
+            ! Move to new coordinates
+            n = 0
+            DO i = 1, size(MinPoint)
+               IF ( Mask(i) ) THEN
+                  n = n + 1 
+                  MinPoint(i) = MinPoint(i) + Delta(n)
+               END IF
+            END DO
+
+#if defined(LOG_FILE) && defined(VERBOSE_OUTPUT)
+            ! Print info to screen
+            IF ( MOD(NIter-1,5) == 0 ) WRITE(__LOG_UNIT,"(I12,E20.6,E20.6,F20.6)") NIter, DeltaNorm, GradNorm, V
+#endif
+
+         END DO Iterations
+
+#if defined(LOG_FILE) && defined(VERBOSE_OUTPUT)
+         WRITE(__LOG_UNIT,"(I12,E20.6,E20.6,F20.6)") NIter, DeltaNorm, GradNorm, V
+#endif
+         ! Check max number of iterations
+         CALL WARN( NIter == NMaxIter+1, " NewtonLocator: max number of iterations reached " )
+
+#if defined(LOG_FILE) && defined(VERBOSE_OUTPUT)
+      __CLOSE_LOG_FILE
+#endif
 
       END FUNCTION MinimizePotential
 
    ! ************************************************************************************************
+
+   FUNCTION ConstrainedVector( Vector, Mask )
+      IMPLICIT NONE
+      REAL, DIMENSION(:), INTENT(IN) :: Vector
+      LOGICAL, DIMENSION(SIZE(Vector)), INTENT(IN) :: Mask
+      REAL, DIMENSION(COUNT(Mask)) :: ConstrainedVector
+      INTEGER :: i, n
+
+      n = 0
+      DO i = 1, size(Vector)
+         IF ( Mask(i) ) THEN
+            n = n + 1
+            ConstrainedVector(n) = Vector(i)
+         END IF
+      END DO
+      
+   END FUNCTION ConstrainedVector
+
+!*************************************************************************************************
 
    FUNCTION HessianOfTheSystem( AtPoint, MassHydro, MassCarb ) RESULT( Hessian )
       IMPLICIT NONE
@@ -516,6 +573,90 @@ MODULE PotentialModule
 
 !*************************************************************************************************
 
+   FUNCTION ConstrainedHessian( AtPoint, Mask ) RESULT( Hessian )
+      IMPLICIT NONE
+      REAL, DIMENSION(:), INTENT(IN) :: AtPoint
+      LOGICAL, DIMENSION(size(AtPoint)), INTENT(IN) :: Mask
+      REAL, DIMENSION(count(Mask),count(Mask)) :: Hessian
+      REAL, DIMENSION(size(AtPoint)) :: Coordinates, FirstDerivative
+      REAL :: Potential
+      INTEGER :: i, k, NDim, l, m, j
+
+      NDim = size(AtPoint)
+
+      Hessian(:,:) = 0.0
+      l = 0
+
+      ! Compute the second derivatives for displacements of x and y
+      ! IMPORTANT!!! since rho = 0 is a singular value of the function, 
+      ! the derivative is computed slightly off the minimum, and is computed for x,y > 0
+      DO i = 1, 2
+
+         IF ( .NOT. Mask(i) ) CYCLE
+         l = l + 1
+
+         DO k = 1, size(ForwardDeltas)
+
+            ! Define small displacement from the point where compute the derivative
+            Coordinates(:) = AtPoint(:)
+            IF ( Coordinates(i) < 0.0 ) THEN
+               Coordinates(i) = - Coordinates(i)
+            END IF
+
+            IF ( Coordinates(i) < 0.001 ) THEN
+               Coordinates(i) = Coordinates(i) + 0.001 + ForwardDeltas(k)*SmallDelta
+            ELSE
+               Coordinates(i) = Coordinates(i) + ForwardDeltas(k)*SmallDelta
+            END IF
+
+            ! Compute potential and forces in the displaced coordinate
+            Potential = VHSticking( Coordinates, FirstDerivative )
+            FirstDerivative = - FirstDerivative
+
+            ! Increment numerical derivative of the analytical derivative
+            m = 0
+            DO j = 1, NDim
+               IF ( Mask(j) ) THEN
+                  m = m + 1
+                  Hessian(l,m) = Hessian(l,m) + ForwardCoeffs(k)*FirstDerivative(j)/SmallDelta
+               END IF
+            END DO
+
+         END DO
+      END DO
+
+      DO i = 3, NDim
+
+         IF ( .NOT. Mask(i) ) CYCLE
+         l = l + 1
+
+         DO k = 1, size(Deltas)
+
+            ! Define small displacement from the point where compute the derivative
+            Coordinates(:) = AtPoint(:)
+            Coordinates(i) = Coordinates(i) + Deltas(k)*SmallDelta
+
+            ! Compute potential and forces in the displaced coordinate
+            Potential = VHSticking( Coordinates, FirstDerivative )
+            FirstDerivative = - FirstDerivative
+
+            ! Increment numerical derivative of the analytical derivative
+            m = 0
+            DO j = 1, NDim
+               IF ( Mask(j) ) THEN
+                  m = m + 1
+                  Hessian(l,m) = Hessian(l,m) + Coeffs(k)*FirstDerivative(j)/SmallDelta
+               END IF
+            END DO
+
+         END DO
+      END DO
+
+   END FUNCTION ConstrainedHessian
+
+   ! ************************************************************************************************
+
+
    FUNCTION SystemBathLinearCoupling( AtPoint ) RESULT( CouplingCoeff )
       IMPLICIT NONE
       REAL, DIMENSION(2) :: CouplingCoeff
@@ -601,7 +742,7 @@ MODULE PotentialModule
                ! Set starting geometry
                OptCoord = (/ Positions, 0., 0., 0., TmpSlab(:) /)
                ! Optimize coordinates
-               V =  MinimizePotential( OptCoord, OptMask, 1.0E-4 )
+               OptCoord =  MinimizePotential( OptCoord, 10**6, 1.0E-5, OptMask )
 
                ! Use optimized coordinates to compute forces and energy
                V = VHSticking( OptCoord, Dummy(:) ) 
@@ -666,7 +807,7 @@ MODULE PotentialModule
 
          ! Check if the nr of dimension is compatible with the slab maximum size
          CALL ERROR( (NrNonFrozen > 124) .OR. (NrNonFrozen < 4), "PotentialModule.VHSticking: wrong number of DoFs" )
-         
+
          ! Transform input coordinate from AU to Angstrom
          IF ( CollinearPES ) THEN
             xh = 0.0
@@ -2124,9 +2265,9 @@ MODULE PotentialModule
          ! Total Potential 
          vv=vt+vlatt-0.5*rkc*(z(1)-qqq)**2
 
-!     Upper and lower energy cutoff
-      if ( vv < -1.0 ) vv = -1.0
-      if ( vv > 20.0 ) vv = 20.0
+         ! Upper and lower energy cutoff
+         if ( vv < -1.0 ) vv = -1.0
+         if ( vv > 20.0 ) vv = 20.0
 
          ! Convert total potential to AU
          vv = vv / MyConsts_Hartree2eV
