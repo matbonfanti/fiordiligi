@@ -88,7 +88,7 @@ MODULE ScatteringSimulation
 
    ! ZCeq as a function of ZH
    CHARACTER(100)   :: ZCofZHFile              !< file storing the data ZC vs ZH (in atomic units)
-   TYPE(SplineType) :: ZCofZHSpline            !< spline function defining ZC as a function of ZH
+   TYPE(SplineType), SAVE :: ZCofZHSpline      !< spline function defining ZC as a function of ZH
 
    CONTAINS
 

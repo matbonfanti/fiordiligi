@@ -56,7 +56,7 @@ MODULE MinimumEnergyPath
    REAL, DIMENSION(:,:), ALLOCATABLE :: MEP_Full_Plus, MEP_Full_Minus
 
    !> Data for printing trajectory in VTK format
-   TYPE(VTKInfo) :: MEPTraj_Full_Plus, MEPTraj_Full_Minus
+   TYPE(VTKInfo), SAVE :: MEPTraj_Full_Plus, MEPTraj_Full_Minus
 
 !    !> Parameters to plot potential cuts
 !    REAL :: GridSpacing          !< Spacing of the grid to plot the potential

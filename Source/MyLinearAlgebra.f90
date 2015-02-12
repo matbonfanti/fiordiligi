@@ -51,7 +51,8 @@
 #endif
 
 MODULE MyLinearAlgebra
-#include "preprocessoptions.cpp"
+   USE ErrorTrap
+   USE MyConsts
 #if defined(WITH_NR)
    USE NRUtility
 #endif

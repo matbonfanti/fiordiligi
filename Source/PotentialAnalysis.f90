@@ -49,9 +49,9 @@ MODULE PotentialAnalysis
    REAL, DIMENSION(:), ALLOCATABLE :: ZCArray, ZHArray, QArray, OptZC    !< array with coordinates grid
    REAL :: ZHmin, ZHmax, ZCmin, ZCmax, Qmin, Qmax                        !< boundaries of the grid
    INTEGER :: NpointZH, NpointZC, NpointQ                                !< nr of points of the grid
-   TYPE(VTKInfo) :: PotentialCH
-   TYPE(VTKInfo) :: CouplingV
-   TYPE(SplineType) :: SplineData                           !< Data for spline interpolation
+   TYPE(VTKInfo), SAVE :: PotentialCH
+   TYPE(VTKInfo), SAVE :: CouplingV
+   TYPE(SplineType), SAVE :: SplineData                           !< Data for spline interpolation
 
    CONTAINS
 
@@ -417,7 +417,7 @@ MODULE PotentialAnalysis
          ! sum over eigenfreq centered gaussians
          DO iEigen = 1, size(EigenFreq)
             IF ( EigenFreq(iEigen) > 0.0 ) & 
-               Spectrum = Spectrum + + LorentzianFunction( Frequency, SQRT(EigenFreq(iEigen)), SigmaPeak )
+               Spectrum = Spectrum + LorentzianFunction( Frequency, SQRT(EigenFreq(iEigen)), SigmaPeak )
          END DO
 
          ! PRINT

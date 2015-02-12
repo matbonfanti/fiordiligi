@@ -711,7 +711,7 @@ MODULE PolymerVibrationalRelax
       ELSE 
          CouplingFunc = Positions(4) - C1Puckering
       END IF
-      CALL BathPotentialAndForces( Bath, CouplingFunc, Positions(NSystem+1:NDim), BathV, ForceCoupCoord, ForceQCoord(:), CouplingV ) 
+      CALL BathPotentialAndForces( Bath, CouplingFunc,Positions(NSystem+1:NDim), BathV, ForceCoupCoord,ForceQCoord(:),CouplingV ) 
       IF ( MorsePotential ) THEN
          Forces(1) = Forces(1) + ForceCoupCoord * ( - exp( - MorseAlpha*Positions(1) ) )
       ELSE
