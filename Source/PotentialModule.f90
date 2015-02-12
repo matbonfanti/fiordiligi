@@ -330,7 +330,7 @@ MODULE PotentialModule
          INTEGER :: NIter, NOpt, n, i
          REAL :: GradNorm, DeltaNorm, V
          REAL, DIMENSION(size(StartX)) :: Forces
-         REAL, DIMENSION(count(Mask)) :: WrkForces, Delta
+         REAL, DIMENSION(count(Mask)) :: WrkForces
          REAL, DIMENSION(count(Mask),count(Mask)) :: Hessian
 
 #if defined(LOG_FILE) && defined(VERBOSE_OUTPUT)
@@ -358,28 +358,29 @@ MODULE PotentialModule
 
             ! Compute forces
             V = VHSticking( MinPoint, Forces )
-            WrkForces = ConstrainedVector( Forces, Mask )
+            ! Extract non-constrained forces and compute norm
+            n = 0
+            GradNorm  = 0
+            DO i = 1, size(Forces)
+               IF ( Mask(i) ) THEN
+                  n = n + 1
+                  WrkForces(n) = Forces(i)
+                  GradNorm = GradNorm + Forces(i)**2
+               END IF
+            END DO
+            GradNorm = SQRT( GradNorm/NOpt )
 
-            ! Compute root mean square of the gradient components
-            GradNorm  = SQRT( TheOneWithVectorDotVector(WrkForces, WrkForces) / NOpt )
-            
             ! Check convergence criteria
             IF ( GradNorm < GradThresh ) THEN
                EXIT Iterations
             END IF
 
             ! When the gradient is large, switch off newton and use gradient only
-            IF ( GradNorm > 1.E-3 ) THEN
-               ! Displacement along the gradient
-               Delta = WrkForces
-               DeltaNorm = GradNorm
-            ELSE
+            IF ( GradNorm < 1.E-2 ) THEN
                ! Compute hessian
                Hessian = ConstrainedHessian( MinPoint, Mask ) 
                ! Compute displacement by solution of the equation Hessian * DX = - Grad
-               Delta = TheOneWithSymmetricLinearSystem( Hessian, WrkForces )
-               ! Compute root mean square of the displacement components
-               DeltaNorm = SQRT( TheOneWithVectorDotVector(Delta, Delta) / NOpt )
+               CALL TheOneWithSymmetricLinearSystem( Hessian, WrkForces )
             END IF
 
             ! Move to new coordinates
@@ -387,18 +388,22 @@ MODULE PotentialModule
             DO i = 1, size(MinPoint)
                IF ( Mask(i) ) THEN
                   n = n + 1 
-                  MinPoint(i) = MinPoint(i) + Delta(n)
+                  MinPoint(i) = MinPoint(i) + WrkForces(n)
                END IF
             END DO
 
 #if defined(LOG_FILE) && defined(VERBOSE_OUTPUT)
-            ! Print info to screen
-            IF ( MOD(NIter-1,5) == 0 ) WRITE(__LOG_UNIT,"(I12,E20.6,E20.6,F20.6)") NIter, DeltaNorm, GradNorm, V
+            IF ( MOD(NIter-1,5) == 0 ) THEN
+               ! Compute root mean square of the displacement components
+               DeltaNorm = SQRT( TheOneWithVectorDotVector(WrkForces, WrkForces) / NOpt )
+               ! Print info to screen
+               WRITE(__LOG_UNIT,"(I12,E20.6,E20.6,F20.6)") NIter, DeltaNorm, GradNorm, V
+            END IF
 #endif
-
          END DO Iterations
 
 #if defined(LOG_FILE) && defined(VERBOSE_OUTPUT)
+         DeltaNorm = SQRT( TheOneWithVectorDotVector(WrkForces, WrkForces) / NOpt )
          WRITE(__LOG_UNIT,"(I12,E20.6,E20.6,F20.6)") NIter, DeltaNorm, GradNorm, V
 #endif
          ! Check max number of iterations
@@ -410,24 +415,6 @@ MODULE PotentialModule
 
       END FUNCTION MinimizePotential
 
-   ! ************************************************************************************************
-
-   FUNCTION ConstrainedVector( Vector, Mask )
-      IMPLICIT NONE
-      REAL, DIMENSION(:), INTENT(IN) :: Vector
-      LOGICAL, DIMENSION(SIZE(Vector)), INTENT(IN) :: Mask
-      REAL, DIMENSION(COUNT(Mask)) :: ConstrainedVector
-      INTEGER :: i, n
-
-      n = 0
-      DO i = 1, size(Vector)
-         IF ( Mask(i) ) THEN
-            n = n + 1
-            ConstrainedVector(n) = Vector(i)
-         END IF
-      END DO
-      
-   END FUNCTION ConstrainedVector
 
 !*************************************************************************************************
 

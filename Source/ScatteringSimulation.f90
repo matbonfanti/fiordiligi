@@ -295,7 +295,7 @@ MODULE ScatteringSimulation
          ALLOCATE( ZHGrid(NData), ZCValue(NData) )
 
          ! open file and read content
-         OPEN( FILE=ZCofZHFile , UNIT= ZCEqUnit )
+         OPEN( FILE=TRIM(ADJUSTL(ZCofZHFile)) , UNIT= ZCEqUnit )
          DO iData = 1, NData
             READ(ZCEqUnit,*) ZHGrid(iData), ZCValue(iData)
          END DO 
