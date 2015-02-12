@@ -86,9 +86,11 @@ MODULE ScatteringSimulation
    ! Number of dimensions of the system+bath hamiltonian
    INTEGER :: NDim                             !< integer nr of dofs of the system+bath hamiltonian
 
+#if defined(__ZH_DEPENDENT_COUPLING)
    ! ZCeq as a function of ZH
    CHARACTER(100)   :: ZCofZHFile              !< file storing the data ZC vs ZH (in atomic units)
    TYPE(SplineType), SAVE :: ZCofZHSpline      !< spline function defining ZC as a function of ZH
+#endif
 
    CONTAINS
 
@@ -157,9 +159,11 @@ MODULE ScatteringSimulation
       CALL SetFieldFromInput( InputData, "NrEquilibrSteps", NrEquilibSteps, int(10.0*(1.0/EquilGamma)/EquilTStep) )
       EquilibrationStepInterval = CEILING( real(NrEquilibSteps) / real(NrOfPrintSteps) )
 
+#if defined(__ZH_DEPENDENT_COUPLING)
       ! EQUILIBRIUM POSITION OF C ATOM AS FUNCTION OF H
       IF ( BathType /= LANGEVIN_DYN .AND. BathType /= SLAB_POTENTIAL ) &
                        CALL SetFieldFromInput( InputData, "ZCofZHFile", ZCofZHFile )
+#endif
 
       WRITE(*, 902) ZHInit*LengthConversion(InternalUnits,InputUnits), LengthUnit(InputUnits), &
                     EKinZH*EnergyConversion(InternalUnits,InputUnits), EnergyUnit(InputUnits), &
@@ -173,7 +177,9 @@ MODULE ScatteringSimulation
                  EquilTStep*NrEquilibSteps*TimeConversion(InternalUnits,InputUnits), TimeUnit(InputUnits), &
                  NrEquilibSteps
 
+#if defined(__ZH_DEPENDENT_COUPLING)
       IF ( BathType /= LANGEVIN_DYN .AND. BathType /= SLAB_POTENTIAL ) WRITE(*, 905) TRIM(ADJUSTL(ZCofZHFile))
+#endif
 
    902 FORMAT(" * Initial conditions of the atom-surface system ", /,&
               " * Initial height of H atom:                    ",F10.4,1X,A,/,&  
@@ -287,6 +293,7 @@ MODULE ScatteringSimulation
          CALL ERROR( Collinear, " Scattering_Initialize: a non collinear potential is needed!" )
       END IF 
 
+#if defined(__ZH_DEPENDENT_COUPLING)
       ! Define spline function with ZCeq as a function of ZH
       IF ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
 
@@ -301,17 +308,12 @@ MODULE ScatteringSimulation
          END DO 
          CLOSE( ZCEqUnit )
 
-         ! Define spline interpolating function
+         ! Define spline interpolating function and deallocate memory
          CALL SetupSpline( ZCofZHSpline, ZHGrid, ZCValue )
-
-!          DO iData = 1, NData
-!             WRITE(88,*) ZHGrid(iData), GetSpline1D( ZCofZHSpline,ZHGrid(iData)), &
-!                DerivSpline( ZCofZHSpline,ZHGrid(iData))
-!          END DO 
-
          DEALLOCATE( ZHGrid, ZCValue )
 
       END IF
+#endif
 
 !          ! if XYZ files of the trajectories are required, allocate memory to store the traj
 !          IF ( PrintType >= FULL  .AND. ( RunType == SCATTERING .OR. RunType == EQUILIBRIUM ) ) THEN
@@ -720,8 +722,10 @@ MODULE ScatteringSimulation
       CALL DisposeEvolutionData( MolecularDynamics )
       CALL DisposeEvolutionData( Equilibration )
 
+#if defined(__ZH_DEPENDENT_COUPLING)
       ! Dispose spline function
       CALL DisposeSpline( ZCofZHSpline )
+#endif
 
    END SUBROUTINE Scattering_Dispose
 
@@ -750,13 +754,19 @@ MODULE ScatteringSimulation
          ! Compute potential and forces of the system
          ScatteringPotential = VHFourDimensional( Positions(1:4), Forces(1:4) )
          ! Coupling function of the system
+#if defined(__ZH_DEPENDENT_COUPLING)
          CouplingFs = Positions(4)-GetSpline1D(ZCofZHSpline, Positions(3))
+#else
+         CouplingFs = Positions(4)
+#endif
          ! Add potential and forces of the bath and the coupling
          CALL BathPotentialAndForces( Bath, CouplingFs, Positions(5:), &
                                                 ScatteringPotential, Forces(4), Forces(5:), DTimesEffMode=DTimesX ) 
+#if defined(__ZH_DEPENDENT_COUPLING)
          ! Add forces on ZH coming from ZH-dependent distortion correction
          Forces(3) = Forces(3) + GetDistorsionForce(Bath)*CouplingFs*DerivSpline(ZCofZHSpline, Positions(3))
          Forces(3) = Forces(3) - DTimesX * DerivSpline(ZCofZHSpline, Positions(3))
+#endif
 
       ELSE IF ( BathType == DOUBLE_CHAIN ) THEN
          ! Compute potential and forces of the system
