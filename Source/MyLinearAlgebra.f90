@@ -19,7 +19,8 @@
 !>  \par Updates
 !>  \arg 9 March 2013: diagonalization implemented with Numerical Recipes
 !>  \arg 9 September 2013: diagonalization implemented with LAPACK
-!>  \arg 9 September 2013: added TheOneWithSymmetricLinearSystem with LAPACK only
+!>  \arg 10 February 2015: added TheOneWithSymmetricLinearSystem with LAPACK only
+!>  \arg 12 February 2015: TheOneWithMatrixVectorProduct in real and complex version
 !
 !>  \todo          Implement matrix inversion with Numerical Recipes
 !>  \todo          Implement computation of euler angles from rotation matrix
@@ -55,6 +56,10 @@ MODULE MyLinearAlgebra
 #endif
    
    IMPLICIT NONE
+
+   INTERFACE TheOneWithMatrixVectorProduct
+      MODULE PROCEDURE TheOneWithMatrixVectorProduct_CMPLX, TheOneWithMatrixVectorProduct_REAL
+   END INTERFACE
 
 
 !********************************************************************************************************
@@ -474,7 +479,7 @@ MODULE MyLinearAlgebra
 !> @param      Vector      M      real array with a vector.
 !> @returns    ProductV    N      array with the product Matrix * Vector.
 !*******************************************************************************
-   FUNCTION TheOneWithMatrixVectorProduct( Matrix, Vector ) RESULT( ProductV )
+   FUNCTION TheOneWithMatrixVectorProduct_REAL( Matrix, Vector ) RESULT( ProductV )
       IMPLICIT NONE
       REAL, DIMENSION(:,:), INTENT(IN) :: Matrix
       REAL, DIMENSION(:), INTENT(IN)   :: Vector
@@ -516,8 +521,51 @@ MODULE MyLinearAlgebra
       END DO
 #endif
 
-   END FUNCTION TheOneWithMatrixVectorProduct
+   END FUNCTION TheOneWithMatrixVectorProduct_REAL
 
+   FUNCTION TheOneWithMatrixVectorProduct_CMPLX( Matrix, Vector ) RESULT( ProductV )
+      IMPLICIT NONE
+      COMPLEX, DIMENSION(:,:), INTENT(IN) :: Matrix
+      COMPLEX, DIMENSION(:), INTENT(IN)   :: Vector
+      COMPLEX, DIMENSION(size(Matrix,1)) :: ProductV
+
+#if defined(WITH_LAPACK)
+      INTEGER( SHORT_INTEGER_KIND )   :: N, M
+#endif
+#if !defined(WITH_LAPACK)
+      INTEGER                         :: i, j
+#endif
+      ! Check and define the dimension of the matrices
+      CALL ERROR( size(Matrix,2) /= SIZE(Vector) , &
+                       " TheOneWithMatrixVectorProduct: mismatch in matrix dimensions ")
+
+#if defined(WITH_LAPACK)
+      ! define dimensions
+      N = size( Matrix, 1 )
+      M = size( Matrix, 2 )
+
+      ! Check kind of real data
+      IF ( KIND( Matrix(1,1) ) == SINGLE_PRECISION_KIND ) THEN
+            ! use blas routine (single precision, general matrix, matrix vector product)
+             CALL CGEMV ( 'N', N, M, 1.0, Matrix, N, Vector, 1, 0.0, ProductV, 1 )
+            
+      ELSE IF ( KIND( Matrix(1,1) ) == DOUBLE_PRECISION_KIND ) THEN
+            ! use blas routine (double precision, general matrix, matrix vector product )
+             CALL ZGEMV ( 'N', N, M, 1.0, Matrix, N, Vector, 1, 0.0, ProductV, 1 )
+      END IF
+#endif
+#if !defined(WITH_LAPACK)
+      ProductV = 0.0
+      DO j  = 1, size(Matrix,2)
+         DO i = 1, size(Matrix,1)
+               ProductV(i) = ProductV(i) + Matrix(i,j)*Vector(j)
+         END DO
+      END DO
+#endif
+
+   END FUNCTION TheOneWithMatrixVectorProduct_CMPLX
+
+   
 !*******************************************************************************
 !          TheOneWithVectorDotVector
 !*******************************************************************************
