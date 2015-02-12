@@ -31,8 +31,7 @@
 !
 !***************************************************************************************
 MODULE InputField
-   USE ErrorTrap
-   USE MyConsts
+#include "preprocessoptions.cpp"
 
    PRIVATE
    PUBLIC :: InputFile, OpenFile, CloseFile, SetFieldFromInput

@@ -37,9 +37,6 @@ MODULE FFTWrapper
 #if defined(WITH_FFTW3)
    USE, INTRINSIC :: ISO_C_BINDING
 #endif
-#if defined(WITH_DFT_MATRIX)
-   USE MyLinearAlgebra
-#endif
    IMPLICIT NONE
 
 #if defined(WITH_FFTW3)

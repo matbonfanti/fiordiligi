@@ -13,7 +13,7 @@ LOGFILE = yes
 LOGNAME = fiordiligi_v3.log
 
 # Compiler ( gfortran, ifort )
-FC = ifort    
+FC = gfortran     
 
 # Debugging options ( yes or no )
 DEBUG =  no
@@ -22,7 +22,7 @@ DEBUG =  no
 OPTLEVEL = 3
 
 # linking FFTW 3.3
-FFTW3 = yes
+FFTW3 = no
 
 # OpenMP libraries
 OPENMP = no 
@@ -387,93 +387,97 @@ clean-doc :
 COMMONDEP = Makefile ${OBJDIR}/ErrorTrap.o  ${OBJDIR}/MyConsts.o ${OBJDIR}/MyLinearAlgebra.o  ${SRCDIR}/preprocessoptions.cpp
 
 # Program to simulate the vibrational relaxation
-${OBJDIR}/VibrationalRelax.o : ${SRCDIR}/VibrationalRelax.f90 ${OBJDIR}/SharedData.o ${OBJDIR}/InputField.o \
-                               ${OBJDIR}/ClassicalEqMotion.o ${OBJDIR}/PotentialModule.o ${OBJDIR}/IndependentOscillatorsModel.o \
-                               ${OBJDIR}/RandomNumberGenerator.o ${COMMONDEP}
+${OBJDIR}/VibrationalRelax.o : ${SRCDIR}/VibrationalRelax.f90 ${OBJDIR}/SharedData.o ${OBJDIR}/InputField.o                        \
+                               ${OBJDIR}/UnitConversion.o ${OBJDIR}/ClassicalEqMotion.o ${OBJDIR}/PotentialModule.o                \
+                               ${OBJDIR}/IndependentOscillatorsModel.o ${OBJDIR}/RandomNumberGenerator.o ${COMMONDEP}
 
 # Program to simulate the thermal equilibrium dynamics
-${OBJDIR}/ThermalEquilibrium.o : ${SRCDIR}/ThermalEquilibrium.f90 ${OBJDIR}/SharedData.o ${OBJDIR}/InputField.o \
+${OBJDIR}/ThermalEquilibrium.o : ${SRCDIR}/ThermalEquilibrium.f90 ${OBJDIR}/SharedData.o ${OBJDIR}/InputField.o                    \
                                  ${OBJDIR}/ClassicalEqMotion.o ${OBJDIR}/PotentialModule.o ${OBJDIR}/IndependentOscillatorsModel.o \
                                  ${OBJDIR}/RandomNumberGenerator.o ${COMMONDEP}
 
 # Program to simulate the scattering process
-${OBJDIR}/ScatteringSimulation.o : ${SRCDIR}/ScatteringSimulation.f90 ${OBJDIR}/SharedData.o ${OBJDIR}/InputField.o \
-                              ${OBJDIR}/UnitConversion.o ${OBJDIR}/ClassicalEqMotion.o ${OBJDIR}/PotentialModule.o \
-                              ${OBJDIR}/IndependentOscillatorsModel.o ${OBJDIR}/RandomNumberGenerator.o  \
-                              ${OBJDIR}/PrintTools.o ${COMMONDEP}
+${OBJDIR}/ScatteringSimulation.o : ${SRCDIR}/ScatteringSimulation.f90 ${OBJDIR}/SharedData.o ${OBJDIR}/InputField.o                \
+                                   ${OBJDIR}/UnitConversion.o ${OBJDIR}/ClassicalEqMotion.o ${OBJDIR}/PotentialModule.o            \
+                                   ${OBJDIR}/IndependentOscillatorsModel.o ${OBJDIR}/RandomNumberGenerator.o                       \
+                                   ${OBJDIR}/PrintTools.o ${OBJDIR}/SplineInterpolator.o ${COMMONDEP} 
 
 # Program to simulate the vibrational relaxation
-${OBJDIR}/Harmonic1DModel.o : ${SRCDIR}/Harmonic1DModel.f90 ${OBJDIR}/SharedData.o ${OBJDIR}/InputField.o \
-                              ${OBJDIR}/ClassicalEqMotion.o ${OBJDIR}/IndependentOscillatorsModel.o \
-                              ${OBJDIR}/RandomNumberGenerator.o ${COMMONDEP}
+${OBJDIR}/Harmonic1DModel.o : ${SRCDIR}/Harmonic1DModel.f90 ${OBJDIR}/SharedData.o ${OBJDIR}/InputField.o                          \
+                              ${OBJDIR}/ClassicalEqMotion.o ${OBJDIR}/IndependentOscillatorsModel.o                                \
+                              ${OBJDIR}/RandomNumberGenerator.o ${OBJDIR}/UnitConversion.o ${OBJDIR}/FFTWrapper.o ${COMMONDEP}
 
 # Program to simulate the correlation functions with ring polymer dynamics
-${OBJDIR}/PolymerEquilibriumOscillator.o : ${SRCDIR}/PolymerEquilibriumOscillator.f90 ${OBJDIR}/SharedData.o ${OBJDIR}/InputField.o \
-                              ${OBJDIR}/ClassicalEqMotion.o ${OBJDIR}/RandomNumberGenerator.o ${OBJDIR}/UnitConversion.o ${COMMONDEP}
+${OBJDIR}/PolymerEquilibriumOscillator.o : ${SRCDIR}/PolymerEquilibriumOscillator.f90 ${OBJDIR}/FFTWrapper.o                       \
+                                           ${OBJDIR}/SharedData.o ${OBJDIR}/InputField.o ${OBJDIR}/UnitConversion.o                \
+                                           ${OBJDIR}/ClassicalEqMotion.o ${OBJDIR}/RandomNumberGenerator.o ${COMMONDEP}
 
 # Program to simulate the correlation functions with ring polymer dynamics
-${OBJDIR}/PolymerVibrationalRelax.o : ${SRCDIR}/PolymerVibrationalRelax.f90 ${OBJDIR}/SharedData.o ${OBJDIR}/InputField.o \
-                              ${OBJDIR}/ClassicalEqMotion.o ${OBJDIR}/RandomNumberGenerator.o \
-                              ${OBJDIR}/PotentialModule.o ${OBJDIR}/IndependentOscillatorsModel.o ${COMMONDEP}
+${OBJDIR}/PolymerVibrationalRelax.o : ${SRCDIR}/PolymerVibrationalRelax.f90 ${OBJDIR}/SharedData.o ${OBJDIR}/InputField.o          \
+                                      ${OBJDIR}/UnitConversion.o ${OBJDIR}/ClassicalEqMotion.o ${OBJDIR}/PotentialModule.o         \
+                                      ${OBJDIR}/IndependentOscillatorsModel.o ${OBJDIR}/RandomNumberGenerator.o                    \
+                                      ${OBJDIR}/FFTWrapper.o ${COMMONDEP}
 
 # Program to compute the properties of the PES
-${OBJDIR}/PotentialAnalysis.o : ${SRCDIR}/PotentialAnalysis.f90 ${OBJDIR}/MyLinearAlgebra.o ${OBJDIR}/SharedData.o \
-                                ${OBJDIR}/InputField.o ${OBJDIR}/UnitConversion.o ${OBJDIR}/PotentialModule.o      \
-				${OBJDIR}/IndependentOscillatorsModel.o ${OBJDIR}/DifferenceDerivatives.o          \
-				${OBJDIR}/PrintTools.o ${COMMONDEP}
+${OBJDIR}/PotentialAnalysis.o : ${SRCDIR}/PotentialAnalysis.f90  ${OBJDIR}/SharedData.o ${OBJDIR}/InputField.o                     \
+                                ${OBJDIR}/UnitConversion.o ${OBJDIR}/PotentialModule.o ${OBJDIR}/IndependentOscillatorsModel.o     \
+				${OBJDIR}/PrintTools.o ${OBJDIR}/SplineInterpolator.o ${COMMONDEP}
 
 # Program to compute the minimum energy path of the PES
-${OBJDIR}/MinimumEnergyPath.o : ${SRCDIR}/MinimumEnergyPath.f90 ${OBJDIR}/MyLinearAlgebra.o ${OBJDIR}/SharedData.o \
-                                ${OBJDIR}/InputField.o ${OBJDIR}/UnitConversion.o ${OBJDIR}/PotentialModule.o      \
-				${OBJDIR}/IndependentOscillatorsModel.o ${OBJDIR}/DifferenceDerivatives.o          \
+${OBJDIR}/MinimumEnergyPath.o : ${SRCDIR}/MinimumEnergyPath.f90 ${OBJDIR}/SharedData.o ${OBJDIR}/InputField.o                      \
+                                ${OBJDIR}/UnitConversion.o ${OBJDIR}/PotentialModule.o ${OBJDIR}/IndependentOscillatorsModel.o     \
 				${OBJDIR}/PrintTools.o ${COMMONDEP}
 
-# Set error and warning procedures
-${OBJDIR}/ErrorTrap.o        : ${SRCDIR}/ErrorTrap.f90 Makefile
-
-# Define common physical and mathematical constants
-${OBJDIR}/MyConsts.o         : ${SRCDIR}/MyConsts.f90 ${OBJDIR}/ErrorTrap.o Makefile
-
-# Utility subroutines and functions of NR
-${OBJDIR}/NRUtility.o        : ${SRCDIR}/NRUtility.f90 Makefile
-
-# Linear algebra module
-${OBJDIR}/MyLinearAlgebra.o : ${SRCDIR}/MyLinearAlgebra.f90 ${OBJDIR}/ErrorTrap.o ${OBJDIR}/MyConsts.o ${OBJDIR}/NRUtility.o \
-                              Makefile
-
-# Set procedure for reading quasi-free format input file
-${OBJDIR}/InputField.o       : ${SRCDIR}/InputField.f90 ${COMMONDEP}
-
-# Module containing the common data (v2)
-${OBJDIR}/CommonData.o       : ${SRCDIR}/CommonData.f90 ${COMMONDEP}
-
-# Input and output unit conversion
-${OBJDIR}/UnitConversion.o : ${SRCDIR}/UnitConversion.f90 ${COMMONDEP}
-
-# Module containing the common data (v3)
-${OBJDIR}/SharedData.o       : ${SRCDIR}/SharedData.f90 ${OBJDIR}/IndependentOscillatorsModel.o ${COMMONDEP}
-
-# Module containing the potential energy surface
-${OBJDIR}/PotentialModule.o  : ${SRCDIR}/PotentialModule.f90 ${OBJDIR}/RandomNumberGenerator.o ${OBJDIR}/MyLinearAlgebra.o ${COMMONDEP}
-
-# Module containing the random number generator
-${OBJDIR}/RandomNumberGenerator.o  : ${SRCDIR}/RandomNumberGenerator.f90 ${COMMONDEP}
+# Module containing the definitions of the independent oscillator model
+${OBJDIR}/IndependentOscillatorsModel.o  : ${SRCDIR}/IndependentOscillatorsModel.f90 ${OBJDIR}/SplineInterpolator.o                \
+                                   ${OBJDIR}/RandomNumberGenerator.o ${OBJDIR}/FFTWrapper.o ${OBJDIR}/UnitConversion.o ${COMMONDEP}
 
 # Module containing the integrator for the classical eq of motion
-${OBJDIR}/ClassicalEqMotion.o  : ${SRCDIR}/ClassicalEqMotion.f90 ${OBJDIR}/RandomNumberGenerator.o ${OBJDIR}/FFTWrapper.o  ${COMMONDEP}
+${OBJDIR}/ClassicalEqMotion.o  : ${SRCDIR}/ClassicalEqMotion.f90 ${OBJDIR}/RandomNumberGenerator.o ${OBJDIR}/FFTWrapper.o          \
+                                 ${COMMONDEP}
 
-# Module containing the definitions of the independent oscillator model
-${OBJDIR}/IndependentOscillatorsModel.o  : ${SRCDIR}/IndependentOscillatorsModel.f90 ${OBJDIR}/MyLinearAlgebra.o ${OBJDIR}/PotentialModule.o \
-                                           ${OBJDIR}/RandomNumberGenerator.o ${OBJDIR}/SplineInterpolator.o ${OBJDIR}/FFTWrapper.o ${COMMONDEP}
+# Module containing the potential energy surface
+${OBJDIR}/PotentialModule.o  : ${SRCDIR}/PotentialModule.f90 ${OBJDIR}/RandomNumberGenerator.o ${OBJDIR}/MyLinearAlgebra.o         \
+                               ${COMMONDEP}
 
-# Module containing the spline interpolation subroutines
-${OBJDIR}/SplineInterpolator.o : ${SRCDIR}/SplineInterpolator.f90 ${OBJDIR}/NRUtility.o ${COMMONDEP}
+# Module containing the common data (v3)
+${OBJDIR}/SharedData.o : ${SRCDIR}/SharedData.f90 ${OBJDIR}/IndependentOscillatorsModel.o ${OBJDIR}/RandomNumberGenerator.o        \
+                         ${COMMONDEP}
+
+# Module containing the common data (v2)
+${OBJDIR}/CommonData.o : ${SRCDIR}/CommonData.f90 ${COMMONDEP}
 
 # Module containing the subroutine to write data in vtk format
 ${OBJDIR}/PrintTools.o : ${SRCDIR}/PrintTools.f90 ${COMMONDEP}
 
+# Module containing the random number generator
+${OBJDIR}/RandomNumberGenerator.o : ${SRCDIR}/RandomNumberGenerator.f90 ${COMMONDEP}
+
+# Input and output unit conversion
+${OBJDIR}/UnitConversion.o : ${SRCDIR}/UnitConversion.f90 ${COMMONDEP}
+
+# Set procedure for reading quasi-free format input file
+${OBJDIR}/InputField.o : ${SRCDIR}/InputField.f90 ${COMMONDEP}
+
+# Wrapper for FFTW 3.3
+${OBJDIR}/FFTWrapper.o : ${SRCDIR}/FFTWrapper.f90 ${COMMONDEP}
+
+# Module containing the spline interpolation subroutines
+${OBJDIR}/SplineInterpolator.o : ${SRCDIR}/SplineInterpolator.f90 ${OBJDIR}/NRUtility.o
+
+# Linear algebra module
+${OBJDIR}/MyLinearAlgebra.o : ${SRCDIR}/MyLinearAlgebra.f90 ${OBJDIR}/ErrorTrap.o ${OBJDIR}/MyConsts.o ${OBJDIR}/NRUtility.o       \
+                              Makefile
+
+# Utility subroutines and functions of NR
+${OBJDIR}/NRUtility.o : ${SRCDIR}/NRUtility.f90 Makefile
+
+# Define common physical and mathematical constants
+${OBJDIR}/MyConsts.o : ${SRCDIR}/MyConsts.f90 ${OBJDIR}/ErrorTrap.o Makefile
+
+# Set error and warning procedures
+${OBJDIR}/ErrorTrap.o : ${SRCDIR}/ErrorTrap.f90 Makefile
+
 # Derivatives with finite difference methods
 ${OBJDIR}/DifferenceDerivatives.o : ${SRCDIR}/DifferenceDerivatives.f90 ${COMMONDEP}
 
-# Wrapper for FFTW 3.3
-${OBJDIR}/FFTWrapper.o :  ${SRCDIR}/FFTWrapper.f90 ${COMMONDEP}

@@ -24,14 +24,12 @@
 
 MODULE MinimumEnergyPath
 #include "preprocessoptions.cpp"
-   USE MyLinearAlgebra
    USE SharedData
    USE InputField
    USE UnitConversion
    USE PotentialModule
    USE IndependentOscillatorsModel
    USE PrintTools
-!    USE SplineInterpolator
 
    IMPLICIT NONE
 

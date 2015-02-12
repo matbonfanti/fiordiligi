@@ -27,7 +27,6 @@
 
 MODULE PolymerVibrationalRelax
 #include "preprocessoptions.cpp"
-   USE MyLinearAlgebra
    USE SharedData
    USE InputField
    USE UnitConversion

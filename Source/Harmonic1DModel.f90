@@ -26,9 +26,7 @@
 !>                 
 !***************************************************************************************
 MODULE Harmonic1DModel
-   USE MyConsts
-   USE ErrorTrap
-   USE MyLinearAlgebra
+#include "preprocessoptions.cpp"
    USE SharedData
    USE InputField
    USE ClassicalEqMotion

@@ -53,6 +53,7 @@
    /* These are modules that are used in most parts of the code */
    USE ErrorTrap
    USE MyConsts
+   USE MyLinearAlgebra
 #if defined(WITH_OPENMP)
    USE omp_lib
 #endif

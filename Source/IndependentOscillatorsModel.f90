@@ -38,7 +38,6 @@ MODULE IndependentOscillatorsModel
 #include "preprocessoptions.cpp"
    USE SplineInterpolator
    USE RandomNumberGenerator
-   USE MyLinearAlgebra
    USE FFTWrapper
    USE UnitConversion
 

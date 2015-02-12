@@ -24,7 +24,6 @@
 !***************************************************************************************
 MODULE PolymerEquilibriumOscillator
 #include "preprocessoptions.cpp"
-   USE MyLinearAlgebra
    USE FFTWrapper
    USE SharedData
    USE InputField

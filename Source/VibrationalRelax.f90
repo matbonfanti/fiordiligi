@@ -23,9 +23,7 @@
 !>                 
 !***************************************************************************************
 MODULE VibrationalRelax
-   USE MyConsts
-   USE ErrorTrap
-   USE MyLinearAlgebra
+#include "preprocessoptions.cpp"
    USE SharedData
    USE InputField
    USE UnitConversion

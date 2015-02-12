@@ -25,6 +25,7 @@
 !>  \todo          Implement matrix inversion with Numerical Recipes
 !>  \todo          Implement computation of euler angles from rotation matrix
 !>  \todo          Implement computation of the euclidean norm 
+!>  \todo          Move NR subroutines to NRUtility module 
 !
 !***************************************************************************************
 !
