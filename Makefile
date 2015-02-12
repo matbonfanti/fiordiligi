@@ -444,9 +444,6 @@ ${OBJDIR}/PotentialModule.o  : ${SRCDIR}/PotentialModule.f90 ${OBJDIR}/RandomNum
 ${OBJDIR}/SharedData.o : ${SRCDIR}/SharedData.f90 ${OBJDIR}/IndependentOscillatorsModel.o ${OBJDIR}/RandomNumberGenerator.o        \
                          ${COMMONDEP}
 
-# Module containing the common data (v2)
-${OBJDIR}/CommonData.o : ${SRCDIR}/CommonData.f90 ${COMMONDEP}
-
 # Module containing the subroutine to write data in vtk format
 ${OBJDIR}/PrintTools.o : ${SRCDIR}/PrintTools.f90 ${COMMONDEP}
 
@@ -478,6 +475,4 @@ ${OBJDIR}/MyConsts.o : ${SRCDIR}/MyConsts.f90 ${OBJDIR}/ErrorTrap.o Makefile
 # Set error and warning procedures
 ${OBJDIR}/ErrorTrap.o : ${SRCDIR}/ErrorTrap.f90 Makefile
 
-# Derivatives with finite difference methods
-${OBJDIR}/DifferenceDerivatives.o : ${SRCDIR}/DifferenceDerivatives.f90 ${COMMONDEP}
 
