@@ -416,8 +416,9 @@ MODULE ScatteringSimulation
             END IF
 
             ! During equilibration, fix H in asymptotic position with null velocity
-            X(1:3) = AsymptoticCH( 1, 1:3 )
-            V(1:3) = 0.0
+            ! and initialize carbon atom in the equilibrium position with null velocity
+            X(1:4) = AsymptoticCH( 1, 1:4 )
+            V(1:4) = 0.0
 
             IF ( BathType /= LANGEVIN_DYN ) THEN 
 
