@@ -54,6 +54,13 @@ PROGRAM JK6_v3
    PRINT "(/,     '                    ==============================')"
    PRINT "(       '                             fiordiligi           ')"
    PRINT "(       '                    ==============================',/)"
+
+   PRINT "(       '                        << Soave sia il vento    ')"
+   PRINT "(       '                         Tranquilla sia l'onda   ')"
+   PRINT "(       '                            Ed ogni elemento     ')"
+   PRINT "(       '                            Benigno risponda     ')"
+   PRINT "(       '                           Ai nostri desir... >> ',/)"
+
    PRINT "(       '                    Author: Matteo Bonfanti  ')"
    PRINT "(       '         ( Potential originally implemented by B.Jackson and J.Kerwin )',/)"
 

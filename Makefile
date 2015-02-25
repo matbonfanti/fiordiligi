@@ -13,7 +13,7 @@ LOGFILE = yes
 LOGNAME = fiordiligi_v3.log
 
 # Compiler ( gfortran, ifort )
-FC = gfortran     
+FC = ifort     
 
 # Debugging options ( yes or no )
 DEBUG =  no
