@@ -336,6 +336,7 @@ MODULE ScatteringSimulation
       INTEGER  ::  jRho, iTraj, iStep, kStep, iCoord
       INTEGER  ::  DebugUnitEn, DebugUnitCoord, DebugUnitVel
       REAL     ::  ImpactPar, Time, CrossSection
+      REAL     ::  RndValue, CarbonFreq
       REAL, DIMENSION(1,8)  :: AsymptoticCH
       REAL     ::  TotEnergy, PotEnergy, KinEnergy, KinHydro, KinCarbon
       REAL     ::  TempAverage, TempVariance, IstTemperature
@@ -390,44 +391,27 @@ MODULE ScatteringSimulation
             ! INITIALIZATION OF THE COORDINATES AND MOMENTA OF THE SYSTEM
             !*************************************************************
 
-            ! Set initial coordinates of C and H atoms
-            AsymptoticCH(1,1) = ImpactPar
-            AsymptoticCH(1,2) = 0.0
-            AsymptoticCH(1,3) = ZHInit
-            AsymptoticCH(1,4) = 0.0
+            ! Put zero point energy in each oscillator of the bath and in the carbon
+            IF ( (BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH) .AND. ZPECorrection ) THEN
 
-            ! Set initial velocities of C and H atoms
-            AsymptoticCH(1,5) = 0.0
-            AsymptoticCH(1,6) = 0.0
-            AsymptoticCH(1,7) = -sqrt( 2.0 * EKinZH / MassH )
-            AsymptoticCH(1,8) = 0.0
+               ! Set initial coordinates of H atom
+               X(1) = ImpactPar
+               X(2) = 0.0
+               X(3) = ZHInit
 
-            ! Set initial conditions
-            IF ( BathType == SLAB_POTENTIAL ) THEN 
-               CALL ZeroKelvinSlabConditions( X, V, AsymptoticCH, RandomNr ) 
-            ELSE IF ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
-               CALL ThermalEquilibriumBathConditions( Bath, X(5:), V(5:), Temperature, RandomNr )
-            ELSE IF ( BathType == DOUBLE_CHAIN ) THEN
-               CALL ThermalEquilibriumBathConditions( DblBath(1), X(5:NBath+4), V(5:NBath+4), Temperature, RandomNr )
-               CALL ThermalEquilibriumBathConditions( DblBath(2), X(NBath+5:2*NBath+4), V(NBath+5:2*NBath+4), &
-                                                                           Temperature, RandomNr )
-            ELSE IF ( BathType == LANGEVIN_DYN ) THEN
-               ! nothing to do
-            END IF
+               ! Set initial velocities of H atom
+               V(1) = 0.0
+               V(2) = 0.0
+               V(3) = -sqrt( 2.0 * EKinZH / MassH )
+ 
+               ! Set initial coord and vel of C atom
+               RndValue = UniformRandomNr( RandomNr )*2.0*MyConsts_PI
+               CarbonFreq = SQRT( CarbonForceConstant() / MassC )
+               X(4) = COS(RndValue)/SQRT(MassC*CarbonFreq)
+               V(4) = SIN(RndValue)*SQRT(CarbonFreq/MassC)
 
-            ! During equilibration, fix H in asymptotic position with null velocity
-            ! and initialize carbon atom in the equilibrium position with null velocity
-            X(1:4) = AsymptoticCH( 1, 1:4 )
-            V(1:4) = 0.0
-
-            IF ( BathType /= LANGEVIN_DYN ) THEN 
-
-               PRINT "(/,A,F6.1,1X,A)",   " Equilibrating the initial conditions at T = ", &
-                   Temperature*TemperatureConversion(InternalUnits,InputUnits), TemperUnit(InputUnits)
-
-               ! Initialize temperature average and variance
-               TempAverage = 0.0
-               TempVariance = 0.0
+               ! Set initial conditions of the bath
+               CALL ZeroKelvinBathConditions( Bath, X(5:), V(5:), ZPECorrection, RandomNr )
 
                ! Compute starting potential and forces
                A(:) = 0.0
@@ -439,39 +423,93 @@ MODULE ScatteringSimulation
                TotEnergy = PotEnergy + KinEnergy
                IstTemperature = 2.0*KinEnergy/size(X)
 
-               ! Do an equilibration run
-               EquilibrationCycle: DO iStep = 1, NrEquilibSteps
+            ELSE  ! Thermalize bath + carbon
 
-                  ! PROPAGATION for ONE TIME STEP
-                  CALL EOM_LangevinSecondOrder( Equilibration, X, V, A, ScatteringPotential, PotEnergy, RandomNr )
+               ! Set initial coordinates of C and H atoms
+               AsymptoticCH(1,1) = ImpactPar
+               AsymptoticCH(1,2) = 0.0
+               AsymptoticCH(1,3) = ZHInit
+               AsymptoticCH(1,4) = 0.0
+
+               ! Set initial velocities of C and H atoms
+               AsymptoticCH(1,5) = 0.0
+               AsymptoticCH(1,6) = 0.0
+               AsymptoticCH(1,7) = -sqrt( 2.0 * EKinZH / MassH )
+               AsymptoticCH(1,8) = 0.0
+
+               ! Set initial conditions
+               IF ( BathType == SLAB_POTENTIAL ) THEN 
+                  CALL ZeroKelvinSlabConditions( X, V, AsymptoticCH, RandomNr ) 
+               ELSE IF ( BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH ) THEN
+                  CALL ThermalEquilibriumBathConditions( Bath, X(5:), V(5:), Temperature, RandomNr )
+               ELSE IF ( BathType == DOUBLE_CHAIN ) THEN
+                  CALL ThermalEquilibriumBathConditions( DblBath(1), X(5:NBath+4), V(5:NBath+4), Temperature, RandomNr )
+                  CALL ThermalEquilibriumBathConditions( DblBath(2), X(NBath+5:2*NBath+4), V(NBath+5:2*NBath+4), &
+                                                                              Temperature, RandomNr )
+               ELSE IF ( BathType == LANGEVIN_DYN ) THEN
+                  ! nothing to do
+               END IF
+
+               ! During equilibration, fix H in asymptotic position with null velocity
+               ! and initialize carbon atom in the equilibrium position with null velocity
+               X(1:4) = AsymptoticCH( 1, 1:4 )
+               V(1:4) = 0.0
+
+               IF ( BathType /= LANGEVIN_DYN ) THEN 
+
+                  PRINT "(/,A,F6.1,1X,A)",   " Equilibrating the initial conditions at T = ", &
+                      Temperature*TemperatureConversion(InternalUnits,InputUnits), TemperUnit(InputUnits)
+
+                  ! Initialize temperature average and variance
+                  TempAverage = 0.0
+                  TempVariance = 0.0
+
+                  ! Compute starting potential and forces
+                  A(:) = 0.0
+                  PotEnergy = ScatteringPotential( X, A )
+                  A(:) = A(:) / MassVector(:)
 
                   ! compute kinetic energy and total energy
                   KinEnergy = EOM_KineticEnergy(Equilibration, V )
                   TotEnergy = PotEnergy + KinEnergy
                   IstTemperature = 2.0*KinEnergy/size(X)
 
-                  ! store temperature average and variance
-                  TempAverage = TempAverage + IstTemperature
-                  TempVariance = TempVariance + IstTemperature**2
+                  ! Do an equilibration run
+                  EquilibrationCycle: DO iStep = 1, NrEquilibSteps
 
-               END DO EquilibrationCycle
+                     ! PROPAGATION for ONE TIME STEP
+                     CALL EOM_LangevinSecondOrder( Equilibration, X, V, A, ScatteringPotential, PotEnergy, RandomNr )
 
-               PRINT "(A)", " Equilibration completed! "
+                     ! compute kinetic energy and total energy
+                     KinEnergy = EOM_KineticEnergy(Equilibration, V )
+                     TotEnergy = PotEnergy + KinEnergy
+                     IstTemperature = 2.0*KinEnergy/size(X)
 
-            END IF 
+                     ! store temperature average and variance
+                     TempAverage = TempAverage + IstTemperature
+                     TempVariance = TempVariance + IstTemperature**2
 
-            ! Compute average and standard deviation
-            TempAverage = TempAverage / NrEquilibSteps 
-            TempVariance = (TempVariance/NrEquilibSteps) - TempAverage**2
-            ! output message with average values
-            WRITE(*,500)  TempAverage*TemperatureConversion(InternalUnits,InputUnits), TemperUnit(InputUnits), &
-                          sqrt(TempVariance)*TemperatureConversion(InternalUnits,InputUnits), TemperUnit(InputUnits)
+                  END DO EquilibrationCycle
 
-            ! for the slab potential translate C2-C3-C4 plane at z=0
-            IF ( BathType == SLAB_POTENTIAL )   X(3:NDim) = X(3:NDim)  - (X(5)+X(6)+X(7))/3.0
-            ! give right initial conditions to the H atom
-            X(1:3) = AsymptoticCH( 1, 1:3 )
-            V(1:3) = AsymptoticCH( 1, 5:7 )
+                  PRINT "(A)", " Equilibration completed! "
+
+                  ! Compute average and standard deviation
+                  TempAverage = TempAverage / NrEquilibSteps 
+                  TempVariance = (TempVariance/NrEquilibSteps) - TempAverage**2
+                  ! output message with average values
+                  WRITE(*,500)  TempAverage*TemperatureConversion(InternalUnits,InputUnits), TemperUnit(InputUnits), &
+                                sqrt(TempVariance)*TemperatureConversion(InternalUnits,InputUnits), TemperUnit(InputUnits)
+
+               END IF 
+
+               ! for the slab potential translate C2-C3-C4 plane at z=0
+               IF ( BathType == SLAB_POTENTIAL )   X(3:NDim) = X(3:NDim)  - (X(5)+X(6)+X(7))/3.0
+               ! give right initial conditions to the H atom
+               X(1:3) = AsymptoticCH( 1, 1:3 )
+               V(1:3) = AsymptoticCH( 1, 5:7 )
+
+            END IF
+
 
 !           !*************************************************************
 !           ! INFORMATION ON INITIAL CONDITIONS, INITIALIZATION, OTHER...

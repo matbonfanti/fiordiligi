@@ -56,7 +56,7 @@ PROGRAM JK6_v3
    PRINT "(       '                    ==============================',/)"
 
    PRINT "(       '                        << Soave sia il vento    ')"
-   PRINT "(       '                         Tranquilla sia l'onda   ')"
+   PRINT "(       '                         Tranquilla sia l''onda   ')"
    PRINT "(       '                            Ed ogni elemento     ')"
    PRINT "(       '                            Benigno risponda     ')"
    PRINT "(       '                           Ai nostri desir... >> ',/)"
