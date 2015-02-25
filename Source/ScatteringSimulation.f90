@@ -24,6 +24,7 @@
 !>  \arg 3 February 2015 : * debug printing is now available
 !>                         * zC-f(ZH) coupling function has been added 
 !>                         * thermal initial conditions before equilibration
+!>  \arg 25 February 2015: * quasiclassical simulation in normal bath case
 !                
 !>  \todo         print XYZ file of scattering trajectory
 !>  \todo         print coupling function and its derivative
@@ -248,26 +249,26 @@ MODULE ScatteringSimulation
       IF ( BathType == SLAB_POTENTIAL .AND. DynamicsGamma /= 0.0 ) THEN 
          LangevinSwitchOn = .TRUE.
          LangevinSwitchOn( 1: MIN( 73, NCarbon )+3 ) = .FALSE.
-         CALL SetupThermostat( MolecularDynamics, DynamicsGamma, 0.0, LangevinSwitchOn )
+         CALL SetupThermostat( MolecularDynamics, DynamicsGamma, Temperature, LangevinSwitchOn )
       END IF
 
       ! Set canonical dynamics at the end of the oscillator chain or chains
       IF ( BathType == CHAIN_BATH .AND. DynamicsGamma /= 0.0 ) THEN 
          LangevinSwitchOn = .FALSE.
          LangevinSwitchOn( NDim ) = .TRUE.
-         CALL SetupThermostat( MolecularDynamics, DynamicsGamma, 0.0, LangevinSwitchOn )
+         CALL SetupThermostat( MolecularDynamics, DynamicsGamma, Temperature, LangevinSwitchOn )
       END IF
       IF ( BathType == DOUBLE_CHAIN .AND. DynamicsGamma /= 0.0 ) THEN 
          LangevinSwitchOn = .FALSE.
          LangevinSwitchOn( 4+NBath ) = .TRUE.  ! end of the first chain
          LangevinSwitchOn( NDim )    = .TRUE.  ! end of the second chain
-         CALL SetupThermostat( MolecularDynamics, DynamicsGamma, 0.0, LangevinSwitchOn )
+         CALL SetupThermostat( MolecularDynamics, DynamicsGamma, Temperature, LangevinSwitchOn )
       END IF
 
       ! In case of Langevin relaxation, switch on gamma at the carbon atom
       IF ( BathType == LANGEVIN_DYN .AND. DynamicsGamma /= 0.0 ) THEN
          LangevinSwitchOn = (/ .FALSE. , .FALSE. , .FALSE. , .TRUE. /)
-         CALL SetupThermostat( MolecularDynamics, DynamicsGamma, 0.0, LangevinSwitchOn )
+         CALL SetupThermostat( MolecularDynamics, DynamicsGamma, Temperature, LangevinSwitchOn )
       END IF
 
       ! Set variables for EOM integration with Langevin thermostat, during initial equilibration
