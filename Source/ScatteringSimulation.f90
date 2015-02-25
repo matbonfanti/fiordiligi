@@ -144,8 +144,10 @@ MODULE ScatteringSimulation
       ! READ THE VARIABLES TO SET THE INITIAL CONDITIONS OF THE SYSTEM
 
       ! Temperature of the equilibrium simulation
-      CALL SetFieldFromInput( InputData, "Temperature", Temperature )
+      CALL SetFieldFromInput( InputData, "Temperature", Temperature, 0.0 )
       Temperature = Temperature * TemperatureConversion(InputUnits, InternalUnits)
+      ! Set temperature to zero in case of a quasiclassical simulation
+      IF ( (BathType == NORMAL_BATH .OR. BathType == CHAIN_BATH) .AND. ZPECorrection ) Temperature = 0.0
 
       ! Set gamma of the equilibration Langevin dynamics
       CALL SetFieldFromInput( InputData, "EquilRelaxTime", EquilGamma)
