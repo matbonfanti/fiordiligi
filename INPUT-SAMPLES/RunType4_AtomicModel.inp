@@ -25,6 +25,12 @@ PrintType : 1
 # 5 - DOUBLE CHAIN the bath is represented as two chain both coupled to the system
 BathType : 4
 
+# 4D MODEL FOR SYSTEM POTENTIAL
+# 0 - SUDDEN MODEL - potential with all C at Z = 0.0
+# 1 - GLOBAL MINIMUM - potential with all C at the global minimum geometry
+# 2 - ADIABATIC MODEL - C positions are optimized at any given 4D configuration
+Cut4D_Model : 0
+
 # Units
 # Length: 0 = bohr, 1 = Ang
 InputLength : 1
@@ -41,7 +47,8 @@ InputTemp   : 16
 # Frequency: 17 = au, 18 = cm^-1 , 19 = fs^-1
 InputFreq   : 18
 
-# Number of carbon atoms in the cluster model of the substrate
+# Slab potential parameters
+# No of carbon atoms 
 NCarbon   : 121
 # Fixing collinear geometry variable
 Collinear : FALSE
@@ -55,12 +62,12 @@ ZHInit : 6.0
 NRhoMax : 0
 # Impact parameter grid spacing
 DeltaRho : 0.0
-
+ 
 # Evolution parameters
 # Step of the time evolution
 TimeStep : 0.01
 # Total number of time step per trajectory
-NrOfSteps  :  50000
+NrOfSteps  : 200000
 # Nr of steps between each analysis
 NrOfPrintSteps  : 1000
 # Gamma for thermostating the dynamics
@@ -86,6 +93,6 @@ Temperature : 50.0
 
 # Sampling parameters
 # number of trajectories per impact parameter
-NrTrajs   : 20
+NrTrajs   : 1000
 
 # -------------------------------- END OF INPUT FILE -------------------------------------
