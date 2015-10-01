@@ -22,7 +22,7 @@ DEBUG =  no
 OPTLEVEL = 3
 
 # linking FFTW 3.3
-FFTW3 = no
+FFTW3 = yes
 
 # OpenMP libraries
 OPENMP = no 
@@ -40,6 +40,7 @@ REAL8 = yes
 # Intel compiler version ( used only if FC=ifort and LAPACK=yes )
 # 2013-SEQ, 2013-MULTI      -   2013 version, sequential / multithreaded 
 # 11-SEQ,   11-MULTI        -   11.x version, sequential / multithreaded 
+# 11-IA32                   -   11.x ia32 arch version, sequential  
 # 10-SEQ,   10-MULTI        -   10.x version, sequential / multithreaded 
 INTELVERS = 2013-MULTI
 
@@ -91,7 +92,7 @@ ifeq (${FC},gfortran)
    endif
 
    # FFTW3 flags
-   FFTW3FLG = -lfftw3
+   FFTW3FLG = -L/usr/local/lib/ -lfftw3
    FFTW3COMPILE = -I/usr/local/include/ 
 
    # OPENMP flags
@@ -132,6 +133,10 @@ ifeq (${FC},ifort)
       LAPACKFLG = -L$(MKLROOT)/lib/intel64 -lmkl_intel_lp64 -lmkl_core -lmkl_sequential -lpthread -lm
       LAPACKCOMPILE = -I$(MKLROOT)/include
    endif
+   ifeq (${INTELVERS},11-IA32)
+      LAPACKFLG = -L${MKLROOT}/lib/ia32 -lmkl_intel -lmkl_core -lmkl_sequential -lpthread -lm 
+      LAPACKCOMPILE = -I${MKLROOT}/include
+   endif
    ifeq (${INTELVERS},11-MULTI)
       LAPACKFLG = -L$(MKLROOT)/lib/intel64 -lmkl_intel_lp64 -lmkl_core -lmkl_intel_thread -lpthread -lm
       LAPACKCOMPILE = -openmp -I$(MKLROOT)/include
@@ -146,7 +151,8 @@ ifeq (${FC},ifort)
    endif
 
    # FFTW3 flags
-   FFTW3FLG = -lfftw3
+   FFTW3FLG = -L/data/local/fftw3/lib/ -lfftw3
+   FFTW3COMPILE = -I/data/local/fftw3/include/ 
 
    # OPENMP flags
    OPENMPFLG = -openmp

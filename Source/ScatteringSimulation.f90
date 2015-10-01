@@ -335,7 +335,7 @@ MODULE ScatteringSimulation
    SUBROUTINE Scattering_Run()
       IMPLICIT NONE
       INTEGER  ::  AvHydroOutputUnit, AvCarbonOutputUnit       ! UNITs FOR OUTPUT AND DEBUG
-      INTEGER  ::  CollinearTrapUnit, CrossSectionUnit
+      INTEGER  ::  CollinearTrapUnit, CrossSectionUnit, OpacityUnit
       INTEGER  ::  jRho, iTraj, iStep, kStep, iCoord
       INTEGER  ::  DebugUnitEn, DebugUnitCoord, DebugUnitVel
       REAL     ::  ImpactPar, Time, CrossSection
@@ -726,6 +726,17 @@ MODULE ScatteringSimulation
             WRITE(CrossSectionUnit,800) TimeGrid(iStep), CrossSection
 
          END DO
+
+         ! Print to file final opacity function
+         OpacityUnit = LookForFreeUnit()
+         OPEN( FILE="OpacityFunction.dat", UNIT=OpacityUnit )
+         WRITE(OpacityUnit, "(A,F8.2,A,/)") "# opacity function @ time ", &
+            float(PrintStepInterval*iStep)*TimeStep*TimeConversion(InternalUnits,InputUnits), " "//TRIM(TimeUnit(InputUnits))
+         DO jRho = 0,NRhoMax
+           WRITE(OpacityUnit,800) ImpactParameterGrid(jRho+1), TrappingProb(jRho,NrOfPrintSteps) 
+         END DO
+         CLOSE(OpacityUnit)
+
       END IF
 
    500 FORMAT (/, " Equilibration averages                 ",/     &
