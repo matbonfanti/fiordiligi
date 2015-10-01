@@ -729,7 +729,7 @@ MODULE PotentialModule
                ! Set starting geometry
                OptCoord = (/ Positions, 0., 0., 0., TmpSlab(:) /)
                ! Optimize coordinates
-               OptCoord =  MinimizePotential( OptCoord, 10**6, 1.0E-5, OptMask )
+               OptCoord =  MinimizePotential( OptCoord, 10**6, 1.0E-6, OptMask )
 
                ! Use optimized coordinates to compute forces and energy
                V = VHSticking( OptCoord, Dummy(:) ) 

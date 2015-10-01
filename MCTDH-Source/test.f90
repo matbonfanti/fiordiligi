@@ -11,7 +11,7 @@ PROGRAM TestMCTDHFunction
    DO j = 0, 0
       zc = 0.8 + j*0.1d0
 
-      print*, "# zc = ", zC*0.52917721092d0
+!      print*, "# zc = ", zC*0.52917721092d0
 
       DO i = 0, 100
          zh = 1.0d0 + i*0.1d0
@@ -19,14 +19,21 @@ PROGRAM TestMCTDHFunction
          CALL hstick_carbon( zc, vC ) 
          CALL hstick_hydro( rho, 0.0d0, zh, vH ) 
          CALL hstick_coupling( rho, 0.0d0, zh, zc, coup ) 
-         PRINT*, zh, (vC+vH+coup)*27.21138505d0, VHTrapping( 0.0d0, 0.0d0, zh, zc )*27.21138505d0
+!         PRINT*, zh, (vC+vH+coup)*27.21138505d0, VHTrapping( 0.0d0, 0.0d0, zh, zc )*27.21138505d0
 
       END DO
 
-      PRINT*, " "
-      PRINT*, " "
-      PRINT*, " "
+!      PRINT*, " "
+!      PRINT*, " "
+!      PRINT*, " "
 
+   END DO
+
+
+   DO i = -100, 100
+       zc = i*0.03d0
+       CALL hstick_carbon( zc, vC )
+       PRINT*, zc, vC
    END DO
 
    CONTAINS

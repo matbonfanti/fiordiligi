@@ -854,10 +854,10 @@ MODULE MinimumEnergyPath
       REAL, DIMENSION(size(X)) :: NormalizedForces
       REAL :: VectorNorm
 
-      NormalizedForces(:) = Forces(:) / MassVector(:)
-      VectorNorm = SQRT(TheOneWithVectorDotVector( ConstrainedVector(NormalizedForces,Mask), &
-                     ConstrainedVector(NormalizedForces,Mask) ))
-      NormalizedForces(:) = NormalizedForces(:) / VectorNorm
+      VectorNorm = SQRT(TheOneWithVectorDotVector( ConstrainedVector(Forces,Mask), &
+                     ConstrainedVector(Forces,Mask) ))
+      NormalizedForces(:) = Forces(:) / VectorNorm
+      NormalizedForces(:) = NormalizedForces(:) / SQRT(MassVector(:))
    END FUNCTION NormalizedForces
 
 
