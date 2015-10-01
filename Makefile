@@ -13,7 +13,7 @@ LOGFILE = yes
 LOGNAME = fiordiligi_v3.log
 
 # Compiler ( gfortran, ifort )
-FC = ifort     
+FC = hilbert     
 
 # Debugging options ( yes or no )
 DEBUG =  no
@@ -196,6 +196,41 @@ ifeq (${FC},fermi)
    DATAFLG =
    ifeq (${REAL8},yes)
       DATAFLG = -r8 -i4
+   endif
+
+   # Flag to specify the position of mod files
+   MODULEFLG = -I
+
+endif
+
+ifeq (${FC},hilbert)
+
+   # Set name of the intel compiler
+   FC = ifort
+
+   # Optimization flags
+   O0FLAGS  = -O0
+   O1FLAGS  = -O1
+   O2FLAGS  = -O2
+   O3FLAGS  = -O3
+
+   # Debug flags
+   DEBUGFLG  =  -g -traceback -fpe-all=0 -debug all -check all
+
+   # Intel 11 with threading
+   LAPACKFLG = -L$(MKLROOT)/lib/intel64 -lmkl_intel_lp64 -lmkl_core -lmkl_intel_thread -lpthread -lm
+   LAPACKCOMPILE = -openmp -I$(MKLROOT)/include
+
+   # FFTW3 flags
+   FFTW3FLG = -lfftw3
+
+   # OPENMP flags
+   OPENMPFLG = -openmp
+
+   # Data type
+   DATAFLG =
+   ifeq (${REAL8},yes)
+        DATAFLG = -r8 -i4
    endif
 
    # Flag to specify the position of mod files
