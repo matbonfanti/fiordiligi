@@ -718,7 +718,7 @@ MODULE ScatteringSimulation
             ! integrate over impact parameter
             CrossSection=0.0
             DO jRho = 0, NRhoMax
-               CrossSection = CrossSection + TrappingProb(jRho,iStep)*ImpactParameterGrid(jRho)
+               CrossSection = CrossSection + TrappingProb(jRho,iStep) * float(jRho)*DeltaRho
             END DO
             CrossSection = 2.0*MyConsts_PI * DeltaRho * CrossSection * LengthConversion(InternalUnits,InputUnits)**2
 
