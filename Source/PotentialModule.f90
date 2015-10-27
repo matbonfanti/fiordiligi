@@ -318,13 +318,14 @@ MODULE PotentialModule
 
 ! ******************************************************************************************      
 
-      FUNCTION MinimizePotential( StartX, NMaxIter, GradThresh, Mask ) RESULT( MinPoint )
+      FUNCTION MinimizePotential( StartX, NMaxIter, GradThresh, Mask, NewtonOn ) RESULT( MinPoint )
          IMPLICIT NONE
 
          REAL, DIMENSION(:), INTENT(IN)    :: StartX
          INTEGER, INTENT(IN)               :: NMaxIter
          REAL, INTENT(IN)                  :: GradThresh
          LOGICAL, DIMENSION(size(StartX)), INTENT(IN) :: Mask
+         LOGICAL, INTENT(IN), OPTIONAL     :: NewtonOn
          REAL, DIMENSION(size(StartX))     :: MinPoint
 
          INTEGER :: NIter, NOpt, n, i
@@ -332,6 +333,7 @@ MODULE PotentialModule
          REAL, DIMENSION(size(StartX)) :: Forces
          REAL, DIMENSION(count(Mask)) :: WrkForces
          REAL, DIMENSION(count(Mask),count(Mask)) :: Hessian
+         LOGICAL :: DoNewton
 
 #if defined(LOG_FILE) && defined(VERBOSE_OUTPUT)
          __OPEN_LOG_FILE
@@ -377,6 +379,14 @@ MODULE PotentialModule
 
             ! When the gradient is large, switch off newton and use gradient only
             IF ( GradNorm < 1.E-2 ) THEN
+               DoNewton = .TRUE.
+            END IF
+            ! When NewtonOn is set to FALSE, Newton acceleration is switched off
+            IF ( PRESENT(NewtonOn)) THEN
+               DoNewton = DoNewton .AND. NewtonOn
+            END IF
+
+            IF ( DoNewton ) THEN
                ! Compute hessian
                Hessian = ConstrainedHessian( MinPoint, Mask ) 
                ! Compute displacement by solution of the equation Hessian * DX = - Grad

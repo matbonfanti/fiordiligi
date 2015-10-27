@@ -642,23 +642,23 @@ MODULE PotentialAnalysis
       DEALLOCATE( PotentialArray, ZHArray, ZCArray )
 
       ! ===================================================================================================
-      ! (9) ZCarbon - ZHydrogen PATH
+      ! (9) ZCarbon - ZHydrogen PATH, plotted for fixed zH-zC value
       ! ===================================================================================================
 
       Rho = 0.0
 
       ! Set grid dimensions
       NpointZH = INT((ZHmax-ZHmin)/GridSpacing) + 1
-      NpointZC = INT((0.8-0.0)/0.0001) + 1
+      NpointZC = INT((1.0+0.5)/0.0001) + 1
 
       ! Allocate temporary array to store potential data and coord grids
       ALLOCATE( PotentialArray( NpointZC ), ZCArray( NpointZC ), OptZC( NpointZH ), ZHArray( NpointZH ) )
     
       ! Define coordinate grids
-      ZCArray = (/ ( 0.0 + 0.0001*(i-1), i=1,NpointZC) /)
+      ZCArray = (/ ( -0.5 + 0.0001*(i-1), i=1,NpointZC) /)
       ZHArray = (/ ( ZHmin + GridSpacing*(j-1), j=1,NpointZH) /)
 
-      DO i = 1, NpointZH
+      DO i = NpointZH, 1, -1
 
          DO j = 1, NpointZC
             ! Set current geometry
@@ -673,54 +673,12 @@ MODULE PotentialAnalysis
 
          j = MINLOC( PotentialArray, 1 )
          OptZC(i) = ZCArray(j)
+         IF ( i == NpointZH ) EAsy = PotentialArray(j)
 
-          WRITE(ZHZCPathUnit, *) SQRT((ZHArray(i)+OptZC(i))**2 + Rho**2)*LengthConversion(InternalUnits,InputUnits), &
-                                OptZC(i)*LengthConversion(InternalUnits,InputUnits), &
-                                PotentialArray(j)*EnergyConversion(InternalUnits,InputUnits)
+          WRITE(ZHZCPathUnit, *) SQRT((ZHArray(i))**2 + Rho**2)*LengthConversion(InternalUnits,InputUnits), &
+                                 OptZC(i)*LengthConversion(InternalUnits,InputUnits), &
+                                 (PotentialArray(j) - EAsy)*EnergyConversion(InternalUnits,InputUnits)
 
-      END DO
-
-!       ! At each fixed sqrt(rho^2 + zH^2), find minimum of the potential along ZC
-! 
-!       ! Set ZH grid dimensions
-!       NpointZH = INT((ZHmax-MAX(ZHmin,1.5))/(0.1*GridSpacing)) + 1
-!       ! Allocate temporary array to store the ZH grid and the ZC of the minimum of the potential
-!       ALLOCATE( PotentialArray( NpointZC ), ZCArray( NpointZH ), ZHArray( NpointZH ), OptZC( NpointZH ) )
-!       ! Define coordinate grids
-!       ZHArray = (/ ( MAX(ZHmin,1.5) + (0.1*GridSpacing)*(j-1), j=1,NpointZH) /)
-! 
-!       DO i = 1, NpointZH
-! 
-!          ! Set starting geometry as the geometry of the minimum
-!          X = XMin 
-!          ! set coordinates for the H atom
-!          X(1:2) = 0.0
-!          X(3) = ZHArray(i)
-!          ! Set mask for optimization
-!          Mask = .FALSE.
-!          Mask(4) = .TRUE.
-! 
-!          ! Computing the energy at this geometry
-!          EMin = MinimizePotential( X, Mask ) 
-!          OptZC(i) = X(4)
-! 
-!          WRITE(ZHZCPathUnit, *) ZHArray(i)*LengthConversion(InternalUnits,InputUnits), &
-!                                 OptZC(i)*LengthConversion(InternalUnits,InputUnits), &
-!                                 Emin*EnergyConversion(InternalUnits,InputUnits)
-! 
-!       END DO
-
-      ! Set spline interpolant through the points
-      CALL SetupSpline( SplineData, ZHArray(:)+OptZC(:), OptZC )
-!       CALL SetupSpline( SplineData, ZHArray(:), OptZC )
-
-      ! Print spline interpolant
-      WRITE(ZHZCPathUnit, "(/,A)") "# Spline interpolant "
-      DO i = -NpointZH, NpointZH*20
-         ZH =  ZHmin + REAL(i)*0.05*GridSpacing
-         
-         WRITE(ZHZCPathUnit, *) SQRT(ZH**2+Rho**2)*LengthConversion(InternalUnits,InputUnits), &
-                                GetSpline( SplineData, ZH)*LengthConversion(InternalUnits,InputUnits)
       END DO
 
       ! Deallocate memory
