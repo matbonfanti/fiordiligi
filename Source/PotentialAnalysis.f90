@@ -556,9 +556,10 @@ MODULE PotentialAnalysis
          X(1:4) = XSysMin(1:4)
          DO i = -NGridPoint, NGridPoint
             X(1:4) = XSysMin(1:4) + NormalModes4D_Vecs(:,3) * REAL(i) * GridSpacing / SQRT( MassVector(1:4 ))
-            WRITE(NormalModeCutsUnit,*) REAL(i) * GridSpacing, & !*LengthConversion(InternalUnits,InputUnits), &
-                                        VHFourDimensional( X(1:4), Dummy ), &!*EnergyConversion(InternalUnits,InputUnits), &
-            ( MinimumEnergy + 0.5 * NormalModes4D_Freq(3) * (REAL(i) * GridSpacing)**2 )!*EnergyConversion(InternalUnits,InputUnits) 
+!            WRITE(NormalModeCutsUnit,*) REAL(i) * GridSpacing*LengthConversion(InternalUnits,InputUnits), &
+            WRITE(NormalModeCutsUnit,*) X(3)*LengthConversion(InternalUnits,InputUnits), &
+                                        VHFourDimensional( X(1:4), Dummy )*EnergyConversion(InternalUnits,InputUnits), &
+            ( MinimumEnergy + 0.5 * NormalModes4D_Freq(3) * (REAL(i) * GridSpacing)**2 )*EnergyConversion(InternalUnits,InputUnits) 
          END DO
          PRINT "(A)"," Written cut along 3rd normal mode to file NormalModeCuts.dat "
 
@@ -566,9 +567,10 @@ MODULE PotentialAnalysis
          X(1:4) = XSysMin(1:4)
          DO i = -NGridPoint, NGridPoint
             X(1:4) = XSysMin(1:4) + NormalModes4D_Vecs(:,4) * REAL(i) * GridSpacing / SQRT( MassVector(1:4 ))
-            WRITE(NormalModeCutsUnit,*) REAL(i) * GridSpacing, & !*LengthConversion(InternalUnits,InputUnits), &
-                                        VHFourDimensional( X(1:4), Dummy ), & !*EnergyConversion(InternalUnits,InputUnits), &
-            ( MinimumEnergy + 0.5 * NormalModes4D_Freq(4) * (REAL(i) * GridSpacing)**2 )!*EnergyConversion(InternalUnits,InputUnits) 
+!            WRITE(NormalModeCutsUnit,*) REAL(i) * GridSpacing*LengthConversion(InternalUnits,InputUnits), &
+            WRITE(NormalModeCutsUnit,*) X(3)*LengthConversion(InternalUnits,InputUnits), &
+                                        VHFourDimensional( X(1:4), Dummy )*EnergyConversion(InternalUnits,InputUnits), &
+            ( MinimumEnergy + 0.5 * NormalModes4D_Freq(4) * (REAL(i) * GridSpacing)**2 )*EnergyConversion(InternalUnits,InputUnits) 
          END DO
          PRINT "(A)"," Written cut along 4th normal mode to file NormalModeCuts.dat "
 

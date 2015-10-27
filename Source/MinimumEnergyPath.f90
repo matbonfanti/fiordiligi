@@ -141,7 +141,7 @@ MODULE MinimumEnergyPath
 !*******************************************************************************
    SUBROUTINE MinimumEnergyPath_Run()
       IMPLICIT NONE
-      INTEGER :: MEPFullUnit, TSFullUnit
+      INTEGER :: MEPFullUnit, TSFullUnit, AsymptoticEUnit
 
       REAL, DIMENSION(NDim)      :: XMin, XAsy, XTS, MEPX
       REAL :: Emin, Easy, ETS, EMEP
@@ -206,6 +206,19 @@ MODULE MinimumEnergyPath
                    XMin(4)*LengthConversion(InternalUnits,InputUnits), LengthUnit(InputUnits),           &
                    (XMin(3)-XMin(4))*LengthConversion(InternalUnits,InputUnits), LengthUnit(InputUnits) 
 
+      PRINT "(/,A)",    " writing potential for H approach with slab in fixed asymptotic coordinates"
+
+      AsymptoticEUnit = LookForFreeUnit()
+      OPEN( FILE="Asymptote.dat", UNIT=AsymptoticEUnit )
+
+      DO iStep = 1,100
+        X(:) = XAsy(:)
+        X(3) = 4.0 + float(iStep)*0.1
+        WRITE(AsymptoticEUnit,*) X(3)*LengthConversion(InternalUnits,InputUnits),                        &
+                                 HStickPotential( X, A )*EnergyConversion(InternalUnits,InputUnits)
+      END DO
+
+      CLOSE( AsymptoticEUnit )
 
       ! ===================================================================================================
       ! (2) look for the transition state of the potential energy surface 
