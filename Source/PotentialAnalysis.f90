@@ -158,20 +158,20 @@ MODULE PotentialAnalysis
       INTEGER :: i, j, nPoint
 
       AsyPhononSpectrumUnit = LookForFreeUnit()
-      OPEN( FILE="AsymptoticPhononSpectrum.dat", UNIT=AsyPhononSpectrumUnit )
+      OPEN( FILE="PhononSpectrum_Asymptote.dat", UNIT=AsyPhononSpectrumUnit )
       WRITE(AsyPhononSpectrumUnit, "(A,/)") "# Slab harmonic phonon spectrum, asymptotic geometry "
       MinPhononSpectrumUnit = LookForFreeUnit()
-      OPEN( FILE="InteractionPhononSpectrum.dat", UNIT=MinPhononSpectrumUnit )
+      OPEN( FILE="PhononSpectrum_Interaction.dat", UNIT=MinPhononSpectrumUnit )
       WRITE(MinPhononSpectrumUnit, "(A,/)") "# Slab harmonic phonon spectrum, adsorption minimum geometry "
       SDCouplingUnit = LookForFreeUnit()
-      OPEN( FILE="SpectralDensityCoupling.dat", UNIT=SDCouplingUnit )
+      OPEN( FILE="PhonoSpectrum_SpectDensCoupling.dat", UNIT=SDCouplingUnit )
       WRITE(SDCouplingUnit, "(A,/)") "# Spectral density of the coupling "
 
       NormalModeCutsUnit = LookForFreeUnit()
-      OPEN( FILE="NormalModeCuts.dat", UNIT=NormalModeCutsUnit )
+      OPEN( FILE="Cuts_NormalMode.dat", UNIT=NormalModeCutsUnit )
       WRITE(NormalModeCutsUnit, "(A,/)") "# Potential cuts along the normal modes "
       CartesianCutsUnit = LookForFreeUnit()
-      OPEN( FILE="CartesianCuts.dat", UNIT=CartesianCutsUnit )
+      OPEN( FILE="Cuts_Cartesian.dat", UNIT=CartesianCutsUnit )
       WRITE(CartesianCutsUnit, "(A,/)") "# Potential cuts along the cartesian coordinates "
 
       ZHZCPathUnit = LookForFreeUnit()
@@ -357,9 +357,9 @@ MODULE PotentialAnalysis
          IF ( EigenFreq(iEigen) < 0.0 ) THEN
             WRITE(*,503)  iEigen, SQRT(-EigenFreq(iEigen))*FreqConversion(InternalUnits,InputUnits), FreqUnit(InputUnits)
          ELSE
-            WRITE(742,*) 0.0, SQRT(EigenFreq(iEigen))*FreqConversion(InternalUnits,InputUnits)
-            WRITE(742,*) 1.0, SQRT(EigenFreq(iEigen))*FreqConversion(InternalUnits,InputUnits)
-            WRITE(742,*) " "   
+!             WRITE(742,*) 0.0, SQRT(EigenFreq(iEigen))*FreqConversion(InternalUnits,InputUnits)
+!             WRITE(742,*) 1.0, SQRT(EigenFreq(iEigen))*FreqConversion(InternalUnits,InputUnits)
+!             WRITE(742,*) " "   
          END IF
       END DO
 
@@ -380,7 +380,7 @@ MODULE PotentialAnalysis
 
       END DO
 
-      PRINT "(/,A,/)"," Phonon spectrum written to file AsymptoticPhononSpectrum.dat"
+      PRINT "(/,A,/)"," Phonon spectrum written to file PhononSpectrum_Asymptote.dat"
 
       DEALLOCATE( EigenFreq, EigenModes )
 
@@ -402,9 +402,9 @@ MODULE PotentialAnalysis
          IF ( EigenFreq(iEigen) < 0.0 ) THEN
             WRITE(*,503)  iEigen, SQRT(-EigenFreq(iEigen))*FreqConversion(InternalUnits,InputUnits), FreqUnit(InputUnits)
          ELSE
-            WRITE(743,*) 1.0, SQRT(EigenFreq(iEigen))*FreqConversion(InternalUnits,InputUnits)
-            WRITE(743,*) 2.0, SQRT(EigenFreq(iEigen))*FreqConversion(InternalUnits,InputUnits)
-            WRITE(743,*) " "   
+!             WRITE(743,*) 1.0, SQRT(EigenFreq(iEigen))*FreqConversion(InternalUnits,InputUnits)
+!             WRITE(743,*) 2.0, SQRT(EigenFreq(iEigen))*FreqConversion(InternalUnits,InputUnits)
+!             WRITE(743,*) " "   
          END IF
       END DO
 
@@ -425,7 +425,7 @@ MODULE PotentialAnalysis
 
       END DO
 
-      PRINT "(/,A,/)"," Phonon spectrum written to file InteractionPhononSpectrum.dat"
+      PRINT "(/,A,/)"," Phonon spectrum written to file PhononSpectrum_Interaction.dat"
 
       DEALLOCATE( EigenFreq, EigenModes )
 
@@ -448,7 +448,6 @@ MODULE PotentialAnalysis
          EigenFreq = 0.0
          EigenModes = 0.0
          CALL TheOneWithDiagonalization( HessianSysAndSlab(5:NDim,5:NDim), EigenModes(5:NDim,5:NDim), EigenFreq(5:NDim) )
-!          CALL TheOneWithDiagonalization( HessianSysAndSlab, EigenModes, EigenFreq )
 
          ! Count positive frequencies
          NrOfModes = 0
@@ -467,19 +466,6 @@ MODULE PotentialAnalysis
          SystemCoord(:) = 0.0
          SystemCoord(4) = 1.0
 
-         ! Trasform normal mode definition to non mass scaled coordinate
-!          DO iEigen = 1, size(EigenFreq)
-!             Norm = 0.0
-!             DO i = 1, 3 
-!                EigenModes(i,iEigen) = EigenModes(i,iEigen) * SQRT(MassH)
-!                Norm = Norm + EigenModes(i,iEigen)**2
-!             END DO
-!             DO i = 4, size(EigenFreq)
-!                EigenModes(i,iEigen) = EigenModes(i,iEigen) * SQRT(MassC)
-!                Norm = Norm + EigenModes(i,iEigen)**2
-!             END DO
-!             IF ( Norm > 1.E-12 )  EigenModes(:,iEigen) = EigenModes(:,iEigen) / SQRT(Norm)
-!          END DO
          PRINT "(A)", " Data is written for peaks with I > 1.E-12 "
 
          PRINT "(/,A,A,A)","  # mode   |  frequency (",TRIM(FreqUnit(InputUnits)),") |   intensity (au) "
@@ -517,7 +503,7 @@ MODULE PotentialAnalysis
 
          END DO
 
-         PRINT "(/,A,/)"," Phonon spectrum written to file SpectralDensityCoupling.dat"
+         PRINT "(/,A,/)"," Phonon spectrum written to file PhonoSpectrum_SpectDensCoupling.dat"
 
          DEALLOCATE( OmegaK, CoeffK, IntensityK )
          CLOSE(SDCouplingUnit)
@@ -539,7 +525,7 @@ MODULE PotentialAnalysis
             WRITE(CartesianCutsUnit,*) X(3)*LengthConversion(InternalUnits,InputUnits), &
                                        VHFourDimensional( X(1:4), Dummy )*EnergyConversion(InternalUnits,InputUnits)
          END DO
-         PRINT "(A)"," Written cut along zH to file NormalModeCuts.dat "
+         PRINT "(A)"," Written cut along zH to file Cuts_Cartesian.dat "
 
          X(1:4) = XSysMin(1:4)
          WRITE(CartesianCutsUnit, "(/,A,I6,A)") "# Cut along zC at equilibrium slab geom - ", 2*NGridPoint+1, " pts (Ang | eV)"
@@ -549,7 +535,7 @@ MODULE PotentialAnalysis
             WRITE(CartesianCutsUnit,*) X(4)*LengthConversion(InternalUnits,InputUnits), &
                                        VHFourDimensional( X(1:4), Dummy )*EnergyConversion(InternalUnits,InputUnits)
          END DO
-         PRINT "(A)"," Written cut along zH to file CartesianCuts.dat "
+         PRINT "(A)"," Written cut along zH to file Cuts_Cartesian.dat "
 
 
          WRITE(NormalModeCutsUnit, "(/,A,I6,A)") "# Cut along normal mode 3 - ", 2*NGridPoint+1, " pts (Ang | eV)"
@@ -561,7 +547,7 @@ MODULE PotentialAnalysis
                                         VHFourDimensional( X(1:4), Dummy )*EnergyConversion(InternalUnits,InputUnits), &
             ( MinimumEnergy + 0.5 * NormalModes4D_Freq(3) * (REAL(i) * GridSpacing)**2 )*EnergyConversion(InternalUnits,InputUnits) 
          END DO
-         PRINT "(A)"," Written cut along 3rd normal mode to file NormalModeCuts.dat "
+         PRINT "(A)"," Written cut along 3rd normal mode to file Cuts_NormalMode.dat "
 
          WRITE(NormalModeCutsUnit, "(/,A,I6,A)") "# Cut along normal mode 4 - ", 2*NGridPoint+1, " pts (Ang | eV)"
          X(1:4) = XSysMin(1:4)
@@ -572,7 +558,7 @@ MODULE PotentialAnalysis
                                         VHFourDimensional( X(1:4), Dummy )*EnergyConversion(InternalUnits,InputUnits), &
             ( MinimumEnergy + 0.5 * NormalModes4D_Freq(4) * (REAL(i) * GridSpacing)**2 )*EnergyConversion(InternalUnits,InputUnits) 
          END DO
-         PRINT "(A)"," Written cut along 4th normal mode to file NormalModeCuts.dat "
+         PRINT "(A)"," Written cut along 4th normal mode to file Cuts_NormalMode.dat "
 
       END IF
 
@@ -740,122 +726,122 @@ MODULE PotentialAnalysis
       ! Deallocate memory
       DEALLOCATE( ZHArray, ZCArray, PotentialArray )
 
-      ! ===================================================================================================
-      ! (10) 2D coupling potential in VTK format
-      ! ===================================================================================================
-
-      IF ( BathType ==  SLAB_POTENTIAL ) THEN
-
-         CALL VTK_NewCollection ( CouplingV, 2, "CouplingV" )
-
-         Qmin = -2.0
-         Qmax = 2.0
-
-         ! Set grid dimensions
-         NpointZH = INT((ZHmax-ZHmin)/GridSpacing) + 1
-         NpointZC = INT((ZCmax-ZCmin)/GridSpacing) + 1
-         NpointQ  = INT((Qmax-Qmin)  /GridSpacing) + 1
-
-         ! Allocate temporary array to store coord grids
-         ALLOCATE( ZCArray( NpointZC ), ZHArray( NpointZH ), QArray( NpointQ ) )
-         ! Define coordinate grids
-         ZCArray = (/ ( ZCmin + GridSpacing*(i-1), i=1,NpointZC) /)
-         ZHArray = (/ ( ZHmin + GridSpacing*(j-1), j=1,NpointZH) /)
-         QArray  = (/ ( Qmin  + GridSpacing*(j-1), j=1,NpointQ)  /)
-
-         ! A) Coupling potential as function of Q and ZH
-
-         ! Allocate temporary array to store potential data
-         ALLOCATE( PotentialArray( NpointZH * NpointQ ) )
-
-         ! fix coordinates 
-         X(1:4) = (/ 0.0, 0.0, HZEquilibrium, C1Puckering /)
-         X(5:NDim) = MinSlab(1:NBath)
-         PotEnergy = VibrRelaxPotential( X, A )
-
-         ! Open VTK file
-         CALL VTK_NewRectilinearSnapshot ( CouplingV, X=ZHArray*LengthConversion(InternalUnits,InputUnits),  & 
-                                   Y=QArray*LengthConversion(InternalUnits,InputUnits), FileName="GraphiteHCouplingV_ZH" )
-
-         nPoint = 0
-         ! Cycle over the ZC coordinate values
-         DO i = 1, NpointQ
-            ! Cycle over the ZH coordinate values
-            DO j = 1, NpointZH
-               nPoint = nPoint + 1
-               ! Set collinear H and other Cs in ideal geometry
-               X(5:7) = QArray(i)
-               X(3) = ZHArray(j)
-               ! Compute potential at current geometry
-               PotentialArray(nPoint) = VibrRelaxPotential( X, A )
-               ! Remove potential of the system
-               X(5:NDim) = MinSlab(1:NBath)
-               X(3) = ZHArray(j)
-               PotentialArray(nPoint) = PotentialArray(nPoint) - VibrRelaxPotential( X, A )
-               ! Remove potential of the slab
-               X(1:4) = (/ 0.0, 0.0, HZEquilibrium, C1Puckering /)
-               X(5:7) = QArray(i)
-               PotentialArray(nPoint) = PotentialArray(nPoint) - VibrRelaxPotential( X, A )
-               ! shoft the V of  the equilibrium geometry to zero
-               PotentialArray(nPoint) = PotentialArray(nPoint) + PotEnergy
-            END DO
-         END DO
-
-         ! Print the potential to vtk file
-         CALL VTK_AddScalarField (CouplingV, Name="CHPotential", &
-                           Field=PotentialArray*EnergyConversion(InternalUnits,InputUnits) )
-
-         DEALLOCATE( PotentialArray )
-
-         ! A) Coupling potential as function of Q and ZH
-
-         ! Allocate temporary array to store potential data
-         ALLOCATE( PotentialArray( NpointZC * NpointQ ) )
-
-         ! fix coordinates 
-         X(1:4) = (/ 0.0, 0.0, HZEquilibrium, C1Puckering /)
-         X(5:NDim) = MinSlab(1:NBath)
-
-         ! Open VTK file
-         CALL VTK_NewRectilinearSnapshot ( CouplingV, X=ZCArray*LengthConversion(InternalUnits,InputUnits),  & 
-                                   Y=QArray*LengthConversion(InternalUnits,InputUnits), FileName="GraphiteHCouplingV_ZC" )
-
-         nPoint = 0
-         ! Cycle over the ZC coordinate values
-         DO i = 1, NpointQ
-            ! Cycle over the ZH coordinate values
-            DO j = 1, NpointZC
-               nPoint = nPoint + 1
-               ! Set collinear H and other Cs in ideal geometry
-               X(5:7) = QArray(i)
-               X(4) = ZCArray(j)
-               ! Compute potential at current geometry
-               PotentialArray(nPoint) = VibrRelaxPotential( X, A )
-               ! Remove potential of the system
-               X(5:NDim) = MinSlab(1:NBath)
-               X(4) = ZCArray(j)
-               PotentialArray(nPoint) = PotentialArray(nPoint) - VibrRelaxPotential( X, A )
-               ! Remove potential of the slab
-               X(1:4) = (/ 0.0, 0.0, HZEquilibrium, C1Puckering /)
-               X(5:7) = QArray(i)
-               PotentialArray(nPoint) = PotentialArray(nPoint) - VibrRelaxPotential( X, A )
-               ! shoft the V of  the equilibrium geometry to zero
-               PotentialArray(nPoint) = PotentialArray(nPoint) + PotEnergy
-            END DO
-         END DO
-
-         ! Print the potential to vtk file
-         CALL VTK_AddScalarField (CouplingV, Name="CHPotential", &
-                           Field=PotentialArray*EnergyConversion(InternalUnits,InputUnits) )
-
-         DEALLOCATE( PotentialArray )
-     
-         WRITE(*,"(/,A)") " * Coupling V written as VTR to file GraphiteHCouplingV_ZH.vtr and GraphiteHCouplingV_ZC.vtr"
-
-         ! Deallocate memory
-         DEALLOCATE( QArray, ZHArray, ZCArray )
-
-      ENDIF
+!       ! ===================================================================================================
+!       ! (10) 2D coupling potential in VTK format
+!       ! ===================================================================================================
+! 
+!       IF ( BathType ==  SLAB_POTENTIAL ) THEN
+! 
+!          CALL VTK_NewCollection ( CouplingV, 2, "CouplingV" )
+! 
+!          Qmin = -2.0
+!          Qmax = 2.0
+! 
+!          ! Set grid dimensions
+!          NpointZH = INT((ZHmax-ZHmin)/GridSpacing) + 1
+!          NpointZC = INT((ZCmax-ZCmin)/GridSpacing) + 1
+!          NpointQ  = INT((Qmax-Qmin)  /GridSpacing) + 1
+! 
+!          ! Allocate temporary array to store coord grids
+!          ALLOCATE( ZCArray( NpointZC ), ZHArray( NpointZH ), QArray( NpointQ ) )
+!          ! Define coordinate grids
+!          ZCArray = (/ ( ZCmin + GridSpacing*(i-1), i=1,NpointZC) /)
+!          ZHArray = (/ ( ZHmin + GridSpacing*(j-1), j=1,NpointZH) /)
+!          QArray  = (/ ( Qmin  + GridSpacing*(j-1), j=1,NpointQ)  /)
+! 
+!          ! A) Coupling potential as function of Q and ZH
+! 
+!          ! Allocate temporary array to store potential data
+!          ALLOCATE( PotentialArray( NpointZH * NpointQ ) )
+! 
+!          ! fix coordinates 
+!          X(1:4) = (/ 0.0, 0.0, HZEquilibrium, C1Puckering /)
+!          X(5:NDim) = MinSlab(1:NBath)
+!          PotEnergy = VibrRelaxPotential( X, A )
+! 
+!          ! Open VTK file
+!          CALL VTK_NewRectilinearSnapshot ( CouplingV, X=ZHArray*LengthConversion(InternalUnits,InputUnits),  & 
+!                                    Y=QArray*LengthConversion(InternalUnits,InputUnits), FileName="GraphiteHCouplingV_ZH" )
+! 
+!          nPoint = 0
+!          ! Cycle over the ZC coordinate values
+!          DO i = 1, NpointQ
+!             ! Cycle over the ZH coordinate values
+!             DO j = 1, NpointZH
+!                nPoint = nPoint + 1
+!                ! Set collinear H and other Cs in ideal geometry
+!                X(5:7) = QArray(i)
+!                X(3) = ZHArray(j)
+!                ! Compute potential at current geometry
+!                PotentialArray(nPoint) = VibrRelaxPotential( X, A )
+!                ! Remove potential of the system
+!                X(5:NDim) = MinSlab(1:NBath)
+!                X(3) = ZHArray(j)
+!                PotentialArray(nPoint) = PotentialArray(nPoint) - VibrRelaxPotential( X, A )
+!                ! Remove potential of the slab
+!                X(1:4) = (/ 0.0, 0.0, HZEquilibrium, C1Puckering /)
+!                X(5:7) = QArray(i)
+!                PotentialArray(nPoint) = PotentialArray(nPoint) - VibrRelaxPotential( X, A )
+!                ! shoft the V of  the equilibrium geometry to zero
+!                PotentialArray(nPoint) = PotentialArray(nPoint) + PotEnergy
+!             END DO
+!          END DO
+! 
+!          ! Print the potential to vtk file
+!          CALL VTK_AddScalarField (CouplingV, Name="CHPotential", &
+!                            Field=PotentialArray*EnergyConversion(InternalUnits,InputUnits) )
+! 
+!          DEALLOCATE( PotentialArray )
+! 
+!          ! A) Coupling potential as function of Q and ZH
+! 
+!          ! Allocate temporary array to store potential data
+!          ALLOCATE( PotentialArray( NpointZC * NpointQ ) )
+! 
+!          ! fix coordinates 
+!          X(1:4) = (/ 0.0, 0.0, HZEquilibrium, C1Puckering /)
+!          X(5:NDim) = MinSlab(1:NBath)
+! 
+!          ! Open VTK file
+!          CALL VTK_NewRectilinearSnapshot ( CouplingV, X=ZCArray*LengthConversion(InternalUnits,InputUnits),  & 
+!                                    Y=QArray*LengthConversion(InternalUnits,InputUnits), FileName="GraphiteHCouplingV_ZC" )
+! 
+!          nPoint = 0
+!          ! Cycle over the ZC coordinate values
+!          DO i = 1, NpointQ
+!             ! Cycle over the ZH coordinate values
+!             DO j = 1, NpointZC
+!                nPoint = nPoint + 1
+!                ! Set collinear H and other Cs in ideal geometry
+!                X(5:7) = QArray(i)
+!                X(4) = ZCArray(j)
+!                ! Compute potential at current geometry
+!                PotentialArray(nPoint) = VibrRelaxPotential( X, A )
+!                ! Remove potential of the system
+!                X(5:NDim) = MinSlab(1:NBath)
+!                X(4) = ZCArray(j)
+!                PotentialArray(nPoint) = PotentialArray(nPoint) - VibrRelaxPotential( X, A )
+!                ! Remove potential of the slab
+!                X(1:4) = (/ 0.0, 0.0, HZEquilibrium, C1Puckering /)
+!                X(5:7) = QArray(i)
+!                PotentialArray(nPoint) = PotentialArray(nPoint) - VibrRelaxPotential( X, A )
+!                ! shoft the V of  the equilibrium geometry to zero
+!                PotentialArray(nPoint) = PotentialArray(nPoint) + PotEnergy
+!             END DO
+!          END DO
+! 
+!          ! Print the potential to vtk file
+!          CALL VTK_AddScalarField (CouplingV, Name="CHPotential", &
+!                            Field=PotentialArray*EnergyConversion(InternalUnits,InputUnits) )
+! 
+!          DEALLOCATE( PotentialArray )
+!      
+!          WRITE(*,"(/,A)") " * Coupling V written as VTR to file GraphiteHCouplingV_ZH.vtr and GraphiteHCouplingV_ZC.vtr"
+! 
+!          ! Deallocate memory
+!          DEALLOCATE( QArray, ZHArray, ZCArray )
+! 
+!       ENDIF
 
       CLOSE(MinPhononSpectrumUnit)
       CLOSE(AsyPhononSpectrumUnit)
