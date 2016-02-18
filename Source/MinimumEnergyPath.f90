@@ -82,6 +82,7 @@ MODULE MinimumEnergyPath
    SUBROUTINE MinimumEnergyPath_ReadInput( InputData )
       IMPLICIT NONE
       TYPE(InputFile), INTENT(INOUT) :: InputData
+      REAL :: LengthConv
 
       ! Set variables for Transition State restart
       CALL SetFieldFromInput( InputData, "FullPES_TSRestartFile", FullPES_TSRestartFile, "NO_RESTART" )
@@ -90,11 +91,29 @@ MODULE MinimumEnergyPath
       ! Set variables for minima and TS optimization
       CALL SetFieldFromInput( InputData, "MaxOptSteps", MaxOptSteps, 10**6 )
       CALL SetFieldFromInput( InputData, "OptThreshold", OptThreshold, 1.E-6 )
+      OptThreshold = OptThreshold * ForceConversion(InputUnits, InternalUnits)
 
       ! Set variables for Minimum Energy Path computation
       CALL SetFieldFromInput( InputData, "MaxMEPNrSteps", MaxMEPNrSteps, 1000 )
       CALL SetFieldFromInput( InputData, "MEPStep", MEPStep, 0.001 )
       MEPStep = MEPStep * LengthConversion(InputUnits, InternalUnits)
+
+      ! SCREEN LOG OF THE INPUT VARIABLES
+      
+      LengthConv = LengthConversion(InternalUnits,InputUnits)
+      
+      WRITE(*, 901) MaxOptSteps, OptThreshold*ForceConversion(InternalUnits,InputUnits), &
+                    TRIM(EnergyUnit(InputUnits))//"/"//TRIM(LengthUnit(InputUnits))
+                    
+      WRITE(*, 902) MEPStep*LengthConv, LengthUnit(InputUnits), MaxMEPNrSteps
+
+      901 FORMAT(" * Stationary states optimization with Newton's method ",     /,&
+                 " * Max nr of steps of the optimization:          ",I10,       /,&
+                 " * Threshold on the gradient:                    ",F10.4,1X,A,/)
+
+      902 FORMAT(" * Minimum energy path computation ",                         /,&
+                 " * Length of the 4th order RK integration step:  ",F10.4,1X,A,/,&
+                 " * Max nr of integration steps:                  ",I10,       / )
 
    END SUBROUTINE MinimumEnergyPath_ReadInput
 
