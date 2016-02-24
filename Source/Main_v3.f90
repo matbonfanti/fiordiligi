@@ -1,7 +1,7 @@
 !***************************************************************************************
 !*                              PROGRAM fiordiligi
 !***************************************************************************************
-!>  \mainpage      Program fiordiligi - version 3
+!>  \mainpage      Program fiordiligi
 !>
 !>  Classical simulations of H + graphene system + dissipative bath       \n
 !>  * Model: 3D for H + 1D Z coordinate for carbon atom                   \n
@@ -16,7 +16,7 @@
 !>
 !>
 !***************************************************************************************
-PROGRAM JK6_v3
+PROGRAM fiordiligi
    USE MyConsts
    USE ErrorTrap
    USE SharedData
@@ -54,15 +54,17 @@ PROGRAM JK6_v3
    PRINT "(/,     '                    ==============================')"
    PRINT "(       '                             fiordiligi           ')"
    PRINT "(       '                    ==============================',/)"
+   PRINT "(       '                       Author: Matteo Bonfanti'      )"
+   PRINT "(       '         ( Potential originally implemented by B.Jackson and J.Kerwin )')"
+   PRINT "(       '                       Release: ',A)", VERSIONTAG
+   PRINT "(       '                       Compilation: ',A,1X,A,/)", __DATE__, __TIME__ 
 
-   PRINT "(       '                        << Soave sia il vento    ')"
-   PRINT "(       '                         Tranquilla sia l''onda   ')"
-   PRINT "(       '                            Ed ogni elemento     ')"
-   PRINT "(       '                            Benigno risponda     ')"
-   PRINT "(       '                           Ai nostri desir... >> ',/)"
-
-   PRINT "(       '                    Author: Matteo Bonfanti  ')"
-   PRINT "(       '         ( Potential originally implemented by B.Jackson and J.Kerwin )',/)"
+   PRINT "(       '                        << Soave sia il vento        ')"
+   PRINT "(       '                         Tranquilla sia l''onda      ')"
+   PRINT "(       '                            Ed ogni elemento         ')"
+   PRINT "(       '                            Benigno risponda         ')"
+   PRINT "(       '                           Ai nostri desir... >> ',  /)"
+   PRINT "(       '                      [Don Giovanni act I scene 1]',2/)"
 
    CALL date_and_time (values=Time1)
 
@@ -475,6 +477,6 @@ PROGRAM JK6_v3
          
    END FUNCTION TimeDifference
    
-END PROGRAM JK6_v3
+END PROGRAM fiordiligi
 
 

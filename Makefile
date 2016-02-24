@@ -6,11 +6,11 @@
 #----------------------------------------------------------------------------
 
 # Executable name
-EXENAME = fiordiligi_v3
+EXENAME = fiordiligi_$(shell git describe --tags)
 
 # Print relevant output to log file
 LOGFILE = yes
-LOGNAME = fiordiligi_v3.log
+LOGNAME = fiordiligi.log
 
 # Compiler ( gfortran, ifort )
 FC = hilbert     
@@ -250,6 +250,9 @@ endif
 #----------------------------------------------------------------------------
 
 PPDEFINE = 
+
+# Define macro for writing current version (git tag) in the code
+PPDEFINE += -DVERSIONTAG=\"$(shell git describe --tags)\"
 
 # Setup preprocessing debug options
 ifeq (${DEBUG}, yes)
