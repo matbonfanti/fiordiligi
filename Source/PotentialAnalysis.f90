@@ -157,6 +157,8 @@ MODULE PotentialAnalysis
       INTEGER :: iFreq, iEigen
       INTEGER :: i, j, nPoint
 
+      CHARACTER(100) :: OutFileName
+
       AsyPhononSpectrumUnit = LookForFreeUnit()
       OPEN( FILE="PhononSpectrum_Asymptote.dat", UNIT=AsyPhononSpectrumUnit )
       WRITE(AsyPhononSpectrumUnit, "(A,/)") "# Slab harmonic phonon spectrum, asymptotic geometry "
@@ -167,9 +169,6 @@ MODULE PotentialAnalysis
       OPEN( FILE="PhonoSpectrum_SpectDensCoupling.dat", UNIT=SDCouplingUnit )
       WRITE(SDCouplingUnit, "(A,/)") "# Spectral density of the coupling "
 
-      NormalModeCutsUnit = LookForFreeUnit()
-      OPEN( FILE="Cuts_NormalMode.dat", UNIT=NormalModeCutsUnit )
-      WRITE(NormalModeCutsUnit, "(A,/)") "# Potential cuts along the normal modes "
       CartesianCutsUnit = LookForFreeUnit()
       OPEN( FILE="Cuts_Cartesian.dat", UNIT=CartesianCutsUnit )
       WRITE(CartesianCutsUnit, "(A,/)") "# Potential cuts along the cartesian coordinates "
@@ -538,27 +537,29 @@ MODULE PotentialAnalysis
          PRINT "(A)"," Written cut along zH to file Cuts_Cartesian.dat "
 
 
-         WRITE(NormalModeCutsUnit, "(/,A,I6,A)") "# Cut along normal mode 3 - ", 2*NGridPoint+1, " pts (Ang | eV)"
+         ! cuts along the normal modes
          X(1:4) = XSysMin(1:4)
-         DO i = -NGridPoint, NGridPoint
-            X(1:4) = XSysMin(1:4) + NormalModes4D_Vecs(:,3) * REAL(i) * GridSpacing / SQRT( MassVector(1:4 ))
-!            WRITE(NormalModeCutsUnit,*) REAL(i) * GridSpacing*LengthConversion(InternalUnits,InputUnits), &
-            WRITE(NormalModeCutsUnit,*) X(3)*LengthConversion(InternalUnits,InputUnits), &
-                                        VHFourDimensional( X(1:4), Dummy )*EnergyConversion(InternalUnits,InputUnits), &
-            ( MinimumEnergy + 0.5 * NormalModes4D_Freq(3) * (REAL(i) * GridSpacing)**2 )*EnergyConversion(InternalUnits,InputUnits) 
-         END DO
-         PRINT "(A)"," Written cut along 3rd normal mode to file Cuts_NormalMode.dat "
+         MinimumEnergy = VHFourDimensional( X(1:4), Dummy )
 
-         WRITE(NormalModeCutsUnit, "(/,A,I6,A)") "# Cut along normal mode 4 - ", 2*NGridPoint+1, " pts (Ang | eV)"
-         X(1:4) = XSysMin(1:4)
-         DO i = -NGridPoint, NGridPoint
-            X(1:4) = XSysMin(1:4) + NormalModes4D_Vecs(:,4) * REAL(i) * GridSpacing / SQRT( MassVector(1:4 ))
-!            WRITE(NormalModeCutsUnit,*) REAL(i) * GridSpacing*LengthConversion(InternalUnits,InputUnits), &
-            WRITE(NormalModeCutsUnit,*) X(3)*LengthConversion(InternalUnits,InputUnits), &
-                                        VHFourDimensional( X(1:4), Dummy )*EnergyConversion(InternalUnits,InputUnits), &
-            ( MinimumEnergy + 0.5 * NormalModes4D_Freq(4) * (REAL(i) * GridSpacing)**2 )*EnergyConversion(InternalUnits,InputUnits) 
+         DO j = 1,4
+            WRITE(OutFileName,"(A,I2.2,A)") "Cuts_NormalMode",j,".dat"
+            NormalModeCutsUnit = LookForFreeUnit()
+            OPEN( FILE=TRIM(OutFileName), UNIT=NormalModeCutsUnit )
+
+            WRITE(NormalModeCutsUnit, "(/,A,I2,A,A,A,A,A,A,A,A,A)") "# Cut along normal mode ",j," - displ along norm mode (",TRIM(LengthUnit(InputUnits))// &
+                        " "//TRIM(MassUnit(InputUnits))//"^1/2","), four cartesian components (",TRIM(LengthUnit(InputUnits)),"), pot energy (", &
+                        TRIM(EnergyUnit(InputUnits)),"), harm approx (",TRIM(EnergyUnit(InputUnits)),")"
+            DO i = -NGridPoint, NGridPoint
+               X(1:4) = XSysMin(1:4) + NormalModes4D_Vecs(:,j) * REAL(i) * GridSpacing / SQRT( MassVector(1:4 ))
+               WRITE(NormalModeCutsUnit,800) REAL(i) * GridSpacing*LengthConversion(InternalUnits,InputUnits)*(MassConversion(InternalUnits,InputUnits)**0.5), &
+                              X(1:4)*LengthConversion(InternalUnits,InputUnits), &
+                              VHFourDimensional( X(1:4), Dummy )*EnergyConversion(InternalUnits,InputUnits), &
+                              ( MinimumEnergy + 0.5 * NormalModes4D_Freq(j) * (REAL(i) * GridSpacing)**2 )*EnergyConversion(InternalUnits,InputUnits) 
+            END DO
+            PRINT "(A,I2,A)"," Written cut along normal mode ",j," to file "//OutFileName
+
+            CLOSE(NormalModeCutsUnit)
          END DO
-         PRINT "(A)"," Written cut along 4th normal mode to file Cuts_NormalMode.dat "
 
       END IF
 
@@ -804,7 +805,6 @@ MODULE PotentialAnalysis
       CLOSE(MinPhononSpectrumUnit)
       CLOSE(AsyPhononSpectrumUnit)
       CLOSE(CartesianCutsUnit)
-      CLOSE(NormalModeCutsUnit)
       CLOSE(ZHZCPathUnit)
 
       500 FORMAT (/, " H-Graphite adsorption geometry and energy   ",/  &
@@ -842,6 +842,8 @@ MODULE PotentialAnalysis
                      " * Asymptotic energy:           ",1F15.6,1X,A, /, &
                      " * ZC asymptotic frequency      ",1F15.6,1X,A, /, &
                      " * ZC Force constant            ",1F15.6,1X,A     )
+
+      800 FORMAT(F12.5,1000F15.8)
 
    END SUBROUTINE PotentialAnalysis_Run
 
