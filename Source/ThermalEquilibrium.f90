@@ -318,11 +318,12 @@ MODULE ThermalEquilibrium
       INTEGER :: ZHRealizationsUnit, VZHRealizationsUnit, TEquilUnit
       INTEGER :: ZHSpectralDensUnit, CHSpectralDensUnit, FullSpectralDensUnit
       INTEGER :: DebugUnitEn, DebugUnitCoord, DebugUnitVel, DebugUnitEquil
-      INTEGER :: Q1RealizationsUnit, Q2RealizationsUnit
       INTEGER :: iTraj, iCoord, iStep, iOmega, kStep
       REAL    :: TempAverage, TempVariance, TotEnergy, PotEnergy, KinEnergy, IstTemperature
-      REAL    :: NMode1, NMode2
       CHARACTER(100) :: OutFileName
+      INTEGER             :: NMRealizationsUnit 
+      REAL, DIMENSION(4)  :: NMCoord, NMVel
+      REAL                :: NMCoordConv, NMVelConv
 
       ! Open output file to print the brownian realizations of ZH vs time
       ZHRealizationsUnit = LookForFreeUnit()
@@ -336,14 +337,13 @@ MODULE ThermalEquilibrium
 
       IF ( PrintType == NORMALMODES ) THEN
          ! Open output file to print the normal modes over time
-         Q1RealizationsUnit = LookForFreeUnit()
-         OPEN( FILE="Trajectories_Q1.dat", UNIT=Q1RealizationsUnit )
-         WRITE(Q1RealizationsUnit, "(A,I6,A,/)") "# ", NrTrajs, " realizations of Q1 (fs | Angstrom)"
-	 WRITE(*, *) "# Normal mode 3 projection on cartesian coords", NormalModes4D_Vecs(3:4,3)
-         Q2RealizationsUnit = LookForFreeUnit()
-         OPEN( FILE="Trajectories_Q2.dat", UNIT=Q2RealizationsUnit )
-         WRITE(Q2RealizationsUnit, "(A,I6,A,/)") "# ", NrTrajs, " realizations of Q2 (fs | Angstrom)"
-	 WRITE(*, *) "# Normal mode 4 projection on cartesian coords", NormalModes4D_Vecs(3:4,4)
+         NMRealizationsUnit = LookForFreeUnit()
+         OPEN( FILE="Trajectories_NM.dat", UNIT=NMRealizationsUnit )
+         WRITE(NMRealizationsUnit, "(A,I6,A,/)") "# ", NrTrajs, " realizations (fs | au ( L M^0.5 , L M^0.5 T^-1))"
+         ! Define conversion factors
+         NMCoordConv = LengthConversion(InternalUnits,InternalUnits)*(MassConversion(InternalUnits,InternalUnits)**0.5)
+         NMVelConv   = LengthConversion(InternalUnits,InternalUnits)*(MassConversion(InternalUnits,InternalUnits)**0.5) &
+                        /TimeConversion(InternalUnits,InternalUnits)
       END IF
 
       IF ( PrintType >= FULL ) THEN
@@ -523,15 +523,11 @@ MODULE ThermalEquilibrium
 
 	 IF ( PrintType == NORMALMODES ) THEN
 	    ! Compute coordinates of the normal modes
-	    NMode1 = 0.0
-	    NMode2 = 0.0
-	    DO iCoord = 1,4
-	       NMode1 = NMode1 + NormalModes4D_Vecs(iCoord,3)*X(iCoord)* SQRT(MassVector(iCoord))
-	       NMode2 = NMode2 + NormalModes4D_Vecs(iCoord,4)*X(iCoord)* SQRT(MassVector(iCoord))
-	    END DO
+            NMCoord = TheOneWithMatrixVectorProduct( TheOneWithTransposeMatrix(NormalModes4D_Vecs), SQRT(MassVector(1:4))* & 
+                       (X(1:4)-(/ 0.0, 0.0, HZEquilibrium, C1Puckering /)) ) 
+            NMVel   = TheOneWithMatrixVectorProduct( TheOneWithTransposeMatrix(NormalModes4D_Vecs), SQRT(MassVector(1:4))* V(1:4) ) 
 	    ! Write the normal mode coords to output file
-	    WRITE(Q1RealizationsUnit,"(F20.8,F20.8)") 0.0, NMode1
-	    WRITE(Q2RealizationsUnit,"(F20.8,F20.8)") 0.0, NMode2
+	    WRITE(NMRealizationsUnit,"(F20.8,8F20.8)") 0.0, NMCoord*NMCoordConv, NMVel*NMVelConv
 	 END IF
 
          IF ( PrintType >= FULL ) THEN
@@ -618,16 +614,14 @@ MODULE ThermalEquilibrium
                                                                  V(3)*MyConsts_Bohr2Ang*MyConsts_fs2AU
 
 	       IF ( PrintType == NORMALMODES ) THEN
-		  ! Compute coordinates of the normal modes
-		  NMode1 = 0.0
-		  NMode2 = 0.0
-		  DO iCoord = 1,4
-		     NMode1 = NMode1 + NormalModes4D_Vecs(iCoord,3)*X(iCoord)* SQRT(MassVector(iCoord))
-		     NMode2 = NMode2 + NormalModes4D_Vecs(iCoord,4)*X(iCoord)* SQRT(MassVector(iCoord))
-		  END DO
-		  ! Write the normal mode coords to output file
-		  WRITE(Q1RealizationsUnit,"(F20.8,F20.8)") TimeStep*real(iStep)/MyConsts_fs2AU, NMode1
-		  WRITE(Q2RealizationsUnit,"(F20.8,F20.8)") TimeStep*real(iStep)/MyConsts_fs2AU, NMode2
+                  ! Compute coordinates of the normal modes
+                  NMCoord = TheOneWithMatrixVectorProduct( TheOneWithTransposeMatrix(NormalModes4D_Vecs), SQRT(MassVector(1:4))* & 
+                             (X(1:4)-(/ 0.0, 0.0, HZEquilibrium, C1Puckering /)) ) 
+                  NMVel   = TheOneWithMatrixVectorProduct( TheOneWithTransposeMatrix(NormalModes4D_Vecs), SQRT(MassVector(1:4))* & 
+                              V(1:4)    ) 
+                  ! Write the normal mode coords to output file
+                  WRITE(NMRealizationsUnit,"(F20.8,8F20.8)") TimeStep*real(iStep)/MyConsts_fs2AU, NMCoord*NMCoordConv, &
+                              NMVel*NMVelConv
 	       END IF
 
                ! autocorrelation functions are computed only for a full output
@@ -671,8 +665,7 @@ MODULE ThermalEquilibrium
          WRITE(ZHRealizationsUnit,*)  " "
          WRITE(VZHRealizationsUnit,*)  " "
 	 IF ( PrintType == NORMALMODES ) THEN
-	    WRITE(Q1RealizationsUnit,*) " "
-	    WRITE(Q2RealizationsUnit,*) " "
+	    WRITE(NMRealizationsUnit,*) " "
 	 END IF
 
          PRINT "(A)", " Time propagation completed! "
@@ -756,8 +749,7 @@ MODULE ThermalEquilibrium
          CLOSE( FullSpectralDensUnit )
       END IF
       IF ( PrintType == NORMALMODES ) THEN
-         CLOSE( Unit=Q1RealizationsUnit )
-         CLOSE( Unit=Q2RealizationsUnit )
+         CLOSE( Unit=NMRealizationsUnit )
       END IF
 
 
