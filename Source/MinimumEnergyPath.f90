@@ -234,7 +234,7 @@ MODULE MinimumEnergyPath
         X(:) = XAsy(:)
         X(3) = 4.0 + float(iStep)*0.1
         WRITE(AsymptoticEUnit,*) X(3)*LengthConversion(InternalUnits,InputUnits),                        &
-                                 HStickPotential( X, A )*EnergyConversion(InternalUnits,InputUnits)
+                                 (HStickPotential( X, A )-Easy)*EnergyConversion(InternalUnits,InputUnits)
       END DO
 
       CLOSE( AsymptoticEUnit )
