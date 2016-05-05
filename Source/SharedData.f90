@@ -56,6 +56,9 @@ MODULE SharedData
    !> Variable to set a collinear calculation
    LOGICAL :: Collinear = .TRUE.
 
+   !> Variable to add Van Der Waals correction to the potential
+   LOGICAL :: VanDerWaals = .FALSE.
+
    !> Gamma of the relaxation during dynamics (its meaning depends on the bath representation)
    REAL    :: DynamicsGamma             
 

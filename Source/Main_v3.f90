@@ -122,6 +122,8 @@ PROGRAM fiordiligi
    CALL CheckPrintType( PrintType )
    ! Define whether the calculation is collinear or not
    CALL SetFieldFromInput( InputData, "Collinear", Collinear, .TRUE. )
+   ! Define whether the VanDerWaals potential correction is added or not
+   CALL SetFieldFromInput( InputData, "VanDerWaals", VanDerWaals, .FALSE. )
 
    ! Hydrogen and carbon masses
    CALL SetFieldFromInput( InputData, "MassH", MassH )
@@ -248,6 +250,9 @@ PROGRAM fiordiligi
       ELSE 
          WRITE(*,"(/,A)") " * Dependence of the potential on impact parameter rho is considered "
       END IF
+      IF ( VanDerWaals ) THEN
+         WRITE(*,"(/,A)") " * Van Der Waals correction is added to the potential "
+      END IF
       WRITE(*,898) MassH*MassConversion(InternalUnits, InputUnits), MassUnit(InputUnits), &
                    MassC*MassConversion(InternalUnits, InputUnits), MassUnit(InputUnits)
    END IF
@@ -347,7 +352,7 @@ PROGRAM fiordiligi
    !*************************************************************
 
    ! Setup potential energy surface
-   CALL SetupPotential(  MassH, MassC, Cut4D_Model, Collinear )
+   CALL SetupPotential(  MassH, MassC, Cut4D_Model, Collinear, VanDerWaals )
    
    ! If needed setup bath frequencies and coupling for oscillator bath models
    IF (  BathType == NORMAL_BATH ) THEN

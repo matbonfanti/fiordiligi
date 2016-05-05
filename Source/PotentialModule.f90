@@ -79,6 +79,20 @@ MODULE PotentialModule
    ! > Coordinate of the slab in the minimum
    REAL, DIMENSION(120), SAVE, PUBLIC :: MinSlab
 
+   !> Flag to switch on the VanDerWaals correction of the potential
+   LOGICAL, SAVE :: VanDerWaalsCorrect = .FALSE.
+
+!> \name VAN DER WAALS POTENTIAL
+!> Parameters of the AP correction for the dispersive interaction
+!> @{
+   ! parameters for the AP VdW correction
+   REAL, PARAMETER :: c0 = 15.4615726741
+   REAL, PARAMETER :: c1 = -0.0185949701563
+   REAL, PARAMETER :: c2 = 0.0318748893405
+   REAL, PARAMETER :: alpha0 = 9.84608039721
+   REAL, PARAMETER :: alpha1 = 0.721761422341
+!> @}
+
    INTEGER, DIMENSION(27), PARAMETER, PUBLIC :: EdgeCarbons = (/ 112, 96, 82, 97, 113, 117, 107, 105, 121, 111, 101, 84, 99, 115, &
                                                  119, 109, 108, 118, 114, 98, 83, 100, 110, 120, 104, 106, 116 /) 
 
@@ -86,10 +100,11 @@ MODULE PotentialModule
 
 ! ************************************************************************************
 
-      SUBROUTINE SetupPotential( MassHydro, MassCarb, Cut4DDefinition, Collinear )
+      SUBROUTINE SetupPotential( MassHydro, MassCarb, Cut4DDefinition, Collinear, VanDerWaals )
          IMPLICIT NONE
          REAL, INTENT(IN)     :: MassHydro, MassCarb
          LOGICAL, OPTIONAL    :: Collinear
+         LOGICAL, OPTIONAL    :: VanDerWaals
          REAL, DIMENSION(124) :: Positions
          LOGICAL, DIMENSION(124) :: OptMask
          INTEGER, INTENT(IN)  :: Cut4DDefinition
@@ -108,6 +123,13 @@ MODULE PotentialModule
             CollinearPES =  Collinear
          ELSE
             CollinearPES = .FALSE.
+         END IF
+
+         ! Setup if potential is VdW corrected or not
+         IF ( PRESENT( VanDerWaals ) ) THEN
+            VanDerWaalsCorrect = VanDerWaals
+         ELSE
+            VanDerWaalsCorrect = .FALSE.
          END IF
 
          ! Store the choice of 4D model
@@ -2262,10 +2284,6 @@ MODULE PotentialModule
          ! Total Potential 
          vv=vt+vlatt-0.5*rkc*(z(1)-qqq)**2
 
-         ! Upper and lower energy cutoff
-         if ( vv < -1.0 ) vv = -1.0
-         if ( vv > 20.0 ) vv = 20.0
-
          ! Convert total potential to AU
          vv = vv / MyConsts_Hartree2eV
 
@@ -2294,20 +2312,18 @@ MODULE PotentialModule
             END IF
          END DO
 
-!          ! Accelerations 
-!          axh=-dvvdxh/(rmh*ev_tu)
-!          ayh=-dvvdyh/(rmh*ev_tu)
-!          azh=-dvvdzh/(rmh*ev_tu)
-!          DO nn = 1, 121
-!             azc(nn)=-dvvdz(nn)/(rmc*ev_tu)
-!          END DO 
-
          ! Transform forces in atomic units (from eV Ang^-1 to Hartree Bohr^-1) 
          Forces(:) = Forces(:) * MyConsts_Bohr2Ang / MyConsts_Hartree2eV
 
-!          DO nn = 1, Size( EdgeCarbons ) 
-!             Forces(EdgeCarbons(nn)+3) = 0.0
-!          END DO
+         ! Van der Waals correction of the potential (the function VanDerWaalsPotential is already in AU )
+         IF ( VanDerWaalsCorrect ) THEN
+            vv = vv + VanDerWaalsPotential( Positions(1:4), ddz(1:4) )
+            Forces(1:4) = Forces(1:4) + ddz(1:4)
+         END IF
+
+         ! Upper and lower energy cutoff
+         if ( vv < -1.0/MyConsts_Hartree2eV ) vv = -1.0/MyConsts_Hartree2eV
+         if ( vv > 20.0/MyConsts_Hartree2eV ) vv = 20.0/MyConsts_Hartree2eV
 
       END FUNCTION VHSticking
       
@@ -2329,6 +2345,8 @@ MODULE PotentialModule
 
          ! temporary variables to store positions in Ang units
          REAL :: xh, yh, zh, zc
+
+         REAL, DIMENSION(4) :: ddz
 
          REAL :: a, b, c1, c2, d0
 
@@ -2496,11 +2514,6 @@ MODULE PotentialModule
 
          ! Total Potential 
          vv=vt
-
-         ! Upper and lower energy cutoff
-         if ( vv < -1.0 ) vv = -1.0
-         if ( vv > 20.0 ) vv = 20.0
-
          ! Convert total potential to AU
          vv = vv / MyConsts_Hartree2eV
 
@@ -2518,7 +2531,41 @@ MODULE PotentialModule
          ! Transform forces in atomic units (from eV Ang^-1 to Hartree Bohr^-1) 
          Forces(:) = Forces(:) * MyConsts_Bohr2Ang / MyConsts_Hartree2eV
 
+         ! Van der Waals correction of the potential (the function VanDerWaalsPotential is already in AU )
+         IF ( VanDerWaalsCorrect ) THEN
+            vv = vv + VanDerWaalsPotential( Positions(1:4), ddz(1:4) )
+            Forces(1:4) = Forces(1:4) + ddz(1:4)
+         END IF
+
+         ! Upper and lower energy cutoff
+         if ( vv < -1.0/MyConsts_Hartree2eV ) vv = -1.0/MyConsts_Hartree2eV
+         if ( vv > 20.0/MyConsts_Hartree2eV ) vv = 20.0/MyConsts_Hartree2eV
+
       END FUNCTION VHTrapping
+
+
+      REAL FUNCTION VanDerWaalsPotential( Positions, Forces ) RESULT(V)
+         IMPLICIT NONE
+         REAL, DIMENSION(4), INTENT(IN)  :: Positions
+         REAL, DIMENSION(4), INTENT(OUT) :: Forces
+         REAL :: r, dVdr
+
+         ! distance between H and C
+         r = sqrt( Positions(1)**2 + Positions(2)**2 + (Positions(3) - Positions(4))**2 )
+         IF ( r < 0.5 ) r = 0.5
+         ! potential
+         V = c0*exp(-alpha0*r)/r + c1*r*exp(-alpha1*r) + c2*r**2*exp(-2.0d0*alpha1*r)
+         ! derivative of the potential with respect to r
+         dVdr =  c0*(-alpha0*r - 1)*exp(-alpha0*r)/r**2       & 
+                +c1*(-alpha1*r + 1)*exp(-alpha1*r)            &
+            +2*c2*r*(-alpha1*r + 1)*exp(-2.0d0*alpha1*r)
+         ! derivatives with respect to the coordinates
+         Forces(1) = Positions(1)*dVdr/r
+         Forces(2) = Positions(2)*dVdr/r
+         Forces(3) = dVdr*(Positions(3) - Positions(4))/r
+         Forces(4) = dVdr*(-Positions(3) + Positions(4))/r
+
+      END FUNCTION VanDerWaalsPotential
 
 END MODULE PotentialModule
 
