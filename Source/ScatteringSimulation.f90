@@ -25,9 +25,19 @@
 !>                         * zC-f(ZH) coupling function has been added 
 !>                         * thermal initial conditions before equilibration
 !>  \arg 25 February 2015: * quasiclassical simulation in normal bath case
+!>  \arg 6 May 2016      : * restart run is now implemented
 !                
 !>  \todo         print XYZ file of scattering trajectory
 !>  \todo         print coupling function and its derivative
+!
+!***************************************************************************************
+!
+!>  \attention   The random number generator is restarted with the status
+!>               at the end of the previous run. When running a non collinear
+!>               calculation (NRhoMax > 0) implies that a single run is different
+!>               from two runs with the same total number of trajectories, 
+!>               because the same sequence of random number is used for 
+!>               trajectories of different rho in a different order.
 !
 !***************************************************************************************
 MODULE ScatteringSimulation
@@ -66,6 +76,12 @@ MODULE ScatteringSimulation
    REAL    :: TimeStep                  !< Time step for the integration of the classical EOM
    INTEGER :: NrOfPrintSteps            !< Nr of analysis steps
    INTEGER :: PrintStepInterval         !< Nr of tsteps between each print of propag info (=NrOfSteps/NrOfPrintSteps)
+
+   ! Variables for restart capabilities
+   LOGICAL         :: Restart           !< Logical flag to switch restart on
+   CHARACTER(100)  :: ProbRestartFile   !< Name of the file with probabilities of previous run
+   CHARACTER(100)  :: RandRestartFile   !< Name of the file with random number generator internal state
+   INTEGER         :: NrTrajRestart     !< Nr of trajectories of previous run
 
    ! Time evolution dataset
    TYPE(Evolution),SAVE :: MolecularDynamics     !< Propagate in micro/macrocanonical ensamble to extract results
@@ -167,6 +183,27 @@ MODULE ScatteringSimulation
       IF ( BathType /= LANGEVIN_DYN .AND. BathType /= SLAB_POTENTIAL ) &
                        CALL SetFieldFromInput( InputData, "ZCofZHFile", ZCofZHFile )
 #endif
+
+      ! RESTART VARIABLES 
+
+      ! flat to set the restart on
+      CALL SetFieldFromInput( InputData, "Restart", Restart, .FALSE. )
+      IF ( Restart ) THEN
+         ! nr of trajectories of previous run
+         CALL SetFieldFromInput( InputData, "NrTrajRestart", NrTrajRestart )
+         IF ( NRhoMax > 0 ) THEN             ! depending of collinear/non collinear, default file name is different
+            ! file with trapping probability as a function of impact parameter
+            CALL SetFieldFromInput( InputData, "ProbRestartFile", ProbRestartFile, "Trapping.vtr" )
+         ELSE
+            ! trapping probability only for collinear approach
+            CALL SetFieldFromInput( InputData, "ProbRestartFile", ProbRestartFile, "CollinearTrapping.dat" )
+         END IF
+         ! Random number generator restart file
+         CALL SetFieldFromInput( InputData, "RandRestartFile", RandRestartFile, "RandomNr.dat" )
+      ELSE
+         ! with no restart, set NrTrajRestart to zero
+         NrTrajRestart = 0
+      END IF
 
       WRITE(*, 902) ZHInit*LengthConversion(InternalUnits,InputUnits), LengthUnit(InputUnits), &
                     EKinZH*EnergyConversion(InternalUnits,InputUnits), EnergyUnit(InputUnits), &
@@ -291,6 +328,13 @@ MODULE ScatteringSimulation
       ALLOCATE( TrappingProb(0:NRhoMax,NrOfPrintSteps) )
       TrappingProb = 0.0
 
+      ! Read from restart file the trapping probability and remove normalization
+      IF ( Restart ) THEN
+         CALL ERROR( NrTrajRestart > NrTrajs, "Scattering_Initialize: in a restart calculation NrTrajs > NrTrajRestart" )
+         CALL ReadForRestart( TrappingProb, RandomNr ) 
+         TrappingProb(:,:) = TrappingProb(:,:) * NrTrajRestart
+      END IF
+
       ! Check that a non collinear V is considered when running a non collinear simulation
       IF (NRhoMax > 0) THEN
          CALL ERROR( Collinear, " Scattering_Initialize: a non collinear potential is needed!" )
@@ -347,21 +391,13 @@ MODULE ScatteringSimulation
       REAL, DIMENSION(NrOfPrintSteps) :: TimeGrid
       CHARACTER(100) :: OutFileName
 
-      IF ( PrintType >= FULL ) THEN
-         AvHydroOutputUnit = LookForFreeUnit()
-         OPEN( FILE="AverageHydro.dat", UNIT=AvHydroOutputUnit )
-         WRITE(AvHydroOutputUnit, "(A,I6,A,/)") "# average zH coord and vel vs time (fs | ang) - ",NrTrajs, " trajs"
-
-         AvCarbonOutputUnit = LookForFreeUnit()
-         OPEN( FILE="AverageCarbon.dat", UNIT=AvCarbonOutputUnit )
-         WRITE(AvCarbonOutputUnit, "(A,I6,A,/)") "# average zC coord and vel vs time (fs | ang) - ",NrTrajs," trajs"
-      ENDIF
-
       PRINT "(2/,A)",    "***************************************************"
       PRINT "(A,F10.5)", "         H-GRAPHITE SCATTERING SIMULATION"
       PRINT "(A,/)" ,    "***************************************************"
 
       PRINT "(A,I5,A,I5,A)"," Running ", NrTrajs, " trajectories per ",NRhoMax+1," impact parameters ... "
+      IF ( Restart ) PRINT "(A,I5,A,I5,A)"," Restarting run with ", NrTrajRestart, " and computing additional ",  &
+                                            NrTrajs-NrTrajRestart," trajectories per impact parameter"
 
       ! Initialize variables to print average results at a given impact parameter value
       AverageVCarbon(:)         = 0.0
@@ -383,10 +419,10 @@ MODULE ScatteringSimulation
             PRINT "(A,/)" ,    "***************************************************"
          END IF
 
-         PRINT "(A,I5,A)"," Running ", NrTrajs, " trajectories ... "
+         PRINT "(A,I5,A)"," Running ", NrTrajs-NrTrajRestart, " trajectories ... "
 
          ! run NTrajs number of trajectories at the current impact parameter
-         Trajectory: DO iTraj = 1, NrTrajs
+         Trajectory: DO iTraj = NrTrajRestart+1, NrTrajs
 
             PRINT "(/,A,I6,A)"," **** Trajectory Nr. ", iTraj," ****" 
 
@@ -651,12 +687,21 @@ MODULE ScatteringSimulation
          PRINT "(A)"," Done! "                                    
 
          ! Normalize coordinates averages 
-         AverageVCarbon(:) = AverageVCarbon(:)/NrTrajs
-         AverageZCarbon(:) = AverageZCarbon(:)/NrTrajs 
-         AverageVHydro(:)  = AverageVHydro(:)/NrTrajs
-         AverageZHydro(:)  = AverageZHydro(:)/NrTrajs
+         AverageVCarbon(:) = AverageVCarbon(:)/(NrTrajs-NrTrajRestart)
+         AverageZCarbon(:) = AverageZCarbon(:)/(NrTrajs-NrTrajRestart)
+         AverageVHydro(:)  = AverageVHydro(:)/(NrTrajs-NrTrajRestart)
+         AverageZHydro(:)  = AverageZHydro(:)/(NrTrajs-NrTrajRestart)
 
          IF ( PrintType >= FULL ) THEN
+
+            AvHydroOutputUnit = LookForFreeUnit()
+            OPEN( FILE="AverageHydro.dat", UNIT=AvHydroOutputUnit )
+            WRITE(AvHydroOutputUnit, "(A,I6,A,/)") "# average zH coord and vel vs time (fs | ang) - ",NrTrajs, " trajs"
+
+            AvCarbonOutputUnit = LookForFreeUnit()
+            OPEN( FILE="AverageCarbon.dat", UNIT=AvCarbonOutputUnit )
+            WRITE(AvCarbonOutputUnit, "(A,I6,A,/)") "# average zC coord and vel vs time (fs | ang) - ",NrTrajs," trajs"
+
             ! write impact parameter header in output files
             WRITE(AvHydroOutputUnit,"(/,A,F10.5)")  &
                        "# Impact parameter : ",ImpactPar*LengthConversion(InternalUnits,InputUnits)
@@ -671,6 +716,9 @@ MODULE ScatteringSimulation
                WRITE(AvCarbonOutputUnit,800) Time, AverageZCarbon(iStep)*LengthConversion(InternalUnits,InputUnits), &     
                                                 AverageVCarbon(iStep)*VelocityConversion(InternalUnits,InputUnits)
             END DO
+
+            CALL WARN( Restart, " Scattering_Run: average coord.s and vel.s computed only for the trajs of the restart run " )  
+
          END IF
 
       END DO ImpactParameter
@@ -738,6 +786,10 @@ MODULE ScatteringSimulation
          CLOSE(OpacityUnit)
 
       END IF
+
+      ! dump the random number generator internal status to file
+      CALL DumpInternalState( RandomNr, "RandomNr.dat" )
+
 
    500 FORMAT (/, " Equilibration averages                 ",/     &
                   " * Average temperature          ",1F10.4,1X,A,/ &
@@ -840,6 +892,101 @@ MODULE ScatteringSimulation
 
 !*************************************************************************************************
 
+!*******************************************************************************
+!> Restart subroutine: check that the restart is allowed and read the 
+!> probability of previous trajectories from file.
+!>
+!*******************************************************************************
+   SUBROUTINE ReadForRestart( TrappingProb, RandomNr  ) 
+      IMPLICIT NONE
+      TYPE( RNGInternalState), INTENT(INOUT) :: RandomNr
+      REAL, DIMENSION(:,:), INTENT(INOUT)    :: TrappingProb
 
+      INTEGER :: PReadUnit        ! input unit
+      CHARACTER(150) :: Dummy     ! dummy string
+      INTEGER :: ReadDataNr       ! nr of data values in the input file
+      INTEGER :: Stat             ! integer i/o status
+      REAL, DIMENSION(6) :: Numbers  ! dummy real variable
+      INTEGER :: i                ! integer counter
+
+      ! Read probability resolved over time and impact parameters from vtr file 
+      IF ( NRhoMax > 0 ) THEN    
+
+         ! Open file and look for the starting line of the "<PointData>" section
+         OPEN(Unit=PReadUnit, FILE=ProbRestartFile)
+         DO i = 1, 100000
+            READ(PReadUnit,*) Dummy
+            IF ( TRIM(ADJUSTL(Dummy)) == "<PointData>" ) EXIT
+         END DO
+         ! skip another line
+         READ(PReadUnit,*) Dummy
+
+         ! COUNT NR OF DATA IN THIS SECTION
+         ReadDataNr = 0
+         DO i = 1, 100000
+            ! read the entire line and try to convert it to 6 real numbers
+            READ(PReadUnit,"(A150)",IOSTAT=Stat) Dummy
+            READ(Dummy,*,IOSTAT=Stat) Numbers
+            ! when the conversion fails, exit from the cycle
+            IF (Stat/=0) EXIT
+            ! increment the number of input data
+            ReadDataNr = ReadDataNr + 6
+         END DO
+         ! the last line (which gave the failure) might contain a smaller number of values
+         DO i = 6,1,-1
+            READ(Dummy,*,IOSTAT=Stat) Numbers(1:i)
+            IF ( Stat == 0 ) THEN
+                ReadDataNr = ReadDataNr + i 
+                EXIT
+            END IF
+         END DO
+
+         ! CHECK THAT THE NR OF DATA CORRESPONDS TO WHAT EXPECTED
+         CALL ERROR( ReadDataNr /= size(TrappingProb,1)*size(TrappingProb,2), &
+                " ScatteringSimulation.ReadForRestart: wrong number of values in file "//TRIM(ADJUSTL(ProbRestartFile)) )
+
+         ! Again go to the beginning of the "<PointData>" section
+         REWIND(PReadUnit)
+         DO i = 1, 100000
+            READ(PReadUnit,*) Dummy
+            IF ( TRIM(ADJUSTL(Dummy)) == "<PointData>" ) EXIT
+         END DO
+         READ(PReadUnit,*) Dummy
+
+         ! Read the probability
+         READ(PReadUnit,"(1(10X,6(E15.8,X)))") TrappingProb(:,:)
+
+         ! close file
+         CLOSE(Unit=PReadUnit)
+
+      ! Read probability resolved over time for collinear approach from dat file 
+      ELSE IF ( NRhoMax == 0 ) THEN
+
+         ! Counts the number of lines with data in the input file
+         ReadDataNr = CountLinesInFile( ProbRestartFile ) - 1
+
+         PRINT*, ReadDataNr, size(TrappingProb,1)*size(TrappingProb,2)
+
+         ! CHECK THAT THE NR OF DATA CORRESPONDS TO WHAT EXPECTED
+         CALL ERROR( ReadDataNr /= size(TrappingProb,1)*size(TrappingProb,2), &
+                " ScatteringSimulation.ReadForRestart: wrong number of values in file "//TRIM(ADJUSTL(ProbRestartFile)) )
+
+         ! Open file and skip two lines
+         OPEN(Unit=PReadUnit, FILE=ProbRestartFile)
+         READ(PReadUnit,*) 
+         READ(PReadUnit,*) 
+
+         ! Read the collinear sticking probability
+         DO i = 1, ReadDataNr
+            READ(PReadUnit,*) Numbers(1:2)
+            TrappingProb(i,1) = Numbers(2)
+         END DO
+
+      END IF
+
+      ! read internal status of the randon number generator from file 
+      CALL LoadInternalState( RandomNr, RandRestartFile )
+
+   END SUBROUTINE ReadForRestart 
 
 END MODULE ScatteringSimulation
