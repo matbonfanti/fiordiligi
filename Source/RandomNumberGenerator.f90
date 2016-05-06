@@ -3,7 +3,14 @@
 !***************************************************************************************
 !
 !>  \brief     Random number generators
-!>  \details   This class defines ...
+!>  \details   This class defines the wrapper of the NR random number generator
+!>             algorithm. Current status of the generator is stored in a derived 
+!>             data type (RNGInternalState). The initial seed can be set with 
+!>             the subroutine SetSeed, for restarting the internal state can be
+!>             dumped to file and read with the sub.s DumpInternalState and 
+!>             LoadInternalState. Uniform / gaussian distributed pseudo-random
+!>             numbers are generated with UniformRandomNr and GaussianRandomNr.
+!>             Tests on the random number distributions are available.
 !
 !***************************************************************************************
 !
@@ -20,6 +27,9 @@
 !>       calls of SetSeed. Thus the module is ready to be used for parallel applications
 !>  \arg 6 November 2014 : added function to get internal state of the random number
 !>       generator
+!>  \arg May 2016 : the function to get the internal state has been modified to a 
+!>       dump file subroutine and a relate load subroutine has been added. The two 
+!>       fucntions add restarting capabilities to the RandomNumberGenerator module
 !
 !>  \todo          ....
 !>                 
@@ -40,7 +50,8 @@ MODULE RandomNumberGenerator
 
    PRIVATE
    PUBLIC :: RNGInternalState
-   PUBLIC :: SetSeed, GetInternalState, UniformRandomNr, GaussianRandomNr
+   PUBLIC :: SetSeed, UniformRandomNr, GaussianRandomNr
+   PUBLIC :: DumpInternalState, LoadInternalState
    PUBLIC :: TestGaussianDistribution, TestGaussianDistribution2, TestCorrelations
 
    ! Integer type for the random number generation
@@ -86,20 +97,56 @@ MODULE RandomNumberGenerator
       
    END SUBROUTINE SetSeed
  
+!****************************************************************************
 
-! Get internal status of the  random number generation from the internal variables
-! of the RNGInternalState data type
+! Write internal state to a dump file for easy restarting purpose
 
-   FUNCTION GetInternalState( IntState )
+   SUBROUTINE DumpInternalState( IntState, FileName )
       IMPLICIT NONE
-      INTEGER, DIMENSION(2)               :: GetInternalState
-      TYPE( RNGInternalState), INTENT(IN) :: IntState
-
-      ! Get integer variables ix and iy
-      GetInternalState(1) = IntState%ix
-      GetInternalState(2) = IntState%iy
+      TYPE(RNGInternalState), INTENT(IN) :: IntState
+      CHARACTER(*), INTENT(IN)           :: FileName
+      INTEGER :: DumpUnit
       
-   END FUNCTION GetInternalState
+      ! open dump file
+      DumpUnit = LookForFreeUnit()
+      OPEN( FILE=TRIM(ADJUSTL(FileName)), UNIT=DumpUnit )
+
+      ! write to dump file the internal state
+      WRITE(DumpUnit,*) IntState%am
+      WRITE(DumpUnit,*) IntState%ix, IntState%iy, IntState%k
+      WRITE(DumpUnit,*) IntState%seed
+      WRITE(DumpUnit,*) IntState%TempGaussian
+      WRITE(DumpUnit,*) IntState%GaussianAvail
+
+      ! close dump file
+      CLOSE( DumpUnit )
+
+   END SUBROUTINE DumpInternalState
+
+! Read internal state from a dump file for restarting purpose
+
+   SUBROUTINE LoadInternalState( IntState, FileName )
+      IMPLICIT NONE
+      TYPE(RNGInternalState), INTENT(INOUT) :: IntState
+      CHARACTER(*), INTENT(IN)              :: FileName
+      INTEGER :: DumpUnit
+
+      ! open dump file
+      DumpUnit = LookForFreeUnit()
+      OPEN( FILE=TRIM(ADJUSTL(FileName)), UNIT=DumpUnit )
+
+      ! write to dump file the internal state
+      READ(DumpUnit,*) IntState%am
+      READ(DumpUnit,*) IntState%ix, IntState%iy, IntState%k
+      READ(DumpUnit,*) IntState%seed
+      READ(DumpUnit,*) IntState%TempGaussian
+      READ(DumpUnit,*) IntState%GaussianAvail
+
+      ! close dump file
+      CLOSE( DumpUnit )
+
+   END SUBROUTINE LoadInternalState
+
   
 !****************************************************************************
 
