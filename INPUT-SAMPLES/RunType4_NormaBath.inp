@@ -103,5 +103,14 @@ ZPECorrection : TRUE
 # number of trajectories per impact parameter
 NrTrajs   : 1000
 
+# Restart input parameters
+# restart simulation from a previous run
+Restart : FALSE
+# nr of trajectories of the previous run
+NrTrajRestart : 2000
+# file with the accumulated prob of the previous run 
+# ProbRestartFile : "CollinearTrapping.dat"
+# file with the stat of the rand.nr. generator f the previous run 
+# RandRestartFile : "RandomNr.dat"
 
 # -------------------------------- END OF INPUT FILE -------------------------------------
