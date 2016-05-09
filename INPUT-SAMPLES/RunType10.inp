@@ -1,17 +1,22 @@
-# INPUT FILE for JK6_v3
+# -------------------- INPUT FILE for fiordiligi (version 3) ------------------------------
+
+# Kind of calculation
 
 # RUNTYPE
 # 1 - Equilibrium calculation with H already adsorbed
 # 2 - Test the parameters with a 1D harmonic model
 # 3 - Relaxation dynamics of a CH bound state, with the bath at 0K
 # 4 - Scattering calculation with H coming from gas-phase
-# 5 - Vibrational relaxation with ring polymer dynamics  
+# 5 - Vibrational relaxation with ring polymer dynamics
 # 10 - Static analysis of the potential
+# 11 - Computation of Minimum Energy Path of the potential
+RunType : 11
 
 # PRINTTYPE
 # 3 - DEBUG fully detailed information about each traj
 # 2 - FULL files to plot the averages over the ensamble
 # 1 - MINIMAL minimal level of output, only final averages
+PrintType : 2
 
 # BATHTYPE
 # 1 - LANGEVIN DYNAMICS - effective relaxation dynamics, with langevin eq of motion
@@ -19,19 +24,39 @@
 # 3 - NORMAL BATH bath of HO on a regular freq grid, all coupled to the system
 # 4 - SLAB POTENTIAL the bath is a slab of carbon atom
 # 5 - DOUBLE CHAIN the bath is represented as two chain both coupled to the system
+BathType : 4
 
-# Units: Ang, eV, AMU, fs, K, cm^-1
+# 4D MODEL FOR SYSTEM POTENTIAL
+# 0 - SUDDEN MODEL - potential with all C at Z = 0.0
+# 1 - GLOBAL MINIMUM - potential with all C at the global minimum geometry
+# 2 - ADIABATIC MODEL - C positions are optimized at any given 4D configuration
+Cut4D_Model : 2
+
+# Units
+# Length: 0 = bohr, 1 = Ang
 InputLength : 1
+# Energy: 2 = Hartree, 3 = eV, 4 = kcal/mol, 5 = kJ/mol, 6 = J
 InputEnergy : 3
+# Mass: 7 = au, 8 = amu, 9 = kg
 InputMass   : 8
+# Angle: 10 = radiant, 11 = degrees
+InputAngle  : 11 
+# Time: 12 = au, 13 = fs, 14 = ps
 InputTime   : 13
+# Temperature: 15 = au, 16 = K
 InputTemp   : 16
+# Frequency: 17 = au, 18 = cm^-1 , 19 = fs^-1
 InputFreq   : 18
 
-# Kind of calculation 
-RunType : 10
-PrintType : 2
-BathType : 4
+# Parameters of the slab potential
+# Collinear / 4D potential energy surface
+Collinear : FALSE
+# Relaxation at the borders of the slab (not relavant for PES analysis)
+RelaxAtBorders : 0.0
+# Number of carbon atoms of the slab
+NCarbon : 121
+# Van der Waals correction to the potential
+VanDerWaals : FALSE
 
 # Masses
 # mass of the target H atom (UMA)
@@ -46,14 +71,16 @@ PlotSpectrum_DeltaFreq : 0.1
 # Width parameter of the peaks in the spectrum
 PlotSpectrum_SigmaPeak : 8.
 
+# Nr of grid points of the potential cuts
 PlotSpectrum_NGridPoint : 1000
+
+# Grid spacing of the potential plots
 PlotSpectrum_GridSpacing : 0.02
 
+# Limits of the grid for the potential plots
 PlotSpectrum_ZHmin : 0.4  
 PlotSpectrum_ZHmax : 6.0
 PlotSpectrum_ZCmin : -0.2
 PlotSpectrum_ZCmax : 1.0
 
-Collinear : FALSE
-RelaxAtBorders : 0.0 
-NCarbon : 121
+# -------------------------------- END OF INPUT FILE -------------------------------------

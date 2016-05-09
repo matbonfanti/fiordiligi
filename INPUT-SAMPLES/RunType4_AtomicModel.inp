@@ -9,6 +9,7 @@
 # 4 - Scattering calculation with H coming from gas-phase
 # 5 - Vibrational relaxation with ring polymer dynamics
 # 10 - Static analysis of the potential
+# 11 - Computation of Minimum Energy Path of the potential
 RunType : 4
 
 # PRINTTYPE
@@ -52,6 +53,8 @@ InputFreq   : 18
 NCarbon   : 121
 # Fixing collinear geometry variable
 Collinear : FALSE
+# Van der Waals correction to the potential
+VanDerWaals : FALSE
 
 # Scattering parameters
 # Kinetic energy of the H atom (normal incidence)

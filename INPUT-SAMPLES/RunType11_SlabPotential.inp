@@ -10,13 +10,13 @@
 # 5 - Vibrational relaxation with ring polymer dynamics
 # 10 - Static analysis of the potential
 # 11 - Computation of Minimum Energy Path of the potential
-RunType : 4
+RunType : 11
 
 # PRINTTYPE
 # 3 - DEBUG fully detailed information about each traj
 # 2 - FULL files to plot the averages over the ensamble
 # 1 - MINIMAL minimal level of output, only final averages
-PrintType : 1
+PrintType : 2
 
 # BATHTYPE
 # 1 - LANGEVIN DYNAMICS - effective relaxation dynamics, with langevin eq of motion
@@ -24,14 +24,14 @@ PrintType : 1
 # 3 - NORMAL BATH bath of HO on a regular freq grid, all coupled to the system
 # 4 - SLAB POTENTIAL the bath is a slab of carbon atom
 # 5 - DOUBLE CHAIN the bath is represented as two chain both coupled to the system
-BathType : 3
+BathType : 4
 
 # 4D MODEL FOR SYSTEM POTENTIAL
 # 0 - SUDDEN MODEL - potential with all C at Z = 0.0
 # 1 - GLOBAL MINIMUM - potential with all C at the global minimum geometry
 # 2 - ADIABATIC MODEL - C positions are optimized at any given 4D configuration
 Cut4D_Model : 2
-
+ 
 # Units
 # Length: 0 = bohr, 1 = Ang
 InputLength : 1
@@ -48,72 +48,29 @@ InputTemp   : 16
 # Frequency: 17 = au, 18 = cm^-1 , 19 = fs^-1
 InputFreq   : 18
 
-# Fixing collinear geometry variable
+# Parameters of the slab potential
+# Collinear / 4D potential energy surface
 Collinear : FALSE
+# Relaxation at the borders of the slab (not relavant for PES analysis)
+RelaxAtBorders : 0.0 
+# Number of carbon atoms of the slab
+NCarbon : 121
 # Van der Waals correction to the potential
 VanDerWaals : FALSE
 
-# cutoff frequency of the bath
-BathCutOffFreq : 900
-# nr of coordinates of the bath
-NBath : 300
-# file with the spectral density of the C flut/diss
-SpectralDensityFile : spectralC.dat
-# mass of the bath oscillators
-MassBath : 12.0000
-
-# Scattering parameters
-# Kinetic energy of the H atom (normal incidence)
-EKinZH : 0.5
-# Initial height of the H atom
-ZHInit : 6.0
-# Maximum number of impact parameter ( 0 = collinear )
-NRhoMax : 0
-# Impact parameter grid spacing
-DeltaRho : 0.0
-
-# Evolution parameters
-# Step of the time evolution 
-TimeStep : 0.01
-# Total number of time step per trajectory
-NrOfSteps  :  50000
-# Nr of steps between each analysis
-NrOfPrintSteps  : 1000
-# Gamma for thermostating the dynamics
-#RelaxAtBorders : 100.
-
-# Langevin equilibration parameters
-# Friction coefficient 
-EquilRelaxTime :  50.
-# Time step
-EquilTStep : 0.02
-# Nr of time steps of the equilibration dynamics
-NrEquilibrSteps :  100000
- 
 # Masses
 # mass of the target H atom 
 MassH  : 1.00782503207
 # mass of the substrate C atoms
 MassC  : 12.0
 
-# Temperature of the simulation
-# Temperature of the system / substrate 
-Temperature : 0.0
-# Quasiclassical simulation (ZPE in the bath, Zero Temp)
-ZPECorrection : TRUE
+# Transition State restart file
+#FullPES_TSRestartFile : TS_FullPES.dat
 
-# Sampling parameters
-# number of trajectories per impact parameter
-NrTrajs   : 1000
-
-# Restart input parameters
-# restart simulation from a previous run
-Restart : FALSE
-# nr of trajectories of the previous run
-NrTrajRestart : 2000
-# file with the accumulated prob of the previous run 
-# ProbRestartFile : "CollinearTrapping.dat"
-# file with the stat of the rand.nr. generator f the previous run 
-# RandRestartFile : "RandomNr.dat"
+# Parameters for the MEP integration
+# max nr of runge kutta steps
+MaxMEPNrSteps : 100000
+# step length of RK integration
+MEPStep : 0.010
 
 # -------------------------------- END OF INPUT FILE -------------------------------------
