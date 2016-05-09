@@ -2559,11 +2559,11 @@ MODULE PotentialModule
          dVdr =  c0*(-alpha0*r - 1)*exp(-alpha0*r)/r**2       & 
                 +c1*(-alpha1*r + 1)*exp(-alpha1*r)            &
             +2*c2*r*(-alpha1*r + 1)*exp(-2.0d0*alpha1*r)
-         ! derivatives with respect to the coordinates
-         Forces(1) = Positions(1)*dVdr/r
-         Forces(2) = Positions(2)*dVdr/r
-         Forces(3) = dVdr*(Positions(3) - Positions(4))/r
-         Forces(4) = dVdr*(-Positions(3) + Positions(4))/r
+         ! derivatives with respect to the coordinates (minus sign because these are forces!)
+         Forces(1) = -Positions(1)*dVdr/r
+         Forces(2) = -Positions(2)*dVdr/r
+         Forces(3) = -dVdr*(Positions(3) - Positions(4))/r
+         Forces(4) = -dVdr*(-Positions(3) + Positions(4))/r
 
       END FUNCTION VanDerWaalsPotential
 
