@@ -379,14 +379,15 @@ MODULE ScatteringSimulation
    SUBROUTINE Scattering_Run()
       IMPLICIT NONE
       INTEGER  ::  AvHydroOutputUnit, AvCarbonOutputUnit       ! UNITs FOR OUTPUT AND DEBUG
-      INTEGER  ::  CollinearTrapUnit, CrossSectionUnit, OpacityUnit
-      INTEGER  ::  jRho, iTraj, iStep, kStep, iCoord
+      INTEGER  ::  CollinearTrapUnit, CrossSectionUnit, OpacityUnit, ETransfUnit
+      INTEGER  ::  jRho, iTraj, iStep, kStep, iCoord, nScatter
       INTEGER  ::  DebugUnitEn, DebugUnitCoord, DebugUnitVel
       REAL     ::  ImpactPar, Time, CrossSection
       REAL     ::  RndValue, CarbonFreq
       REAL, DIMENSION(1,8)  :: AsymptoticCH
       REAL     ::  TotEnergy, PotEnergy, KinEnergy, KinHydro, KinCarbon
       REAL     ::  TempAverage, TempVariance, IstTemperature
+      REAL     ::  EnTransfer, EnTrasfAverage, NormOverRho
       REAL, DIMENSION(NRhoMax+1) :: ImpactParameterGrid
       REAL, DIMENSION(NrOfPrintSteps) :: TimeGrid
       CHARACTER(100) :: OutFileName
@@ -405,6 +406,14 @@ MODULE ScatteringSimulation
       AverageVHydro(:)          = 0.0
       AverageZHydro(:)          = 0.0
 
+      IF ( PrintType >= FULL ) THEN
+         ! Open unit with the energy transfer
+         ETransfUnit = LookForFreeUnit()
+         OPEN( FILE="AverageETransf.dat", UNIT=ETransfUnit )
+         WRITE(ETransfUnit, "(A,I6,A,/)") "# average energy transfer of the projectile - ",NrTrajs-NrTrajRestart," trajs"
+      END IF
+      EnTrasfAverage = 0.0; NormOverRho = 0.0
+
       ! scan over the impact parameter... 
       ImpactParameter: DO jRho = 0,NRhoMax
 
@@ -420,6 +429,9 @@ MODULE ScatteringSimulation
          END IF
 
          PRINT "(A,I5,A)"," Running ", NrTrajs-NrTrajRestart, " trajectories ... "
+
+         ! Initialize counter of scattered trajectories
+         nScatter = 0; EnTransfer = 0.0
 
          ! run NTrajs number of trajectories at the current impact parameter
          Trajectory: DO iTraj = NrTrajRestart+1, NrTrajs
@@ -676,6 +688,12 @@ MODULE ScatteringSimulation
                          X(4)*LengthConversion(InternalUnits,InputUnits), LengthUnit(InputUnits), &
                          TotEnergy*EnergyConversion(InternalUnits,InputUnits), EnergyUnit(InputUnits)
 
+            ! if H is not in the trapping region, compute energy transfer
+            IF ( X(3) >= AdsorpLimit ) THEN
+               nScatter = nScatter +1
+               EnTransfer = EnTransfer + (-KinHydro+EKinZH)
+            END IF
+
             IF ( PrintType == DEBUG ) THEN
                   CLOSE( Unit=DebugUnitEn )
                   CLOSE( Unit=DebugUnitCoord )
@@ -691,6 +709,11 @@ MODULE ScatteringSimulation
          AverageZCarbon(:) = AverageZCarbon(:)/(NrTrajs-NrTrajRestart)
          AverageVHydro(:)  = AverageVHydro(:)/(NrTrajs-NrTrajRestart)
          AverageZHydro(:)  = AverageZHydro(:)/(NrTrajs-NrTrajRestart)
+
+         ! Normalize energy transfer and accumulate for average over rho
+         EnTransfer = EnTransfer / nScatter
+         EnTrasfAverage = EnTrasfAverage + EnTransfer * ImpactPar
+         NormOverRho = NormOverRho + ImpactPar
 
          IF ( PrintType >= FULL ) THEN
 
@@ -718,6 +741,11 @@ MODULE ScatteringSimulation
             END DO
 
             CALL WARN( Restart, " Scattering_Run: average coord.s and vel.s computed only for the trajs of the restart run " )  
+
+            WRITE(ETransfUnit,800)  ImpactPar*LengthConversion(InternalUnits,InputUnits), &
+                                    EnTransfer*EnergyConversion(InternalUnits,InputUnits)
+
+            CALL WARN( Restart, " Scattering_Run: average energy transfer computed only for the trajs of the restart run " )  
 
          END IF
 
@@ -785,6 +813,8 @@ MODULE ScatteringSimulation
          END DO
          CLOSE(OpacityUnit)
 
+         IF ( PrintType >= FULL )   WRITE(ETransfUnit,*)  "# average over rho: ", &
+                                    (EnTrasfAverage/NormOverRho)*EnergyConversion(InternalUnits,InputUnits)
       END IF
 
       ! dump the random number generator internal status to file
