@@ -13,7 +13,7 @@
 !>  \date             10 October 2013
 !>
 !>  \todo            everything
-!>                 
+!>
 !***************************************************************************************
 MODULE PotentialAnalysis
 #include "preprocessoptions.cpp"
@@ -32,7 +32,7 @@ MODULE PotentialAnalysis
    PRIVATE
    PUBLIC :: PotentialAnalysis_ReadInput, PotentialAnalysis_Initialize, PotentialAnalysis_Run, PotentialAnalysis_Dispose
 
-   !> Nr of dimension of the system + bath 
+   !> Nr of dimension of the system + bath
    INTEGER :: NDim
 
    !> Parameters to plot spectra in the frequency domain
@@ -226,14 +226,14 @@ MODULE PotentialAnalysis
                    (EMin-EAsy)*EnergyConversion(InternalUnits,InputUnits), EnergyUnit(InputUnits),       &
                    XMin(3)*LengthConversion(InternalUnits,InputUnits), LengthUnit(InputUnits),           &
                    XMin(4)*LengthConversion(InternalUnits,InputUnits), LengthUnit(InputUnits),           &
-                   (XMin(3)-XMin(4))*LengthConversion(InternalUnits,InputUnits), LengthUnit(InputUnits) 
+                   (XMin(3)-XMin(4))*LengthConversion(InternalUnits,InputUnits), LengthUnit(InputUnits)
 
       ! ===================================================================================================
-      ! (2) Frequencies along the ZC and ZH cut of the potential 
+      ! (2) Frequencies along the ZC and ZH cut of the potential
       ! ===================================================================================================
 
       ! Set starting geometry as the geometry of the minimum
-      X = XMin 
+      X = XMin
 
       ! ZH frequency at the minimum of the potential
       X(3) = XMin(3) + SmallDelta
@@ -274,13 +274,13 @@ MODULE PotentialAnalysis
                    ZCAsyFreq*FreqConversion(InternalUnits,InputUnits), FreqUnit(InputUnits)
 
       ! ===================================================================================================
-      ! (2b) Parameters of the 4D potential with C slab at the minimum 
+      ! (2b) Parameters of the 4D potential with C slab at the minimum
       ! ===================================================================================================
 
       IF ( BathType ==  SLAB_POTENTIAL ) THEN
 
          ! Set starting geometry as the geometry of the minimum
-         X = XMin 
+         X = XMin
          ! set asymptotic coordinates for the H atom
          X(1:2) = 0.0
          X(3) = 30.0
@@ -290,7 +290,7 @@ MODULE PotentialAnalysis
          Mask(4) = .TRUE.
 
          ! Computing the energy at this geometry
-         X = MinimizePotential( X, 10**6, 1.E-6, Mask ) 
+         X = MinimizePotential( X, 10**6, 1.E-6, Mask )
          Emin = VHSticking( X, A )
          ZCeq = X(4)
 
@@ -313,7 +313,7 @@ MODULE PotentialAnalysis
       END IF
 
       ! ===================================================================================================
-      ! (3) Frequencies and normal modes of the 4D potential 
+      ! (3) Frequencies and normal modes of the 4D potential
       ! ===================================================================================================
 
       ! Numerical mass scaled hessian of the 4D system potential
@@ -358,7 +358,7 @@ MODULE PotentialAnalysis
          ELSE
 !             WRITE(742,*) 0.0, SQRT(EigenFreq(iEigen))*FreqConversion(InternalUnits,InputUnits)
 !             WRITE(742,*) 1.0, SQRT(EigenFreq(iEigen))*FreqConversion(InternalUnits,InputUnits)
-!             WRITE(742,*) " "   
+!             WRITE(742,*) " "
          END IF
       END DO
 
@@ -370,7 +370,7 @@ MODULE PotentialAnalysis
 
          ! sum over eigenfreq centered gaussians
          DO iEigen = 1, size(EigenFreq)
-            IF ( .NOT. EigenFreq(iEigen) < 0.0 ) & 
+            IF ( .NOT. EigenFreq(iEigen) < 0.0 ) &
                Spectrum = Spectrum + LorentzianFunction( Frequency, SQRT(EigenFreq(iEigen)), SigmaPeak )
          END DO
 
@@ -403,7 +403,7 @@ MODULE PotentialAnalysis
          ELSE
 !             WRITE(743,*) 1.0, SQRT(EigenFreq(iEigen))*FreqConversion(InternalUnits,InputUnits)
 !             WRITE(743,*) 2.0, SQRT(EigenFreq(iEigen))*FreqConversion(InternalUnits,InputUnits)
-!             WRITE(743,*) " "   
+!             WRITE(743,*) " "
          END IF
       END DO
 
@@ -415,7 +415,7 @@ MODULE PotentialAnalysis
 
          ! sum over eigenfreq centered gaussians
          DO iEigen = 1, size(EigenFreq)
-            IF ( EigenFreq(iEigen) > 0.0 ) & 
+            IF ( EigenFreq(iEigen) > 0.0 ) &
                Spectrum = Spectrum + LorentzianFunction( Frequency, SQRT(EigenFreq(iEigen)), SigmaPeak )
          END DO
 
@@ -432,12 +432,12 @@ MODULE PotentialAnalysis
       ! (6) SD of the coupling
       ! ===================================================================================================
 
-      IF ( BathType == SLAB_POTENTIAL ) THEN 
+      IF ( BathType == SLAB_POTENTIAL ) THEN
 
          PRINT "(/,A,/)"," * Computing the spectral density of the coupling for the zC coordinate... "
 
          XMinWithoutH = XMin
-         XMinWithoutH(3) = 30.0 
+         XMinWithoutH(3) = 30.0
 
          ! compute hessian at the asymptotic geometry of the PES
          HessianSysAndSlab = HessianOfThePotential( XMinWithoutH )
@@ -472,7 +472,7 @@ MODULE PotentialAnalysis
          D0 = 0.0
          DO iEigen = 1, size(EigenFreq)
             IF ( EigenFreq(iEigen) > 1.E-10 ) THEN
-               i = i+1 
+               i = i+1
                OmegaK(i) = SQRT( EigenFreq(iEigen) )
                CoeffK(i) = DirectionalSecondDerivative( XMin, SystemCoord, EigenModes(:,iEigen) )
                IntensityK(i) = MyConsts_PI / 2.0  * CoeffK(i)**2 / OmegaK(i) / MassC
@@ -492,7 +492,7 @@ MODULE PotentialAnalysis
 
             ! sum over eigenfreq centered gaussians
             DO iEigen = 1, NrOfModes
-               IF ( EigenFreq(iEigen) > 1.E-10 .AND. OmegaK(iEigen) > 30.*FreqConversion(InputUnits,InternalUnits) ) & 
+               IF ( EigenFreq(iEigen) > 1.E-10 .AND. OmegaK(iEigen) > 30.*FreqConversion(InputUnits,InternalUnits) ) &
                   Spectrum = Spectrum + MyConsts_PI / 2.0  * CoeffK(iEigen)**2 / OmegaK(iEigen) / MassC * &
                                  LorentzianFunction( Frequency, OmegaK(iEigen), SigmaPeak )
             END DO
@@ -528,7 +528,7 @@ MODULE PotentialAnalysis
 
          X(1:4) = XSysMin(1:4)
          WRITE(CartesianCutsUnit, "(/,A,I6,A)") "# Cut along zC at equilibrium slab geom - ", 2*NGridPoint+1, " pts (Ang | eV)"
-         X(:) = XMin(:) 
+         X(:) = XMin(:)
          DO i = -NGridPoint, NGridPoint
             X(4) = C1Puckering + REAL(i) * GridSpacing
             WRITE(CartesianCutsUnit,*) X(4)*LengthConversion(InternalUnits,InputUnits), &
@@ -541,7 +541,7 @@ MODULE PotentialAnalysis
          X(1:4) = XSysMin(1:4)
          print*, XSysMin(1:4)*LengthConversion(InternalUnits,InputUnits)
          print*, TheOneWithMatrixVectorProduct(TheOneWithTransposeMatrix(NormalModes4D_Vecs), &
-                  SQRT( MassVector(1:4 ))*XSysMin(1:4))*LengthConversion(InternalUnits,InputUnits)*(MassConversion(InternalUnits,InputUnits)**0.5) 
+                  SQRT( MassVector(1:4 ))*XSysMin(1:4))*LengthConversion(InternalUnits,InputUnits)*(MassConversion(InternalUnits,InputUnits)**0.5)
          MinimumEnergy = VHFourDimensional( X(1:4), Dummy )
 
          DO j = 1,4
@@ -557,7 +557,7 @@ MODULE PotentialAnalysis
                WRITE(NormalModeCutsUnit,800) REAL(i) * GridSpacing*LengthConversion(InternalUnits,InputUnits)*(MassConversion(InternalUnits,InputUnits)**0.5), &
                               X(1:4)*LengthConversion(InternalUnits,InputUnits), &
                               VHFourDimensional( X(1:4), Dummy )*EnergyConversion(InternalUnits,InputUnits), &
-                              ( MinimumEnergy + 0.5 * NormalModes4D_Freq(j) * (REAL(i) * GridSpacing)**2 )*EnergyConversion(InternalUnits,InputUnits) 
+                              ( MinimumEnergy + 0.5 * NormalModes4D_Freq(j) * (REAL(i) * GridSpacing)**2 )*EnergyConversion(InternalUnits,InputUnits)
             END DO
             PRINT "(A,I2,A)"," Written cut along normal mode ",j," to file "//OutFileName
 
@@ -576,7 +576,7 @@ MODULE PotentialAnalysis
 
       ! Allocate temporary array to store potential data and coord grids
       ALLOCATE( PotentialArray( NpointZH * NpointZC ), ZCArray( NpointZC ), ZHArray( NpointZH ) )
-    
+
       ! Define coordinate grids
       ZCArray = (/ ( ZCmin + GridSpacing*(i-1), i=1,NpointZC) /)
       ZHArray = (/ ( ZHmin + GridSpacing*(j-1), j=1,NpointZH) /)
@@ -585,11 +585,11 @@ MODULE PotentialAnalysis
       X(1:4) = (/ 0.0, 0.0, 30.0, 0.0 /)
       EAsy = VHFourDimensional( X(1:4), A(1:4) )
 
-      ! fix other coordinates 
+      ! fix other coordinates
       X(1:2) = 0.0
- 
+
       ! Open VTK file
-      CALL VTK_NewRectilinearSnapshot ( PotentialCH, X=ZHArray*LengthConversion(InternalUnits,InputUnits),  & 
+      CALL VTK_NewRectilinearSnapshot ( PotentialCH, X=ZHArray*LengthConversion(InternalUnits,InputUnits),  &
                                 Y=ZCArray*LengthConversion(InternalUnits,InputUnits), FileName="GraphiteHSticking" )
 
       nPoint = 0
@@ -626,7 +626,7 @@ MODULE PotentialAnalysis
 
       ! Allocate temporary array to store potential data and coord grids
       ALLOCATE( PotentialArray( NpointZC ), ZCArray( NpointZC ), OptZC( NpointZH ), ZHArray( NpointZH ) )
-    
+
       ! Define coordinate grids
       ZCArray = (/ ( -0.5 + 0.0001*(i-1), i=1,NpointZC) /)
       ZHArray = (/ ( ZHmin + GridSpacing*(j-1), j=1,NpointZH) /)
@@ -638,7 +638,7 @@ MODULE PotentialAnalysis
             X = Xmin
             X(1) = Rho
             X(2) = 0.0
-            X(4) = ZCArray(j) 
+            X(4) = ZCArray(j)
             X(3) = SQRT(ZHArray(i)**2 - Rho**2) + ZCArray(j)
             ! Compute potential at current geometry
             PotentialArray(j) = VibrRelaxPotential( X, A )
@@ -661,40 +661,40 @@ MODULE PotentialAnalysis
 !       ! ===================================================================================================
 !       ! (10) 2D coupling potential in VTK format
 !       ! ===================================================================================================
-! 
+!
 !       IF ( BathType ==  SLAB_POTENTIAL ) THEN
-! 
+!
 !          CALL VTK_NewCollection ( CouplingV, 2, "CouplingV" )
-! 
+!
 !          Qmin = -2.0
 !          Qmax = 2.0
-! 
+!
 !          ! Set grid dimensions
 !          NpointZH = INT((ZHmax-ZHmin)/GridSpacing) + 1
 !          NpointZC = INT((ZCmax-ZCmin)/GridSpacing) + 1
 !          NpointQ  = INT((Qmax-Qmin)  /GridSpacing) + 1
-! 
+!
 !          ! Allocate temporary array to store coord grids
 !          ALLOCATE( ZCArray( NpointZC ), ZHArray( NpointZH ), QArray( NpointQ ) )
 !          ! Define coordinate grids
 !          ZCArray = (/ ( ZCmin + GridSpacing*(i-1), i=1,NpointZC) /)
 !          ZHArray = (/ ( ZHmin + GridSpacing*(j-1), j=1,NpointZH) /)
 !          QArray  = (/ ( Qmin  + GridSpacing*(j-1), j=1,NpointQ)  /)
-! 
+!
 !          ! A) Coupling potential as function of Q and ZH
-! 
+!
 !          ! Allocate temporary array to store potential data
 !          ALLOCATE( PotentialArray( NpointZH * NpointQ ) )
-! 
-!          ! fix coordinates 
+!
+!          ! fix coordinates
 !          X(1:4) = (/ 0.0, 0.0, HZEquilibrium, C1Puckering /)
 !          X(5:NDim) = MinSlab(1:NBath)
 !          PotEnergy = VibrRelaxPotential( X, A )
-! 
+!
 !          ! Open VTK file
-!          CALL VTK_NewRectilinearSnapshot ( CouplingV, X=ZHArray*LengthConversion(InternalUnits,InputUnits),  & 
+!          CALL VTK_NewRectilinearSnapshot ( CouplingV, X=ZHArray*LengthConversion(InternalUnits,InputUnits),  &
 !                                    Y=QArray*LengthConversion(InternalUnits,InputUnits), FileName="GraphiteHCouplingV_ZH" )
-! 
+!
 !          nPoint = 0
 !          ! Cycle over the ZC coordinate values
 !          DO i = 1, NpointQ
@@ -718,26 +718,26 @@ MODULE PotentialAnalysis
 !                PotentialArray(nPoint) = PotentialArray(nPoint) + PotEnergy
 !             END DO
 !          END DO
-! 
+!
 !          ! Print the potential to vtk file
 !          CALL VTK_AddScalarField (CouplingV, Name="CHPotential", &
 !                            Field=PotentialArray*EnergyConversion(InternalUnits,InputUnits) )
-! 
+!
 !          DEALLOCATE( PotentialArray )
-! 
+!
 !          ! A) Coupling potential as function of Q and ZH
-! 
+!
 !          ! Allocate temporary array to store potential data
 !          ALLOCATE( PotentialArray( NpointZC * NpointQ ) )
-! 
-!          ! fix coordinates 
+!
+!          ! fix coordinates
 !          X(1:4) = (/ 0.0, 0.0, HZEquilibrium, C1Puckering /)
 !          X(5:NDim) = MinSlab(1:NBath)
-! 
+!
 !          ! Open VTK file
-!          CALL VTK_NewRectilinearSnapshot ( CouplingV, X=ZCArray*LengthConversion(InternalUnits,InputUnits),  & 
+!          CALL VTK_NewRectilinearSnapshot ( CouplingV, X=ZCArray*LengthConversion(InternalUnits,InputUnits),  &
 !                                    Y=QArray*LengthConversion(InternalUnits,InputUnits), FileName="GraphiteHCouplingV_ZC" )
-! 
+!
 !          nPoint = 0
 !          ! Cycle over the ZC coordinate values
 !          DO i = 1, NpointQ
@@ -761,18 +761,18 @@ MODULE PotentialAnalysis
 !                PotentialArray(nPoint) = PotentialArray(nPoint) + PotEnergy
 !             END DO
 !          END DO
-! 
+!
 !          ! Print the potential to vtk file
 !          CALL VTK_AddScalarField (CouplingV, Name="CHPotential", &
 !                            Field=PotentialArray*EnergyConversion(InternalUnits,InputUnits) )
-! 
+!
 !          DEALLOCATE( PotentialArray )
-!      
+!
 !          WRITE(*,"(/,A)") " * Coupling V written as VTR to file GraphiteHCouplingV_ZH.vtr and GraphiteHCouplingV_ZC.vtr"
-! 
+!
 !          ! Deallocate memory
 !          DEALLOCATE( QArray, ZHArray, ZCArray )
-! 
+!
 !       ENDIF
 
       CLOSE(MinPhononSpectrumUnit)
@@ -792,7 +792,7 @@ MODULE PotentialAnalysis
                      " * Frequency along ZH cut:       ",1F15.2,1X,A,/, &
                      " * Frequency along ZC cut:       ",1F15.2,1X,A,2/, &
                      " Frequencies in the asymptotic geometry      ",/ &
-                     " * Frequency along ZC:           ",1F15.2,1X,A    ) 
+                     " * Frequency along ZC:           ",1F15.2,1X,A    )
 
       502 FORMAT (/, " 4D system potential normal modes             ",/, &
                      " 1) Frequency:                   ",1F15.2,1X,A, /, &
@@ -837,7 +837,7 @@ MODULE PotentialAnalysis
    REAL FUNCTION VibrRelaxPotential( Positions, Forces )
       REAL, DIMENSION(:), TARGET, INTENT(IN)  :: Positions
       REAL, DIMENSION(:), TARGET, INTENT(OUT) :: Forces
-      INTEGER :: NrDOF, i       
+      INTEGER :: NrDOF, i
 
       ! Check the number degrees of freedom
       NrDOF = size( Positions )
@@ -848,7 +848,7 @@ MODULE PotentialAnalysis
       VibrRelaxPotential = 0.0
       Forces(:)          = 0.0
 
-      IF ( BathType == SLAB_POTENTIAL ) THEN 
+      IF ( BathType == SLAB_POTENTIAL ) THEN
          ! Compute potential using the potential subroutine
          VibrRelaxPotential = VHSticking( Positions, Forces )
 
@@ -857,16 +857,16 @@ MODULE PotentialAnalysis
          VibrRelaxPotential = VHFourDimensional( Positions(1:4), Forces(1:4) )
          ! Add potential and forces of the bath and the coupling
          CALL BathPotentialAndForces( Bath, Positions(4)-C1Puckering, Positions(5:), VibrRelaxPotential, &
-                                                                               Forces(4), Forces(5:) ) 
+                                                                               Forces(4), Forces(5:) )
 
       ELSE IF ( BathType == DOUBLE_CHAIN ) THEN
          ! Compute potential and forces of the system
          VibrRelaxPotential = VHFourDimensional( Positions(1:4), Forces(1:4) )
          ! Add potential and forces of the bath and the coupling
          CALL BathPotentialAndForces( DblBath(1), Positions(4)-C1Puckering, Positions(5:NBath+4), VibrRelaxPotential, &
-                                                                               Forces(4), Forces(5:NBath+4) ) 
+                                                                               Forces(4), Forces(5:NBath+4) )
          CALL BathPotentialAndForces( DblBath(2), Positions(4)-C1Puckering, Positions(NBath+5:2*NBath+4), VibrRelaxPotential, &
-                                                                               Forces(4), Forces(NBath+5:2*NBath+4) ) 
+                                                                               Forces(4), Forces(NBath+5:2*NBath+4) )
 
       ELSE IF ( BathType == LANGEVIN_DYN ) THEN
          ! Compute potential using only the 4D subroutine
@@ -887,17 +887,17 @@ MODULE PotentialAnalysis
       INTEGER :: i, j, k
 
       REAL, DIMENSION(4), PARAMETER :: Deltas = (/ -2.0,    -1.0,    +1.0,    +2.0    /)
-      REAL, DIMENSION(4), PARAMETER :: Coeffs = (/ +1./12., -8./12., +8./12., -1./12. /) 
+      REAL, DIMENSION(4), PARAMETER :: Coeffs = (/ +1./12., -8./12., +8./12., -1./12. /)
 
       REAL, DIMENSION(3), PARAMETER :: ForwardDeltas = (/  0.0,   +1.0,  +2.0   /)
-      REAL, DIMENSION(3), PARAMETER :: ForwardCoeffs = (/ -3./2., +2.0,  -1./2. /) 
+      REAL, DIMENSION(3), PARAMETER :: ForwardCoeffs = (/ -3./2., +2.0,  -1./2. /)
 
       Hessian(:,:) = 0.0
 
-      IF ( BathType == SLAB_POTENTIAL ) THEN 
+      IF ( BathType == SLAB_POTENTIAL ) THEN
 
          ! Compute the second derivatives for displacements of x and y
-         ! IMPORTANT!!! since rho = 0 is a singular value of the function, 
+         ! IMPORTANT!!! since rho = 0 is a singular value of the function,
          ! the derivative is computed slightly off the minimum, and is computed for x,y > 0
          DO i = 1, 2
             DO k = 1, size(ForwardDeltas)
@@ -954,13 +954,13 @@ MODULE PotentialAnalysis
          Hessian(1:4,1:4) = HessianOfTheSystem( AtPoint(1:4), MassH, MassC )
 
          ! add the part of the hessian of the independent oscillator model
-         CALL  HessianOfTheBath( Bath, Hessian(5:NDim, 5:NDim) ) 
+         CALL  HessianOfTheBath( Bath, Hessian(5:NDim, 5:NDim) )
 
          ! add the contribution from SYSTEM-BATH coupling and from DISTORTION CORRECTION
          CALL  CouplingAndDistortionHessian( Bath, CouplingsCoeffs, DistortionCoeff )
          DO i = 1, NBath
-            Hessian(4,4+i) = Hessian(4,4+i) + CouplingsCoeffs(i) / SQRT( MassVector(4) * MassVector(4+i) ) 
-            Hessian(4+i,4) = Hessian(4+i,4) + CouplingsCoeffs(i) / SQRT( MassVector(4) * MassVector(4+i) ) 
+            Hessian(4,4+i) = Hessian(4,4+i) + CouplingsCoeffs(i) / SQRT( MassVector(4) * MassVector(4+i) )
+            Hessian(4+i,4) = Hessian(4+i,4) + CouplingsCoeffs(i) / SQRT( MassVector(4) * MassVector(4+i) )
          END DO
          Hessian(4,4) = Hessian(4,4) + DistortionCoeff / MassVector(4)
 
@@ -970,12 +970,12 @@ MODULE PotentialAnalysis
          Hessian(1:4,1:4) = HessianOfTheSystem( AtPoint(1:4), MassH, MassC )
 
          ! add the part of the hessian of the independent oscillator model
-         CALL  HessianOfTheBath( Bath, Hessian(5:NDim, 5:NDim) ) 
+         CALL  HessianOfTheBath( Bath, Hessian(5:NDim, 5:NDim) )
 
          ! add the contribution from SYSTEM-BATH coupling and from DISTORTION CORRECTION
          CALL  CouplingAndDistortionHessian( Bath, CouplingsCoeffs, DistortionCoeff )
-         Hessian(4,5) = Hessian(4,5) + CouplingsCoeffs(1) / SQRT( MassVector(4) * MassVector(5) ) 
-         Hessian(5,4) = Hessian(5,4) + CouplingsCoeffs(1) / SQRT( MassVector(4) * MassVector(5) ) 
+         Hessian(4,5) = Hessian(4,5) + CouplingsCoeffs(1) / SQRT( MassVector(4) * MassVector(5) )
+         Hessian(5,4) = Hessian(5,4) + CouplingsCoeffs(1) / SQRT( MassVector(4) * MassVector(5) )
          Hessian(4,4) = Hessian(4,4) + DistortionCoeff / MassVector(4)
 
       ELSE IF ( BathType == DOUBLE_CHAIN ) THEN
@@ -984,17 +984,17 @@ MODULE PotentialAnalysis
          Hessian(1:4,1:4) = HessianOfTheSystem( AtPoint(1:4), MassH, MassC )
 
          ! add the part of the hessian of the independent oscillator model
-         CALL HessianOfTheBath( DblBath(1), Hessian(5:4+NBath, 5:4+NBath) ) 
-         CALL HessianOfTheBath( DblBath(2), Hessian(5+NBath:NDim, 5+NBath:NDim) ) 
+         CALL HessianOfTheBath( DblBath(1), Hessian(5:4+NBath, 5:4+NBath) )
+         CALL HessianOfTheBath( DblBath(2), Hessian(5+NBath:NDim, 5+NBath:NDim) )
 
          ! add the contribution from SYSTEM-BATH coupling and from DISTORTION CORRECTION
          CALL  CouplingAndDistortionHessian( DblBath(1), CouplingsCoeffs, DistortionCoeff )
-         Hessian(4,5) = Hessian(4,5) + CouplingsCoeffs(1) / SQRT( MassVector(4) * MassVector(5) ) 
-         Hessian(5,4) = Hessian(4,5) + CouplingsCoeffs(1) / SQRT( MassVector(4) * MassVector(5) ) 
+         Hessian(4,5) = Hessian(4,5) + CouplingsCoeffs(1) / SQRT( MassVector(4) * MassVector(5) )
+         Hessian(5,4) = Hessian(4,5) + CouplingsCoeffs(1) / SQRT( MassVector(4) * MassVector(5) )
          Hessian(4,4) = Hessian(4,4) + DistortionCoeff / MassVector(4)
          CALL  CouplingAndDistortionHessian( DblBath(2), CouplingsCoeffs, DistortionCoeff )
-         Hessian(4,5+NBath) = Hessian(4,5+NBath) + CouplingsCoeffs(1) / SQRT( MassVector(4) * MassVector(5) ) 
-         Hessian(5+NBath,4) = Hessian(5+NBath,4) + CouplingsCoeffs(1) / SQRT( MassVector(4) * MassVector(5) ) 
+         Hessian(4,5+NBath) = Hessian(4,5+NBath) + CouplingsCoeffs(1) / SQRT( MassVector(4) * MassVector(5) )
+         Hessian(5+NBath,4) = Hessian(5+NBath,4) + CouplingsCoeffs(1) / SQRT( MassVector(4) * MassVector(5) )
          Hessian(4,4) = Hessian(4,4) + DistortionCoeff / MassVector(4)
 
       ELSE IF ( BathType == LANGEVIN_DYN ) THEN
@@ -1015,7 +1015,7 @@ MODULE PotentialAnalysis
       REAL, DIMENSION(NDim), INTENT(IN) :: AtPoint, Direction, NormalMode
 
       REAL, DIMENSION(4), PARAMETER :: Deltas = (/ -2.0,    -1.0,    +1.0,    +2.0    /)
-      REAL, DIMENSION(4), PARAMETER :: Coeffs = (/ +1./12., -8./12., +8./12., -1./12. /) 
+      REAL, DIMENSION(4), PARAMETER :: Coeffs = (/ +1./12., -8./12., +8./12., -1./12. /)
 
       REAL, DIMENSION(NDim) :: Coordinates, FirstDerivative
       REAL :: Potential, Norm
@@ -1042,13 +1042,6 @@ MODULE PotentialAnalysis
       END DO
 
    END FUNCTION DirectionalSecondDerivative
-
-!*************************************************************************************************
-
-   SUBROUTINE PrintCouplingPotential
-      IMPLICIT NONE
-
-   END SUBROUTINE PrintCouplingPotential
 
 !*************************************************************************************************
 

@@ -36,7 +36,7 @@ MODULE MinimumEnergyPath
    PRIVATE
    PUBLIC :: MinimumEnergyPath_ReadInput, MinimumEnergyPath_Initialize, MinimumEnergyPath_Run, MinimumEnergyPath_Dispose
 
-   !> Nr of dimension of the system + bath 
+   !> Nr of dimension of the system + bath
    INTEGER :: NDim
 
    !> Restart file for full D PES transition state
@@ -61,7 +61,7 @@ MODULE MinimumEnergyPath
 !    !> Parameters to plot potential cuts
 !    REAL :: GridSpacing          !< Spacing of the grid to plot the potential
 !    INTEGER :: NGridPoint        !< Nr of points around the equilibrium value
-! 
+!
 !    !> Parameters to plot 2D potential
 !    REAL, DIMENSION(:), ALLOCATABLE :: PotentialArray                     !< array to store 2D potential
 !    REAL, DIMENSION(:), ALLOCATABLE :: ZCArray, ZHArray, QArray, OptZC    !< array with coordinates grid
@@ -99,12 +99,12 @@ MODULE MinimumEnergyPath
       MEPStep = MEPStep * LengthConversion(InputUnits, InternalUnits)
 
       ! SCREEN LOG OF THE INPUT VARIABLES
-      
+
       LengthConv = LengthConversion(InternalUnits,InputUnits)
-      
+
       WRITE(*, 901) MaxOptSteps, OptThreshold*ForceConversion(InternalUnits,InputUnits), &
                     TRIM(EnergyUnit(InputUnits))//"/"//TRIM(LengthUnit(InputUnits))
-                    
+
       WRITE(*, 902) MEPStep*LengthConv, LengthUnit(InputUnits), MaxMEPNrSteps
 
       901 FORMAT(" * Stationary states optimization with Newton's method ",     /,&
@@ -160,12 +160,21 @@ MODULE MinimumEnergyPath
 !*******************************************************************************
    SUBROUTINE MinimumEnergyPath_Run()
       IMPLICIT NONE
+
       INTEGER :: MEPFullUnit, TSFullUnit, AsymptoticEUnit
 
       REAL, DIMENSION(NDim)      :: XMin, XAsy, XTS, MEPX
-      REAL :: Emin, Easy, ETS, EMEP
+      REAL, DIMENSION(NDim,NDim) :: HessianSysAndSlab
+
+      REAL, DIMENSION(NDim)   :: EigenFreq
+      REAL, DIMENSION(NDim,NDim) :: EigenModes
+
+      REAL, DIMENSION(:), ALLOCATABLE   :: OmegaK, CoeffK, IntensityK
+
+      REAL :: Emin, Easy, ETS, EMEP, D0, ImagValue
       LOGICAL, DIMENSION(NDim)   :: OptMask
-      INTEGER :: iStep, MaxFullPlus, MaxFullMinus
+      INTEGER :: iStep, iEigen, MaxFullPlus, MaxFullMinus
+      INTEGER :: NrOfModes, ImagMode, RemoveEigen
       LOGICAL :: Check
 
       PRINT "(2/,A)",    "***************************************************"
@@ -190,7 +199,7 @@ MODULE MinimumEnergyPath
       ELSE IF ( BathType == LANGEVIN_DYN ) THEN
          ! nothing to set
       END IF
- 
+
       ! Find minimum by Newton's optimization
       XMin = SteepLocator( X, MaxOptSteps, OptThreshold )
       XMin(3:) = XMin(3:) - (XMin(5)+XMin(6)+XMin(7))/3.0
@@ -211,7 +220,7 @@ MODULE MinimumEnergyPath
       ELSE IF ( BathType == LANGEVIN_DYN ) THEN
          ! nothing to set
       END IF
- 
+
       ! Find minimum by Newton's optimization
       XAsy = SteepLocator( X, MaxOptSteps, OptThreshold )
       ! Computing the energy at this geometry
@@ -223,7 +232,7 @@ MODULE MinimumEnergyPath
                    (EMin-EAsy)*EnergyConversion(InternalUnits,InputUnits), EnergyUnit(InputUnits),       &
                    XMin(3)*LengthConversion(InternalUnits,InputUnits), LengthUnit(InputUnits),           &
                    XMin(4)*LengthConversion(InternalUnits,InputUnits), LengthUnit(InputUnits),           &
-                   (XMin(3)-XMin(4))*LengthConversion(InternalUnits,InputUnits), LengthUnit(InputUnits) 
+                   (XMin(3)-XMin(4))*LengthConversion(InternalUnits,InputUnits), LengthUnit(InputUnits)
 
       PRINT "(/,A)",    " writing potential for H approach with slab in fixed asymptotic coordinates"
 
@@ -240,7 +249,7 @@ MODULE MinimumEnergyPath
       CLOSE( AsymptoticEUnit )
 
       ! ===================================================================================================
-      ! (2) look for the transition state of the potential energy surface 
+      ! (2) look for the transition state of the potential energy surface
       ! ===================================================================================================
 
       PRINT "(2/,A)",    " **** Transition state of full PES **** "
@@ -278,6 +287,70 @@ MODULE MinimumEnergyPath
       CLOSE( TSFullUnit )
 
       ! ===================================================================================================
+      ! (2b) spectral density computed at the transition state
+      ! ===================================================================================================
+
+      IF ( BathType == SLAB_POTENTIAL ) THEN
+
+         PRINT "(/,A,/)"," * Computing the spectral density of the coupling for the reactive coordinate... "
+
+         ! compute hessian at the asymptotic geometry of the PES
+         HessianSysAndSlab = HessianOfThePotential( XTS )
+
+         ! Compute eigenvectors and eigevalues of the hessian
+         EigenFreq = 0.0;  EigenModes = 0.0
+         CALL TheOneWithDiagonalization( HessianSysAndSlab(1:NDim,1:NDim), EigenModes(1:NDim,1:NDim), EigenFreq(1:NDim) )
+
+         ! Define reaction coordinate as the one with the most negative eigenvalue
+         ImagMode = 0; ImagValue = 0.0
+         DO iEigen = 1, NDim
+            IF ( EigenFreq(iEigen) < ImagValue ) THEN
+               ImagMode = iEigen
+               ImagValue = EigenFreq(iEigen)
+            END IF
+         END DO
+         WRITE(*,*) "Normal mode ",ImagMode, " is reaction coordinate with frequency ", &
+               SQRT(-ImagValue)*(FreqConversion(InternalUnits,InputUnits)), FreqUnit(InputUnits)
+         RemoveEigen = 42
+
+         ! Count positive frequencies
+         NrOfModes = 0
+         DO iEigen = 1, NDim
+            IF ( EigenFreq(iEigen) < 0.0 .AND. iEigen /= ImagMode ) THEN
+               WRITE(*,504)  iEigen, SQRT(-EigenFreq(iEigen))*(FreqConversion(InternalUnits,InputUnits)), FreqUnit(InputUnits)
+            ELSE IF ( iEigen /= ImagMode .AND. iEigen /= RemoveEigen ) THEN
+               NrOfModes = NrOfModes + 1
+            END IF
+         END DO
+         504 FORMAT (   " Excluding negative normal mode # ",I5," with eigenvalue = ",1F12.6,1X,A )
+
+         ALLOCATE( OmegaK(NrOfModes), CoeffK(NrOfModes), IntensityK(NrOfModes) )
+         PRINT "(/,A,I4,A,/)"," * Building spectral density with ", NrOfModes, " normal modes"
+
+         PRINT "(/,A,A,A)","  # mode   |  frequency (",TRIM(FreqUnit(InputUnits)),") |   intensity (au) "
+         NrOfModes = 0
+         D0 = 0.0
+         DO iEigen = 1, size(EigenFreq)
+            IF ( EigenFreq(iEigen) > 0.0 .AND. iEigen /= RemoveEigen ) THEN
+               NrOfModes = NrOfModes+1
+               OmegaK(NrOfModes) = SQRT( EigenFreq(iEigen) )
+               CoeffK(NrOfModes) = -DirectionalSecondDerivative( XTS,  EigenModes(:,ImagMode), EigenModes(:,iEigen) )
+               IntensityK(NrOfModes) = MyConsts_PI / 2.0  * CoeffK(NrOfModes)**2 / OmegaK(NrOfModes)/ MassC
+                   WRITE(*,"(I6,1F18.2,1E25.8)") iEigen, OmegaK(NrOfModes)*FreqConversion(InternalUnits,InputUnits), &
+                        IntensityK(NrOfModes)
+               D0 = D0 + IntensityK(NrOfModes)
+            END IF
+         END DO
+
+         WRITE(*,"(/,A,1E16.8,/)") " The sum of the peak intensities is ", D0
+         CALL PrintSpectrum( OmegaK, IntensityK, "TS_SpectDensCoupling.dat" )
+         PRINT "(/,A,/)"," Phonon spectrum written to file TS_SpectDensCoupling.dat"
+
+         DEALLOCATE( OmegaK, CoeffK, IntensityK )
+
+      END IF
+
+      ! ===================================================================================================
       ! (3) compute the minimum energy path from the TS
       ! ===================================================================================================
 
@@ -290,7 +363,7 @@ MODULE MinimumEnergyPath
       OptMask = .TRUE.; OptMask(1:4) = (/ .FALSE., .FALSE., .TRUE., .TRUE. /)
       IF ( BathType ==  SLAB_POTENTIAL ) OptMask(5:7) = .FALSE.
 
-      ! Write header lines screen 
+      ! Write header lines screen
       WRITE(*,700) TRIM(LengthUnit(InputUnits)), TRIM(LengthUnit(InputUnits)), TRIM(EnergyUnit(InputUnits))
 
       ! Write to output file and to screen the starting point
@@ -358,7 +431,7 @@ MODULE MinimumEnergyPath
 
       ! Close file
       CLOSE(MEPFullUnit)
- 
+
       ! Write the MEP to VTV files
       CALL VTK_WriteTrajectory ( MEPTraj_Full_Plus, &
          MEP_Full_Plus(1:2,1:MaxFullPlus)*LengthConversion(InternalUnits, InputUnits),   "MEPTraj_Full_Plus" )
@@ -424,14 +497,14 @@ MODULE MinimumEnergyPath
    REAL FUNCTION HStickPotential( Positions, Forces ) RESULT(V)
       REAL, DIMENSION(NDim), TARGET, INTENT(IN)  :: Positions
       REAL, DIMENSION(NDim), TARGET, INTENT(OUT) :: Forces
-      INTEGER :: NrDOF, i    
+      INTEGER :: NrDOF, i
       REAL    :: CoupFs, DTimesX
 
       ! Initialize forces and potential
       V         = 0.0
       Forces(:) = 0.0
 
-      IF ( BathType == SLAB_POTENTIAL ) THEN 
+      IF ( BathType == SLAB_POTENTIAL ) THEN
          ! Compute potential using the potential subroutine
          V = VHSticking( Positions, Forces )
 
@@ -441,7 +514,7 @@ MODULE MinimumEnergyPath
          ! Coupling function of the system
          CoupFs = Positions(4)-C1Puckering
          ! Add potential and forces of the bath and the coupling
-         CALL BathPotentialAndForces( Bath, CoupFs, Positions(5:), V, Forces(4), Forces(5:) ) 
+         CALL BathPotentialAndForces( Bath, CoupFs, Positions(5:), V, Forces(4), Forces(5:) )
 
       ELSE IF ( BathType == DOUBLE_CHAIN ) THEN
          ! Compute potential and forces of the system
@@ -449,8 +522,8 @@ MODULE MinimumEnergyPath
          ! Coupling function of the system
          CoupFs = Positions(4)-C1Puckering
          ! Add potential and forces of the bath and the coupling
-         CALL BathPotentialAndForces( DblBath(1), CoupFs, Positions(5:NBath+4), V, Forces(4), Forces(5:NBath+4) ) 
-         CALL BathPotentialAndForces( DblBath(2), CoupFs, Positions(NBath+5:2*NBath+4), V, Forces(4), Forces(NBath+5:2*NBath+4) ) 
+         CALL BathPotentialAndForces( DblBath(1), CoupFs, Positions(5:NBath+4), V, Forces(4), Forces(5:NBath+4) )
+         CALL BathPotentialAndForces( DblBath(2), CoupFs, Positions(NBath+5:2*NBath+4), V, Forces(4), Forces(NBath+5:2*NBath+4) )
 
       ELSE IF ( BathType == LANGEVIN_DYN ) THEN
          ! Compute potential using only the 4D subroutine
@@ -475,7 +548,7 @@ MODULE MinimumEnergyPath
       REAL    :: DistortionCoeff
       INTEGER :: i
 
-      IF ( BathType == SLAB_POTENTIAL ) THEN 
+      IF ( BathType == SLAB_POTENTIAL ) THEN
 
          ! Compute hessian of the full slab potential
          Hessian(1:NDim,1:NDim) = HessianOfTheFullPotential( AtPoint(1:NDim), MassH, MassC )
@@ -486,13 +559,13 @@ MODULE MinimumEnergyPath
          Hessian(1:4,1:4) = HessianOfTheSystem( AtPoint(1:4), MassH, MassC )
 
          ! add the part of the hessian of the independent oscillator model
-         CALL  HessianOfTheBath( Bath, Hessian(5:NDim, 5:NDim) ) 
+         CALL  HessianOfTheBath( Bath, Hessian(5:NDim, 5:NDim) )
 
          ! add the contribution from SYSTEM-BATH coupling and from DISTORTION CORRECTION
          CALL  CouplingAndDistortionHessian( Bath, CouplingsCoeffs, DistortionCoeff )
          DO i = 1, NBath
-            Hessian(4,4+i) = Hessian(4,4+i) + CouplingsCoeffs(i) / SQRT( MassVector(4) * MassVector(4+i) ) 
-            Hessian(4+i,4) = Hessian(4+i,4) + CouplingsCoeffs(i) / SQRT( MassVector(4) * MassVector(4+i) ) 
+            Hessian(4,4+i) = Hessian(4,4+i) + CouplingsCoeffs(i) / SQRT( MassVector(4) * MassVector(4+i) )
+            Hessian(4+i,4) = Hessian(4+i,4) + CouplingsCoeffs(i) / SQRT( MassVector(4) * MassVector(4+i) )
          END DO
          Hessian(4,4) = Hessian(4,4) + DistortionCoeff / MassVector(4)
 
@@ -502,12 +575,12 @@ MODULE MinimumEnergyPath
          Hessian(1:4,1:4) = HessianOfTheSystem( AtPoint(1:4), MassH, MassC )
 
          ! add the part of the hessian of the independent oscillator model
-         CALL  HessianOfTheBath( Bath, Hessian(5:NDim, 5:NDim) ) 
+         CALL  HessianOfTheBath( Bath, Hessian(5:NDim, 5:NDim) )
 
          ! add the contribution from SYSTEM-BATH coupling and from DISTORTION CORRECTION
          CALL  CouplingAndDistortionHessian( Bath, CouplingsCoeffs, DistortionCoeff )
-         Hessian(4,5) = Hessian(4,5) + CouplingsCoeffs(1) / SQRT( MassVector(4) * MassVector(5) ) 
-         Hessian(5,4) = Hessian(5,4) + CouplingsCoeffs(1) / SQRT( MassVector(4) * MassVector(5) ) 
+         Hessian(4,5) = Hessian(4,5) + CouplingsCoeffs(1) / SQRT( MassVector(4) * MassVector(5) )
+         Hessian(5,4) = Hessian(5,4) + CouplingsCoeffs(1) / SQRT( MassVector(4) * MassVector(5) )
          Hessian(4,4) = Hessian(4,4) + DistortionCoeff / MassVector(4)
 
       ELSE IF ( BathType == DOUBLE_CHAIN ) THEN
@@ -516,17 +589,17 @@ MODULE MinimumEnergyPath
          Hessian(1:4,1:4) = HessianOfTheSystem( AtPoint(1:4), MassH, MassC )
 
          ! add the part of the hessian of the independent oscillator model
-         CALL HessianOfTheBath( DblBath(1), Hessian(5:4+NBath, 5:4+NBath) ) 
-         CALL HessianOfTheBath( DblBath(2), Hessian(5+NBath:NDim, 5+NBath:NDim) ) 
+         CALL HessianOfTheBath( DblBath(1), Hessian(5:4+NBath, 5:4+NBath) )
+         CALL HessianOfTheBath( DblBath(2), Hessian(5+NBath:NDim, 5+NBath:NDim) )
 
          ! add the contribution from SYSTEM-BATH coupling and from DISTORTION CORRECTION
          CALL  CouplingAndDistortionHessian( DblBath(1), CouplingsCoeffs, DistortionCoeff )
-         Hessian(4,5) = Hessian(4,5) + CouplingsCoeffs(1) / SQRT( MassVector(4) * MassVector(5) ) 
-         Hessian(5,4) = Hessian(4,5) + CouplingsCoeffs(1) / SQRT( MassVector(4) * MassVector(5) ) 
+         Hessian(4,5) = Hessian(4,5) + CouplingsCoeffs(1) / SQRT( MassVector(4) * MassVector(5) )
+         Hessian(5,4) = Hessian(4,5) + CouplingsCoeffs(1) / SQRT( MassVector(4) * MassVector(5) )
          Hessian(4,4) = Hessian(4,4) + DistortionCoeff / MassVector(4)
          CALL  CouplingAndDistortionHessian( DblBath(2), CouplingsCoeffs, DistortionCoeff )
-         Hessian(4,5+NBath) = Hessian(4,5+NBath) + CouplingsCoeffs(1) / SQRT( MassVector(4) * MassVector(5) ) 
-         Hessian(5+NBath,4) = Hessian(5+NBath,4) + CouplingsCoeffs(1) / SQRT( MassVector(4) * MassVector(5) ) 
+         Hessian(4,5+NBath) = Hessian(4,5+NBath) + CouplingsCoeffs(1) / SQRT( MassVector(4) * MassVector(5) )
+         Hessian(5+NBath,4) = Hessian(5+NBath,4) + CouplingsCoeffs(1) / SQRT( MassVector(4) * MassVector(5) )
          Hessian(4,4) = Hessian(4,4) + DistortionCoeff / MassVector(4)
 
       ELSE IF ( BathType == LANGEVIN_DYN ) THEN
@@ -537,7 +610,33 @@ MODULE MinimumEnergyPath
       END IF
 
    END FUNCTION HessianOfThePotential
- 
+
+!*************************************************************************************************
+
+   REAL FUNCTION DirectionalSecondDerivative( AtPoint, Direction1, Direction2 )
+      IMPLICIT NONE
+      REAL, DIMENSION(NDim), INTENT(IN) :: AtPoint, Direction1, Direction2
+
+      REAL, DIMENSION(4), PARAMETER :: Deltas = (/ -2.0,    -1.0,    +1.0,    +2.0    /)
+      REAL, DIMENSION(4), PARAMETER :: Coeffs = (/ +1./12., -8./12., +8./12., -1./12. /)
+      REAL, PARAMETER :: SmallDelta = 1.E-04
+
+      REAL, DIMENSION(NDim) :: Coordinates, FirstDerivative
+      REAL :: Potential
+      INTEGER :: k
+
+      DirectionalSecondDerivative = 0.0
+
+      DO k = 1, size(Deltas)
+         Coordinates(:) = AtPoint(:) + SmallDelta*Deltas(k)*Direction1(:)
+         Potential = VHSticking( Coordinates, FirstDerivative )
+         DirectionalSecondDerivative = DirectionalSecondDerivative - &
+                          Coeffs(k)* TheOneWithVectorDotVector(Direction2,FirstDerivative)
+      END DO
+      DirectionalSecondDerivative = DirectionalSecondDerivative / SmallDelta
+
+   END FUNCTION DirectionalSecondDerivative
+
 !*************************************************************************************************
 
 ! J. Chem. Phys., Vol. 121, No. 20, 22 November 2004
@@ -590,7 +689,7 @@ MODULE MinimumEnergyPath
 
       ! Start at initial position
       CurrentX = StartX
- 
+
       WRITE(*,"(A12,A20,A20)") "N Iteration", "Displacement Norm", "Gradient Norm"
       WRITE(*,*)              "-------------------------------------------------------------"
 
@@ -600,7 +699,7 @@ MODULE MinimumEnergyPath
             ! Compute constrained forces at current position
             V = HStickPotential( CurrentX, Forces )
             WrkForces = ConstrainedVector( Forces, Mask )
-            
+
             ! Compute constrained Hessian at current position
             Hessian = HessianOfThePotential( CurrentX )
             DO i = 1, NDim
@@ -638,7 +737,7 @@ MODULE MinimumEnergyPath
          ! Weigths forces with eigenvalues (hence obtain displacements)
          IF (.NOT.SteepestDescent ) THEN
             DO i = 1, NOpt
-               IF ( TSCheck ) THEN 
+               IF ( TSCheck ) THEN
                   Factors(i) = 0.5 * ( ABS(EigenValues(i)) + SQRT( EigenValues(i)**2 + 4.0 * WrkForces(i)**2  ) )
                ELSE
                   Factors(i) = EigenValues(i)
@@ -647,10 +746,10 @@ MODULE MinimumEnergyPath
             WrkForces(:) =  WrkForces(:) / Factors(:)
          END IF
 
-         ! In case of TS search, change the sign of the step in the direction of the eigenvector with lowest eigenvalue 
+         ! In case of TS search, change the sign of the step in the direction of the eigenvector with lowest eigenvalue
          IF ( TSCheck ) THEN
             i = MINLOC( EigenValues, 1 )
-            WrkForces(i) = - WrkForces(i) 
+            WrkForces(i) = - WrkForces(i)
          END IF
 
          ! Tranform displacements back to original coordinates
@@ -664,7 +763,7 @@ MODULE MinimumEnergyPath
             n = 0
             DO i = 1, size(CurrentX)
                IF ( Mask(i) ) THEN
-                  n = n + 1 
+                  n = n + 1
                   CurrentX(i) = CurrentX(i) + WrkForces(n)
                END IF
             END DO
@@ -690,7 +789,7 @@ MODULE MinimumEnergyPath
 
       ! Store final point
       StationaryPoint = CurrentX
- 
+
       ! Check the number of imaginary frequencies
 
       IF ( PRESENT(Mask) ) THEN
@@ -731,7 +830,7 @@ MODULE MinimumEnergyPath
 
       ! Start at initial position
       CurrentX = StartX
- 
+
       WRITE(*,"(A12,A20)") "N Iteration",  "Gradient Norm"
       WRITE(*,*)              "---------------------------------------------"
 
@@ -820,13 +919,13 @@ MODULE MinimumEnergyPath
          ! Identify position of the negative eigenvalue
          NegativeEig = MINLOC( EigenValues, 1 )
 
-         ! Move current position in the direction of the negative eigenvalue 
+         ! Move current position in the direction of the negative eigenvalue
          IF ( PRESENT(Mask) ) THEN
             n = 0
             DO i = 1, size(X)
                IF ( Mask(i) ) THEN
-                  n = n + 1 
-                  X(i) = X(i) + StepLength * EigenVectors(n,NegativeEig) 
+                  n = n + 1
+                  X(i) = X(i) + StepLength * EigenVectors(n,NegativeEig)
                END IF
             END DO
          ELSE
@@ -845,7 +944,7 @@ MODULE MinimumEnergyPath
          V = HStickPotential( X, Forces )
          IF ( PRESENT(Mask) ) THEN
             FMax = MAXVAL( ABS(Forces), Mask )
-         ELSE 
+         ELSE
             FMax = MAXVAL( ABS(Forces) )
          END IF
 
@@ -901,7 +1000,7 @@ MODULE MinimumEnergyPath
       LOGICAL, DIMENSION(SIZE(Hessian,1)), INTENT(IN) :: Mask
       REAL, DIMENSION(COUNT(Mask),COUNT(Mask)) :: ConstrainedHessian
       INTEGER :: i,j, n1, n2
-      
+
       n1 = 0
       DO i = 1, SIZE(Hessian,2)
          IF ( .NOT. Mask(i) ) CYCLE
@@ -932,9 +1031,52 @@ MODULE MinimumEnergyPath
             ConstrainedVector(n) = Vector(i)
          END IF
       END DO
-      
+
    END FUNCTION ConstrainedVector
 
 !*************************************************************************************************
+
+   SUBROUTINE PrintSpectrum( OmegaK, IntensityK, FileName )
+      IMPLICIT NONE
+      CHARACTER(*), INTENT(IN) :: FileName
+      REAL, DIMENSION(:), INTENT(IN) ::  OmegaK, IntensityK
+      INTEGER :: SDCouplingUnit, iFreq, iEigen
+      REAL :: MaxFreq, DeltaFreq, Spectrum, Frequency
+      INTEGER, PARAMETER :: NFreq = 200
+
+      SDCouplingUnit = LookForFreeUnit()
+      OPEN( FILE=TRIM(ADJUSTL(FileName)), UNIT=SDCouplingUnit )
+      WRITE(SDCouplingUnit, "(A,/)") "# Spectral density of the coupling at the transition state "
+
+      MaxFreq = MAXVAL(OmegaK)*1.1
+      DeltaFreq = MaxFreq / REAL(NFreq)
+
+      DO iFreq = 1, NFreq
+
+         ! initialize frequency value and value of the signal
+         Frequency = REAL(iFreq)*DeltaFreq
+         Spectrum = 0.0
+
+         ! sum over eigenfreq centered gaussians
+         DO iEigen = 1, SIZE(OmegaK)
+            Spectrum = Spectrum + IntensityK(iEigen)*LorentzianFunction( Frequency, OmegaK(iEigen), 0.00004 )
+         END DO
+
+         ! PRINT
+         WRITE(SDCouplingUnit,*) Frequency*FreqConversion(InternalUnits,InputUnits), Spectrum
+
+      END DO
+
+      CLOSE(SDCouplingUnit)
+
+      CONTAINS
+
+         REAL FUNCTION LorentzianFunction( x, x0, gamma )
+            IMPLICIT NONE
+            REAL, INTENT(IN) :: x, x0, gamma
+            LorentzianFunction = ( gamma / ( (x-x0)**2 + gamma**2 ) ) / MyConsts_PI
+         END FUNCTION LorentzianFunction
+
+   END SUBROUTINE
 
 END MODULE MinimumEnergyPath

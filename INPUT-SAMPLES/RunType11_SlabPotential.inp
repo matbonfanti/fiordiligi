@@ -30,8 +30,8 @@ BathType : 4
 # 0 - SUDDEN MODEL - potential with all C at Z = 0.0
 # 1 - GLOBAL MINIMUM - potential with all C at the global minimum geometry
 # 2 - ADIABATIC MODEL - C positions are optimized at any given 4D configuration
-Cut4D_Model : 2
- 
+Cut4D_Model : 0
+
 # Units
 # Length: 0 = bohr, 1 = Ang
 InputLength : 1
@@ -56,7 +56,7 @@ RelaxAtBorders : 0.0
 # Number of carbon atoms of the slab
 NCarbon : 121
 # Van der Waals correction to the potential
-VanDerWaals : FALSE
+VanDerWaals : TRUE 
 
 # Masses
 # mass of the target H atom 
