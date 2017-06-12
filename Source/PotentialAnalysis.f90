@@ -539,6 +539,9 @@ MODULE PotentialAnalysis
 
          ! cuts along the normal modes
          X(1:4) = XSysMin(1:4)
+         print*, XSysMin(1:4)*LengthConversion(InternalUnits,InputUnits)
+         print*, TheOneWithMatrixVectorProduct(TheOneWithTransposeMatrix(NormalModes4D_Vecs), &
+                  SQRT( MassVector(1:4 ))*XSysMin(1:4))*LengthConversion(InternalUnits,InputUnits)*(MassConversion(InternalUnits,InputUnits)**0.5) 
          MinimumEnergy = VHFourDimensional( X(1:4), Dummy )
 
          DO j = 1,4
@@ -578,16 +581,13 @@ MODULE PotentialAnalysis
       ZCArray = (/ ( ZCmin + GridSpacing*(i-1), i=1,NpointZC) /)
       ZHArray = (/ ( ZHmin + GridSpacing*(j-1), j=1,NpointZH) /)
 
+      ! compute asymptotic energy
+      X(1:4) = (/ 0.0, 0.0, 30.0, 0.0 /)
+      EAsy = VHFourDimensional( X(1:4), A(1:4) )
+
       ! fix other coordinates 
       X(1:2) = 0.0
-      IF ( BathType ==  SLAB_POTENTIAL ) THEN
-         X(5:NDim) = MinSlab(1:NBath)
-      ELSE IF ( BathType ==  NORMAL_BATH .OR. BathType == CHAIN_BATH .OR. BathType ==  DOUBLE_CHAIN ) THEN
-         X(5:NDim) = 0.0
-      ELSE IF ( BathType == LANGEVIN_DYN ) THEN
-         ! nothing to set
-      END IF
-
+ 
       ! Open VTK file
       CALL VTK_NewRectilinearSnapshot ( PotentialCH, X=ZHArray*LengthConversion(InternalUnits,InputUnits),  & 
                                 Y=ZCArray*LengthConversion(InternalUnits,InputUnits), FileName="GraphiteHSticking" )
@@ -602,40 +602,12 @@ MODULE PotentialAnalysis
             X(4) = ZCArray(i)
             X(3) = ZHArray(j)
             ! Compute potential at optimized geometry
-            PotentialArray(nPoint) = VibrRelaxPotential( X, A )
-            ! Remove asymptotic contributions of the energy
-            PotentialArray(nPoint) = PotentialArray(nPoint)
+            PotentialArray(nPoint) = VHFourDimensional( X(1:4), A(1:4) ) - EAsy
          END DO
       END DO
       ! Print the potential to vtk file
       CALL VTK_AddScalarField (PotentialCH, Name="CHPotential", &
-                        Field=PotentialArray*EnergyConversion(InternalUnits,InputUnits), LetFileOpen=.TRUE. )
-
-      nPoint = 0
-      ! Cycle over the ZC coordinate values
-      DO i = 1, NpointZC
-         ! Cycle over the ZH coordinate values
-         DO j = 1, NpointZH
-            nPoint = nPoint + 1
-            ! Set collinear H and other Cs in ideal geometry
-            X(4) = ZCArray(i)
-            X(3) = ZHArray(j)
-            ! Compute potential at optimized geometry
-            PotentialArray(nPoint) = VibrRelaxPotential( X, A )
-
-            ! Remove costant asymptotic energy
-            PotentialArray(nPoint) = PotentialArray(nPoint) - EMin
-            ! Remove asymptotic contributions of the carbon strain
-            PotentialArray(nPoint) = PotentialArray(nPoint) - 0.5 * MassVector(4) * ZCAsyFreq**2 * (X(4)-ZCeq)**2
-            ! Remove asymptotic CH interaction at fixed Cz
-	    X(4) = ZCeq
-            PotentialArray(nPoint) = PotentialArray(nPoint) - (VibrRelaxPotential( X, A ) - EMin)
-
-         END DO
-      END DO
-      ! Print the potential to vtk file
-      CALL VTK_AddScalarField (PotentialCH, Name="CouplingOnly", & 
-                    Field=PotentialArray*EnergyConversion(InternalUnits,InputUnits) )
+                        Field=PotentialArray*EnergyConversion(InternalUnits,InputUnits), LetFileOpen=.FALSE. )
 
       WRITE(*,"(/,A)") " * PES as a func of ZC and ZH with reference graphite geom written as VTR to file GraphiteHSticking.vtr"
 
@@ -676,7 +648,8 @@ MODULE PotentialAnalysis
          OptZC(i) = ZCArray(j)
          IF ( i == NpointZH ) EAsy = PotentialArray(j)
 
-          WRITE(ZHZCPathUnit, *) SQRT((ZHArray(i))**2 + Rho**2)*LengthConversion(InternalUnits,InputUnits), &
+!          WRITE(ZHZCPathUnit, *) (OptZC(i)+SQRT((ZHArray(i))**2 + Rho**2))*LengthConversion(InternalUnits,InputUnits), &
+          WRITE(ZHZCPathUnit, *) (SQRT((ZHArray(i))**2 + Rho**2))*LengthConversion(InternalUnits,InputUnits), &
                                  OptZC(i)*LengthConversion(InternalUnits,InputUnits), &
                                  (PotentialArray(j) - EAsy)*EnergyConversion(InternalUnits,InputUnits)
 
